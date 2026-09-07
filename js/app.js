@@ -209,7 +209,7 @@
         <div class="about-scroll">
           <h3 class="about-h">变更日记</h3>
           ${CHANGELOG.map((log) => `
-            <h4 class="about-ver">v${log.version} · ${log.date}</h4>
+            <h4 class="about-ver">v${log.version}</h4>
             <ul class="about-list muted">
               ${log.items.map((it) => `<li>${esc(it)}</li>`).join('')}
             </ul>
