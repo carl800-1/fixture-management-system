@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 夹具管理系统主进程（v1.9）
+ * main.js — 工装夹具出入库管理系统主进程（v2.1）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -31,7 +31,7 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 700,
-    title: '夹具管理系统 v1.9',
+    title: '工装夹具出入库管理系统 v2.1',
     backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
