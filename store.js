@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * store.js — 夹具管理系统数据层（Node fs，本地 JSON 文件）
+ * store.js — 工装夹具出入库管理系统数据层（Node fs，本地 JSON 文件）
  * ============================================================ */
 const fs = require('fs');
 const path = require('path');
@@ -15,6 +15,24 @@ function setDataDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 function file() { return path.join(DATA_DIR, 'fixture-data.json'); }
+
+function migrateFixtureLineModels() {
+  let changed = false;
+  (data.fixtures || []).forEach((f) => {
+    if (!Array.isArray(f.lineModels)) {
+      const models = [];
+      [f.lineNo, f.spec].forEach((v) => {
+        const s = typeof v === 'string' ? v.trim() : '';
+        if (s && !models.includes(s)) models.push(s);
+      });
+      f.lineModels = models.slice(0, 4);
+      changed = true;
+    }
+    // 保证数组长度<=4，且元素为字符串
+    if (f.lineModels.length > 4) { f.lineModels = f.lineModels.slice(0, 4); changed = true; }
+  });
+  return changed;
+}
 
 function load() {
   if (loaded) return;
@@ -33,6 +51,7 @@ function load() {
   } catch (e) {
     data = { fixtures: [], fixTransactions: [], meta: {} };
   }
+  if (migrateFixtureLineModels()) save();
   loaded = true;
 }
 
