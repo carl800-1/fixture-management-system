@@ -67,7 +67,7 @@ async function main() {
 
   section('0. 应用启动');
   const boot = await wc.executeJavaScript('({title: document.title, hasContent: !!document.querySelector("#content"), navCount: document.querySelectorAll(".nav-item").length})');
-  ok('页面标题正确 v1.8', /v1\.8/.test(boot.title), boot.title);
+  ok('页面标题正确 v1.9', /v1\.9/.test(boot.title), boot.title);
   ok('主内容容器存在', boot.hasContent);
   ok('导航项 7 个（含库位管理）', boot.navCount === 7, String(boot.navCount));
   const cssLoaded = await wc.executeJavaScript('getComputedStyle(document.body).backgroundColor');

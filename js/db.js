@@ -1,8 +1,8 @@
 /* ============================================================
- * db.js v1.8 — 夹具管理系统数据层
+ * db.js v1.9 — 夹具管理系统数据层
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '1.8';
+  const APP_VERSION = '1.9';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   if (electronApi) {

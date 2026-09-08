@@ -1,7 +1,7 @@
 {
   "name": "fixture-management-system",
-  "version": "1.8.0",
-  "description": "夹具管理系统 v1.8（Electron 桌面版，本地 JSON 文件存储，支持夹具出库/回库/维修重复流转，出库回库四栏互查、二维码前缀兼容、中文输入法守卫、库位管理、编号归一化匹配、二维码标签生成与打印）",
+  "version": "1.9.0",
+  "description": "夹具管理系统 v1.9（Electron 桌面版，本地 JSON 文件存储，支持夹具出库/回库/维修重复流转，出库回库四栏互查、二维码前缀兼容、中文输入法守卫、库位管理、编号归一化匹配、二维码标签生成与打印）",
   "main": "main.js",
   "private": true,
   "license": "MIT",
@@ -27,7 +27,7 @@
     },
     "win": {
       "target": ["dir"],
-      "artifactName": "夹具管理系统_v1.8.${ext}"
+      "artifactName": "夹具管理系统_v1.9.${ext}"
     },
     "asar": false
   },
