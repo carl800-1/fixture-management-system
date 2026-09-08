@@ -1,0 +1,131 @@
+name: 构建 Windows 免安装版
+
+on:
+  # 推送到主分支：只构建并上传 Artifact（不发布）
+  # 推送 v* 标签：构建 + 自动创建 Release 并挂附件
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  # 手动触发：默认只构建；填 release_tag 才会发布
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '可选：要发布到的标签（如 v1.8.0），留空则只构建不发布'
+        type: string
+        required: false
+        default: ''
+
+# 创建 Release 并上传附件需要写权限
+permissions:
+  contents: write
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 构建 Windows 可执行文件
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    env:
+      # Electron / electron-builder 下载二进制时带上 token，避免 GitHub 匿名限流
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 读取版本号
+        id: meta
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "当前版本: $v"
+
+      - name: 执行构建
+        # --publish never 必须加：electron-builder 检测到 GH_TOKEN 且当前是 tag 推送时，
+        # 会按默认的 onTagOrDraft 自行发布一份资产。关掉它，Release 统一由最后一步创建。
+        run: npm run build -- --publish never
+
+      - name: 校验产物
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path release)) { throw "未找到 release 目录，构建失败" }
+          Write-Host "== release 目录 =="
+          Get-ChildItem release | ForEach-Object { Write-Host "  $($_.Name)" }
+          # 本项目 win.target = dir，exe 位于 release\win-unpacked\ 下，需递归查找
+          $exe = Get-ChildItem -Path release -Filter *.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "release 下未找到 .exe，构建失败" }
+          if ($exe.Length -lt 20MB) { throw "exe 仅 $([math]::Round($exe.Length / 1MB, 1)) MB，疑似打包不完整" }
+          Write-Host "主程序: $($exe.FullName) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
+
+      - name: 整理并打包产物
+        shell: pwsh
+        run: |
+          $version = '${{ steps.meta.outputs.version }}'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          # 本项目为「解压目录分发」模式（win.target = dir）：产物是 release\win-unpacked 整个目录，
+          # 内含 exe + resources + 运行时，必须整体打包分发，不能只拷单个 exe。
+          # 文件名一律用 ASCII：GitHub Actions 在 Windows runner 上处理含中文的文件名时可能被吞掉，
+          # 因此统一改用 FMS 前缀。
+          $exe = Get-ChildItem -Path release -Filter *.exe -File -Recurse | Select-Object -First 1
+          $unpacked = $exe.DirectoryName
+          Compress-Archive -Path "$unpacked\*" -DestinationPath "dist\FMS-v$version-win-x64.zip" -Force
+          Write-Host "已打包解压版目录: $unpacked"
+
+          Write-Host "== 最终产物 =="
+          Get-ChildItem dist | ForEach-Object { Write-Host "  $($_.Name)  $([math]::Round($_.Length / 1MB, 1)) MB" }
+
+      - name: 冒烟测试
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $exe = Get-ChildItem -Path release -Filter *.exe -File -Recurse | Select-Object -First 1
+          $proc = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 20
+          if ($proc.HasExited) {
+            Write-Host "::warning::程序在 20 秒内自行退出（退出码 $($proc.ExitCode)），建议下载后人工确认"
+          } else {
+            Write-Host "程序持续运行 20 秒未退出，启动正常"
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMS-v${{ steps.meta.outputs.version }}-win-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      # 推送 v* 标签、或手动触发且填了 release_tag 时，创建 GitHub Release。
+      # 刻意放在 build job 内部：dist 与构建产物在同一 runner 上，跨 job 不共享文件系统。
+      # 注意不能监听 release: created，否则会形成「构建 → 创建 Release → 又触发构建」死循环。
+      - name: 创建 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
+          name: 夹具管理系统 ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
