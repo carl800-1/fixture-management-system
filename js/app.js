@@ -1,5 +1,5 @@
 /* ============================================================
- * app.js — 夹具管理系统主逻辑（v1.0）
+ * app.js — 工装夹具出入库管理系统主逻辑（v2.1）
  * ============================================================ */
 (function () {
   'use strict';
@@ -50,6 +50,16 @@
     const n = String(needle == null ? '' : needle);
     if (n === '') return false;
     return h.toLowerCase().includes(n.toLowerCase()) || normalizeCode(h).includes(normalizeCode(n));
+  }
+
+  /* 机种名称：展示 / 搜索 helpers */
+  function formatLineModels(f, emptyMark = '—') {
+    const arr = (Array.isArray(f.lineModels) ? f.lineModels : []).filter((x) => String(x).trim() !== '');
+    return arr.length ? arr.join(' / ') : emptyMark;
+  }
+  function lineModelsMatch(f, q) {
+    const arr = Array.isArray(f.lineModels) ? f.lineModels : [];
+    return arr.some((lm) => String(lm).toLowerCase().includes(q));
   }
 
   /* 中文输入法守卫：组合输入期间不触发实时搜索 */
@@ -143,6 +153,13 @@
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
+    {
+      version: '2.1', date: '2026-09-08', items: [
+        '【改造】新建夹具表单将原「规格型号」「所属线号」合并升级为「机种名称1~4」，最多可同时关联 4 个机种；数据模型改为 lineModels 数组',
+        '【兼容】启动时自动把旧版 spec / lineNo 字段迁移到 lineModels[0]，最多保留 4 项，保障历史数据可用',
+        '【检索】夹具搜索、出库/回库候选列表、卡片、列表视图、二维码、打印标签、CSV 导出/盘点均按 lineModels 展示，任一机种名称命中即可匹配'
+      ]
+    },
     {
       version: '1.9', date: '2026-09-08', items: [
         '【优化】关于面板「变更日记」的版本标题去掉日期后缀，仅显示版本号（如 v1.9），更简洁',
@@ -353,11 +370,24 @@
     } catch (e) { toast('出库失败：' + e.message, 'err'); }
   };
 
+  function collectNewLineModels() {
+    const arr = [];
+    for (let i = 1; i <= 4; i++) {
+      const v = ($('#fix_new_lm' + i) || {}).value.trim();
+      if (v && !arr.includes(v)) arr.push(v);
+      if (arr.length >= 4) break;
+    }
+    return arr;
+  }
+
   window.fixtureNew = function () {
     const html = `
       <div class="form-group"><label>编号</label><input type="text" id="fix_new_code" placeholder="4位数字编号（如 2001）" maxlength="4"></div>
       <div class="form-group"><label>名称</label><input type="text" id="fix_new_name" placeholder="夹具名称"></div>
-      <div class="form-group"><label>规格型号</label><input type="text" id="fix_new_spec" placeholder="规格型号"></div>
+      <div class="form-group"><label>机种名称1</label><input type="text" id="fix_new_lm1" placeholder="机种名称（如 Model-A，可选）"></div>
+      <div class="form-group"><label>机种名称2</label><input type="text" id="fix_new_lm2" placeholder="机种名称（可选）"></div>
+      <div class="form-group"><label>机种名称3</label><input type="text" id="fix_new_lm3" placeholder="机种名称（可选）"></div>
+      <div class="form-group"><label>机种名称4</label><input type="text" id="fix_new_lm4" placeholder="机种名称（可选）"></div>
       <div class="form-group"><label>分类</label><input type="text" id="fix_new_cat" placeholder="分类（如 冲压/焊接/装配）"></div>
       <div class="form-group"><label>库位</label><input type="text" id="fix_new_loc" placeholder="存放位置（可选）"></div>
       <div class="form-group"><label>备注</label><input type="text" id="fix_new_remark" placeholder="可选备注"></div>
@@ -372,14 +402,14 @@
   window.submitFixtureNew = async function () {
     const code = ($('#fix_new_code') || {}).value.trim();
     const name = ($('#fix_new_name') || {}).value.trim();
-    const spec = ($('#fix_new_spec') || {}).value.trim();
+    const lineModels = collectNewLineModels();
     const category = ($('#fix_new_cat') || {}).value.trim();
     const location = ($('#fix_new_loc') || {}).value.trim();
     const remark = ($('#fix_new_remark') || {}).value.trim();
     if (!code || !/^\d{4}$/.test(code)) { toast('编号为4位纯数字（如 2001）', 'err'); return; }
     if (!name) { toast('请填写夹具名称', 'err'); return; }
     try {
-      await DB.fixtureAdd({ code, name, spec, category, location, remark, status: 'stocked', totalOutCount: 0, totalReturnCount: 0, repairCount: 0 });
+      await DB.fixtureAdd({ code, name, lineModels, category, location, remark, status: 'stocked', totalOutCount: 0, totalReturnCount: 0, repairCount: 0 });
       closeModal();
       await reloadAll();
       renderFixtures();
@@ -394,20 +424,25 @@
     const filtered = q ? state.fixtures.filter((f) =>
       codeLike(f.code, q) ||
       (f.name || '').toLowerCase().includes(q) ||
-      (f.spec || '').toLowerCase().includes(q) ||
       (f.location || '').toLowerCase().includes(q) ||
+      lineModelsMatch(f, q) ||
       (f.category || '').toLowerCase().includes(q)
     ) : state.fixtures;
     renderFixtureArea(list, filtered, state.fixSelectedId || 0);
   };
 
   window.fixtureExportCSV = function () {
-    const headers = ['编号', '名称', '规格', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '备注'];
-    const rows = state.fixtures.map((f) => [
-      f.code, f.name, f.spec || '', f.category || '', f.location || '',
-      (FIX_STATUS[f.status] || { label: f.status }).label,
-      f.totalOutCount || 0, f.totalReturnCount || 0, f.repairCount || 0, f.remark || ''
-    ]);
+    const headers = ['编号', '名称', '机种名称1', '机种名称2', '机种名称3', '机种名称4', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '备注'];
+    const rows = state.fixtures.map((f) => {
+      const lms = Array.isArray(f.lineModels) ? f.lineModels : [];
+      return [
+        f.code, f.name,
+        lms[0] || '', lms[1] || '', lms[2] || '', lms[3] || '',
+        f.category || '', f.location || '',
+        (FIX_STATUS[f.status] || { label: f.status }).label,
+        f.totalOutCount || 0, f.totalReturnCount || 0, f.repairCount || 0, f.remark || ''
+      ];
+    });
     const csv = '﻿' + [headers.join(','), ...rows.map((r) => r.map((v) => /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v).join(','))].join('\r\n');
     download('夹具清单_' + new Date().toISOString().slice(0, 10) + '.csv', csv);
   };
@@ -456,7 +491,7 @@
           </div>
           <div class="fixture-card-body">
             <div class="fixture-name">${esc(f.name)}</div>
-            <div class="fixture-spec">${esc(f.spec || '-')}</div>
+            <div class="fixture-spec">机种：${esc(formatLineModels(f, '—'))}</div>
             <div class="fixture-meta"><span>出库 ${f.totalOutCount || 0} 次</span><span>回库 ${f.totalReturnCount || 0} 次</span></div>
           </div>
           <div class="fixture-card-footer">
@@ -480,13 +515,13 @@
     if (!fixtures.length) { container.innerHTML = '<div class="empty-tip">暂无夹具记录</div>'; return; }
     const html = `
       <div class="table-wrap"><table>
-        <thead><tr><th>编号</th><th>名称</th><th>规格</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>累计回库</th><th>操作</th></tr></thead>
+        <thead><tr><th>编号</th><th>名称</th><th>机种名称</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>累计回库</th><th>操作</th></tr></thead>
         <tbody>
           ${fixtures.map((f) => {
             const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
             const isSelected = f.id === selectedId;
             return `<tr class="${isSelected ? 'selected' : ''}" data-id="${f.id}" onclick="fixtureSelect(${f.id})">
-              <td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${esc(f.spec)}</td>
+              <td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${esc(formatLineModels(f, '—'))}</td>
               <td>${esc(f.category)}</td><td>${esc(f.location)}</td>
               <td><span class="badge ${st.cls}">${st.label}</span></td>
               <td>${f.totalOutCount || 0}</td><td>${f.totalReturnCount || 0}</td>
@@ -638,18 +673,18 @@
   window.outSearch = function () {
     const code = ($('#out_code') || {}).value.trim().toLowerCase();
     const name = ($('#out_name') || {}).value.trim().toLowerCase();
-    const spec = ($('#out_spec') || {}).value.trim().toLowerCase();
+    const lm = ($('#out_spec') || {}).value.trim().toLowerCase();
     const location = ($('#out_location') || {}).value.trim().toLowerCase();
     const inStock = state.fixtures.filter((f) => f.status === 'stocked');
     const filtered = inStock.filter((f) =>
       (!code || codeLike(f.code, code)) &&
       (!name || (f.name || '').toLowerCase().includes(name)) &&
-      (!spec || (f.spec || '').toLowerCase().includes(spec)) &&
+      (!lm || lineModelsMatch(f, lm)) &&
       (!location || (f.location || '').toLowerCase().includes(location))
     );
     const container = $('#out_candidates');
     if (!container) return;
-    if (!code && !name && !spec && !location) { container.innerHTML = ''; return; }
+    if (!code && !name && !lm && !location) { container.innerHTML = ''; return; }
     if (filtered.length === 0) {
       container.innerHTML = '<div class="empty-tip">未找到在库夹具</div>';
     } else if (filtered.length === 1) {
@@ -661,7 +696,7 @@
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">匹配到 ${filtered.length} 条，请点击选择：</div>
           ${filtered.map((f) => `
             <div class="candidate-item" onclick="outPick(${f.id})">
-              <b>${esc(f.code)}</b> ${esc(f.name)} <span class="muted">${esc(f.spec || '-')}</span>
+              <b>${esc(f.code)}</b> ${esc(f.name)} <span class="muted">${esc(formatLineModels(f, '—'))}</span>
               <span class="muted" style="margin-left:auto;">${esc(f.location || '未分配库位')}</span>
             </div>
           `).join('')}
@@ -681,7 +716,7 @@
   function fillOutFields(f) {
     const codeEl = $('#out_code'); if (codeEl) codeEl.value = f.code;
     const nameEl = $('#out_name'); if (nameEl) nameEl.value = f.name;
-    const specEl = $('#out_spec'); if (specEl) specEl.value = f.spec || '';
+    const specEl = $('#out_spec'); if (specEl) specEl.value = formatLineModels(f, '');
     const locEl = $('#out_location'); if (locEl) locEl.value = f.location || '';
   }
 
@@ -733,18 +768,18 @@
   window.returnSearch = function () {
     const code = ($('#return_code') || {}).value.trim().toLowerCase();
     const name = ($('#return_name') || {}).value.trim().toLowerCase();
-    const spec = ($('#return_spec') || {}).value.trim().toLowerCase();
+    const lm = ($('#return_spec') || {}).value.trim().toLowerCase();
     const location = ($('#return_location') || {}).value.trim().toLowerCase();
     const outStock = state.fixtures.filter((f) => f.status === 'checked_out');
     const filtered = outStock.filter((f) =>
       (!code || codeLike(f.code, code)) &&
       (!name || (f.name || '').toLowerCase().includes(name)) &&
-      (!spec || (f.spec || '').toLowerCase().includes(spec)) &&
+      (!lm || lineModelsMatch(f, lm)) &&
       (!location || (f.location || '').toLowerCase().includes(location))
     );
     const container = $('#return_candidates');
     if (!container) return;
-    if (!code && !name && !spec && !location) { container.innerHTML = ''; return; }
+    if (!code && !name && !lm && !location) { container.innerHTML = ''; return; }
     if (filtered.length === 0) {
       container.innerHTML = '<div class="empty-tip">未找到已出库夹具</div>';
     } else if (filtered.length === 1) {
@@ -756,7 +791,7 @@
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">匹配到 ${filtered.length} 条，请点击选择：</div>
           ${filtered.map((f) => `
             <div class="candidate-item" onclick="returnPick(${f.id})">
-              <b>${esc(f.code)}</b> ${esc(f.name)} <span class="muted">${esc(f.spec || '-')}</span>
+              <b>${esc(f.code)}</b> ${esc(f.name)} <span class="muted">${esc(formatLineModels(f, '—'))}</span>
               <span class="muted" style="margin-left:auto;">${esc(f.location || '未分配库位')}</span>
             </div>
           `).join('')}
@@ -776,7 +811,7 @@
   function fillReturnFields(f) {
     const codeEl = $('#return_code'); if (codeEl) codeEl.value = f.code;
     const nameEl = $('#return_name'); if (nameEl) nameEl.value = f.name;
-    const specEl = $('#return_spec'); if (specEl) specEl.value = f.spec || '';
+    const specEl = $('#return_spec'); if (specEl) specEl.value = formatLineModels(f, '');
     const locEl = $('#return_location'); if (locEl) locEl.value = f.location || '';
   }
 
@@ -851,12 +886,12 @@
         <div class="panel loc-bottom" style="margin-bottom:0">
           <div class="panel-title">${filter ? '库位「' + esc(filter) + '」下夹具' : '全部夹具'}（${list.length} 件）</div>
           <div class="table-wrap"><table>
-            <thead><tr><th>编号</th><th>名称</th><th>规格</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>最近动态</th></tr></thead>
+            <thead><tr><th>编号</th><th>名称</th><th>机种名称</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>最近动态</th></tr></thead>
             <tbody>
               ${list.length ? list.map((f) => {
                 const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
                 return `<tr>
-                  <td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${esc(f.spec)}</td>
+                  <td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${esc(formatLineModels(f, '—'))}</td>
                   <td>${esc(f.category)}</td><td>${esc(f.location)}</td>
                   <td><span class="badge ${st.cls}">${st.label}</span></td>
                   <td>${f.totalOutCount || 0}</td><td>${esc(lastMove(f.id))}</td></tr>`;
@@ -904,9 +939,9 @@
     if (filter) list = list.filter((f) => (f.location || LOC_UNASSIGNED) === filter);
     list.sort((a, b) => natCompare(a.code, b.code));
 
-    const headers = ['编号', '名称', '规格', '分类', '库位', '状态', '累计出库', '累计回库', '最近动态', '盘点人', '实盘数量'];
+    const headers = ['编号', '名称', '机种名称', '分类', '库位', '状态', '累计出库', '累计回库', '最近动态', '盘点人', '实盘数量'];
     const rows = list.map((f) => [
-      f.code, f.name, f.spec || '', f.category || '', f.location || '',
+      f.code, f.name, formatLineModels(f, ''), f.category || '', f.location || '',
       (FIX_STATUS[f.status] || { label: f.status }).label,
       f.totalOutCount || 0, f.totalReturnCount || 0, lastMove(f.id), op, ''
     ]);
@@ -1075,7 +1110,7 @@
         <div class="qr-info">
           <div><b>编号：</b>${esc(f.code)}</div>
           <div><b>名称：</b>${esc(f.name)}</div>
-          <div><b>规格：</b>${esc(f.spec || '—')}</div>
+          <div><b>机种名称：</b>${esc(formatLineModels(f, '—'))}</div>
           <div><b>库位：</b>${esc(f.location || '（未分配）')}</div>
           <div class="muted">二维码内容：${esc(token)}</div>
         </div>
@@ -1122,7 +1157,7 @@
       <div class="label-text">
         <div class="lc-code">${esc(f.code)}</div>
         <div class="lc-name">${esc(f.name)}</div>
-        <div class="lc-spec">${esc(f.spec || '')}</div>
+        <div class="lc-lineModels">机种：${esc(formatLineModels(f, '—'))}</div>
         <div class="lc-loc">库位：${esc(f.location || '—')}</div>
       </div></div>`;
   }
