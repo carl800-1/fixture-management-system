@@ -52,9 +52,16 @@ jobs:
         id: meta
         shell: bash
         run: |
+          # 输出目录与产品名一律从 package.json 读取，避免改版本时 workflow 与配置脱节
           v=$(node -p "require('./package.json').version")
+          d=$(node -p "const p=require('./package.json'); (p.build && p.build.directories && p.build.directories.output) || 'release'")
+          n=$(node -p "const p=require('./package.json'); (p.build && p.build.productName) || p.name")
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "outdir=$d" >> "$GITHUB_OUTPUT"
+          echo "product=$n" >> "$GITHUB_OUTPUT"
           echo "当前版本: $v"
+          echo "构建输出目录: $d"
+          echo "产品名: $n"
 
       - name: 执行构建
         # --publish never 必须加：electron-builder 检测到 GH_TOKEN 且当前是 tag 推送时，
@@ -65,12 +72,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not (Test-Path release)) { throw "未找到 release 目录，构建失败" }
-          Write-Host "== release 目录 =="
-          Get-ChildItem release | ForEach-Object { Write-Host "  $($_.Name)" }
-          # 本项目 win.target = dir，exe 位于 release\win-unpacked\ 下，需递归查找
-          $exe = Get-ChildItem -Path release -Filter *.exe -File -Recurse | Select-Object -First 1
-          if (-not $exe) { throw "release 下未找到 .exe，构建失败" }
+          $outDir = '${{ steps.meta.outputs.outdir }}'
+          if (-not (Test-Path $outDir)) { throw "未找到 $outDir 目录，构建失败（检查 package.json 的 build.directories.output）" }
+          Write-Host "== $outDir 目录 =="
+          Get-ChildItem $outDir | ForEach-Object { Write-Host "  $($_.Name)" }
+          # 本项目 win.target = dir，exe 位于 <输出目录>\win-unpacked\ 下，需递归查找
+          $exe = Get-ChildItem -Path $outDir -Filter *.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "$outDir 下未找到 .exe，构建失败" }
           if ($exe.Length -lt 20MB) { throw "exe 仅 $([math]::Round($exe.Length / 1MB, 1)) MB，疑似打包不完整" }
           Write-Host "主程序: $($exe.FullName) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
 
@@ -78,13 +86,14 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ steps.meta.outputs.version }}'
+          $outDir = '${{ steps.meta.outputs.outdir }}'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-          # 本项目为「解压目录分发」模式（win.target = dir）：产物是 release\win-unpacked 整个目录，
+          # 本项目为「解压目录分发」模式（win.target = dir）：产物是 <输出目录>\win-unpacked 整个目录，
           # 内含 exe + resources + 运行时，必须整体打包分发，不能只拷单个 exe。
           # 文件名一律用 ASCII：GitHub Actions 在 Windows runner 上处理含中文的文件名时可能被吞掉，
           # 因此统一改用 FMS 前缀。
-          $exe = Get-ChildItem -Path release -Filter *.exe -File -Recurse | Select-Object -First 1
+          $exe = Get-ChildItem -Path $outDir -Filter *.exe -File -Recurse | Select-Object -First 1
           $unpacked = $exe.DirectoryName
           Compress-Archive -Path "$unpacked\*" -DestinationPath "dist\FMS-v$version-win-x64.zip" -Force
           Write-Host "已打包解压版目录: $unpacked"
@@ -96,7 +105,8 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          $exe = Get-ChildItem -Path release -Filter *.exe -File -Recurse | Select-Object -First 1
+          $outDir = '${{ steps.meta.outputs.outdir }}'
+          $exe = Get-ChildItem -Path $outDir -Filter *.exe -File -Recurse | Select-Object -First 1
           $proc = Start-Process -FilePath $exe.FullName -PassThru
           Start-Sleep -Seconds 20
           if ($proc.HasExited) {
@@ -122,7 +132,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
-          name: 夹具管理系统 ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
+          name: ${{ steps.meta.outputs.product }} ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
           files: dist/*
           generate_release_notes: true
           draft: false
