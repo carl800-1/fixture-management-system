@@ -67,7 +67,7 @@ async function main() {
 
   section('0. 应用启动');
   const boot = await wc.executeJavaScript('({title: document.title, hasContent: !!document.querySelector("#content"), navCount: document.querySelectorAll(".nav-item").length})');
-  ok('页面标题正确 v1.9', /v1\.9/.test(boot.title), boot.title);
+  ok('页面标题正确 v2.1', /v2\.1/.test(boot.title), boot.title);
   ok('主内容容器存在', boot.hasContent);
   ok('导航项 7 个（含库位管理）', boot.navCount === 7, String(boot.navCount));
   const cssLoaded = await wc.executeJavaScript('getComputedStyle(document.body).backgroundColor');
@@ -105,7 +105,7 @@ async function main() {
     const set = (id,v)=>{ const el=document.querySelector(id); if(el) el.value=v; return !!el; };
     const found = {
       code: set('#fix_new_code','2001'), name: set('#fix_new_name','焊接夹具A'),
-      spec: set('#fix_new_spec','WJ-100'), cat: set('#fix_new_cat','焊接'),
+      lm1: set('#fix_new_lm1','WJ-100'), cat: set('#fix_new_cat','焊接'),
       loc: set('#fix_new_loc','A1-01'), remark: set('#fix_new_remark','测试建档')
     };
     [...document.querySelectorAll('button')].find(b=>b.textContent.includes('建档')).click();
