@@ -37,10 +37,20 @@ sources.forEach(([srcName, src]) => {
   re.lastIndex = 0;
   while ((m = re.exec(src))) {
     const expr = m[1];
+    // 模板拼接函数名：onchange="${prefix}ToggleGroup(this)" —— 按已知前缀展开后校验
+    const PREFIX_VALUES = { prefix: ['out', 'return'] };
+    const tplRe = /\$\{([A-Za-z_$][A-Za-z0-9_$]*)\}([A-Za-z0-9_$]+)\s*\(/g;
+    let tm;
+    while ((tm = tplRe.exec(expr))) {
+      const vals = PREFIX_VALUES[tm[1]];
+      if (vals) vals.forEach((p) => handlerNames.add(p + tm[2] + '|' + srcName));
+    }
     const fnRe = /([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
     let mm;
     while ((mm = fnRe.exec(expr))) {
       const fn = mm[1];
+      // 模板拼接里只取到后半段（${prefix}ToggleGroup → ToggleGroup）的已单独展开，跳过
+      if (expr.charAt(mm.index - 1) === '}') continue;
       // 排除内建/局部
       if (['event', 'this', 'if', 'return', 'alert', 'confirm', 'prompt', 'console', 'Number', 'String', 'parseInt', 'parseFloat', 'stopPropagation', 'preventDefault', 'target', 'value'].includes(fn)) continue;
       handlerNames.add(fn + '|' + srcName);
