@@ -1,7 +1,7 @@
 {
   "name": "fixture-mgmt",
-  "version": "2.1.0",
-  "description": "工装夹具出入库管理系统 v2.1（Electron 桌面版，本地 JSON 文件存储，支持夹具出库/回库/维修重复流转，出库回库四栏互查、二维码前缀兼容、中文输入法守卫、库位管理、编号归一化匹配、二维码标签生成与打印、多机种名称关联）",
+  "version": "2.2.0",
+  "description": "工装夹具出入库管理系统 v2.2（Electron 桌面版，本地 JSON 文件存储，支持夹具出库/回库/维修重复流转，出库回库四栏互查、二维码前缀兼容、中文输入法守卫、库位管理、编号归一化匹配、二维码标签生成与打印、多机种名称关联、夹具查询多条件组合检索与定位）",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -11,6 +11,7 @@
   "build": {
     "appId": "com.spms.fixture",
     "productName": "工装夹具出入库管理系统",
+    "electronDist": "node_modules/electron/dist",
     "files": [
       "main.js",
       "preload.js",
@@ -24,16 +25,14 @@
     },
     "win": {
       "target": ["dir"],
-      "artifactName": "工装夹具出入库管理系统_v2.1.${ext}"
+      "artifactName": "工装夹具出入库管理系统_v2.2.${ext}"
     },
     "asar": false
   },
   "devDependencies": {
     "app-builder-bin": "^4.2.0",
     "electron": "^31.0.0",
-    "electron-builder": "^26.0.0"
-  },
-  "dependencies": {
+    "electron-builder": "^26.0.0",
     "pinyin-match": "^1.2.10"
   }
 }
