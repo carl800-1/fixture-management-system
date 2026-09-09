@@ -126,7 +126,16 @@
     operators: [],
     locFilter: '',          // 库位管理：当前选中的库位（空 = 全部）
     qrFixture: null,        // 当前查看二维码的夹具（单标签打印用）
-    fixViewMode: 'card'     // 夹具列表视图模式：card = 卡片 / list = 表格
+    fixViewMode: 'card',    // 夹具列表视图模式：card = 卡片 / list = 表格
+    outAvailable: 0,        // 出库页：当前检索结果中的可出库台数（数量上限）
+    returnAvailable: 0,     // 回库页：当前检索结果中的可回库台数（数量上限）
+    outSelectedId: 0,       // 出库页当前选中的夹具（0 = 未选）
+    returnSelectedId: 0,    // 回库页当前选中的夹具（0 = 未选）
+    // 出库/回库页的常驻录入项：切换选项或提交后仍保留，便于连续作业
+    outForm: { operator: '', counterparty: '', remark: '', time: '' },
+    returnForm: { operator: '', remark: '', time: '' },
+    // 夹具查询：筛选/排序状态（切换视图后保留，便于连续检索）
+    query: { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', statuses: [], sortBy: 'code', sortDir: 'asc' }
   };
 
   /* ---------------- 数据加载 ---------------- */
@@ -254,6 +263,7 @@
     return: '夹具回库',
     location: '库位管理',
     records: '流水记录',
+    query: '夹具查询',
     data: '数据备份'
   };
   const RENDERERS = {
@@ -263,6 +273,7 @@
     return: renderReturn,
     location: renderLocation,
     records: renderRecords,
+    query: renderQuery,
     data: renderData
   };
 
@@ -633,48 +644,322 @@
    * ============================================================ */
   function renderOutbound() {
     $('#content').innerHTML = `
-      <div class="panel">
-        <div class="panel-title">
-          📤 夹具出库
-          <span class="panel-actions">
-            <button class="btn sm" onclick="scanForFixBatch()">📷 批量扫码出库</button>
-          </span>
-        </div>
-        <div style="padding:16px;">
-          <p class="muted">输入编号/名称/规格/库位进行检索，命中唯一自动回填；或扫码出库。</p>
-          <div class="multi-search" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0;">
-            <input type="text" id="out_code" placeholder="编号" oninput="outSearch()">
-            <input type="text" id="out_name" placeholder="名称" oninput="outSearch()">
-            <input type="text" id="out_spec" placeholder="规格" oninput="outSearch()">
-            <input type="text" id="out_location" placeholder="库位" oninput="outSearch()">
+      <div class="fix-nav-out-wrap">
+        <aside class="fix-nav">
+          <h3>出库流程导航</h3>
+          <ol>
+            <li>确定夹具：扫码 / 编号 / 名称 / 机种 / 库位检索</li>
+            <li>选择数量：默认 1 件，可在右侧调整</li>
+            <li>填写领用信息：领用人、经办人</li>
+            <li>提交出库</li>
+          </ol>
+        </aside>
+        <div class="fix-out-col">
+          <div class="panel-title">
+            📤 夹具出库
+            <span class="panel-actions">
+              <button class="btn sm" onclick="scanForFixBatch()">📷 批量扫码出库</button>
+            </span>
           </div>
-          <div id="out_candidates" style="margin-bottom:12px;"></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-            <button class="btn primary" onclick="scanForFixOut()">📷 扫码出库</button>
-            <button class="btn" onclick="clearOutSelection()">清除已选内容</button>
-            <button class="btn" onclick="showView('fixtures')">返回列表选择</button>
+          <div class="info-tip">
+            在「编号 / 名称 / 机种名称 / 库位」任一栏输入即可互查；同一名称下有多台时，
+            在结果区<b>勾选具体编号</b>即可一次出库多台。
+          </div>
+          <div class="multi-search search-row">
+            <div class="input-scan">
+              <input type="text" id="out_code" placeholder="编号（扫描枪直接扫码）" oninput="outSearch()">
+              <button class="btn-scan" title="拍照扫码" onclick="scanForFixOut()">📷</button>
+            </div>
+            <input type="text" id="out_name" placeholder="名称（可检索并自动回填）" oninput="outSearch()">
+            <input type="text" id="out_spec" placeholder="机种名称" oninput="outSearch()">
+            <div class="input-scan">
+              <input type="text" id="out_location" placeholder="库位（扫码反查夹具）" oninput="outSearch()">
+              <button class="btn-scan" title="拍照扫码" onclick="scanForFixOut()">📷</button>
+            </div>
+          </div>
+          <div class="stock-bar">可出库库存：<b id="out_avail">0</b> 台
+            <span class="muted">同种夹具只是编号不同，下方按名称分组显示</span>
+          </div>
+          <div id="out_candidates" class="pick-list"></div>
+          <div id="out_picked_summary" class="picked-summary"><span class="muted">未选择夹具</span></div>
+          <div class="fix-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>出库数量（件）</label>
+                <input type="number" id="out_qty" value="1" min="1" step="1" oninput="outQtyChange()">
+                <small class="hint">默认 1 件，可手动调整；不能超过上方库存</small>
+              </div>
+              <div class="form-group">
+                <label>出库时间</label>
+                <input type="datetime-local" id="out_time" value="${nowInput()}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>领用人 / 使用部门 *</label>
+                <input type="text" id="out_party" placeholder="领用人">
+              </div>
+              <div class="form-group">
+                <label>经办人 *</label>
+                <input type="text" id="out_operator" placeholder="经办人">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>备注或用途</label>
+              <input type="text" id="out_remark" placeholder="可选备注">
+            </div>
+            <div class="form-actions">
+              <button class="btn primary" onclick="submitOutDo()">提交出库</button>
+              <button class="btn ghost" onclick="clearOutSelection()">清除已选内容</button>
+            </div>
           </div>
           <div id="fix_scan_out_area" style="margin-top:16px;"></div>
         </div>
       </div>
     `;
-    imeGuard($('#out_code'), outSearch);
-    imeGuard($('#out_name'), outSearch);
-    imeGuard($('#out_spec'), outSearch);
-    imeGuard($('#out_location'), outSearch);
-    // 如果扫描枪输入到编号框，优先解析二维码前缀
-    $('#out_code').addEventListener('change', () => {
-      const el = $('#out_code');
-      const code = parseQRToken(el.value);
-      if (code && code !== el.value.trim()) { el.value = code; outSearch(); }
+    bindOutPage();
+    outSearch();
+  }
+
+  function renderReturn() {
+    $('#content').innerHTML = `
+      <div class="fix-nav-out-wrap">
+        <aside class="fix-nav">
+          <h3>回库流程导航</h3>
+          <ol>
+            <li>确定夹具：扫码 / 编号 / 名称 / 机种 / 库位检索</li>
+            <li>选择数量：默认 1 件，可在右侧调整</li>
+            <li>填写归还信息：退库人、经办人</li>
+            <li>提交回库</li>
+          </ol>
+        </aside>
+        <div class="fix-out-col">
+          <div class="panel-title">📥 夹具回库</div>
+          <div class="info-tip">
+            在「编号 / 名称 / 机种名称 / 库位」任一栏输入即可互查已出库夹具；同一名称下有多台时，
+            在结果区<b>勾选具体编号</b>即可一次回库多台。
+          </div>
+          <div class="multi-search search-row">
+            <div class="input-scan">
+              <input type="text" id="return_code" placeholder="编号（扫描枪直接扫码）" oninput="returnSearch()">
+              <button class="btn-scan" title="拍照扫码" onclick="scanForFixReturn()">📷</button>
+            </div>
+            <input type="text" id="return_name" placeholder="名称（可检索并自动回填）" oninput="returnSearch()">
+            <input type="text" id="return_spec" placeholder="机种名称" oninput="returnSearch()">
+            <div class="input-scan">
+              <input type="text" id="return_location" placeholder="库位（扫码反查夹具）" oninput="returnSearch()">
+              <button class="btn-scan" title="拍照扫码" onclick="scanForFixReturn()">📷</button>
+            </div>
+          </div>
+          <div class="stock-bar">待回库：<b id="return_avail">0</b> 台
+            <span class="muted">同种夹具只是编号不同，下方按名称分组显示</span>
+          </div>
+          <div id="return_candidates" class="pick-list"></div>
+          <div id="return_picked_summary" class="picked-summary"><span class="muted">未选择夹具</span></div>
+          <div class="fix-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>回库数量（件）</label>
+                <input type="number" id="return_qty" value="1" min="1" step="1" oninput="returnQtyChange()">
+                <small class="hint">默认 1 件，可手动调整；不能超过上方待回库台数</small>
+              </div>
+              <div class="form-group">
+                <label>回库时间</label>
+                <input type="datetime-local" id="return_time" value="${nowInput()}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>退库人 / 使用部门</label>
+                <input type="text" id="return_party" placeholder="退库人">
+              </div>
+              <div class="form-group">
+                <label>经办人 *</label>
+                <input type="text" id="return_operator" placeholder="经办人">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>备注或用途</label>
+              <input type="text" id="return_remark" placeholder="可选备注">
+            </div>
+            <div class="form-actions">
+              <button class="btn primary" onclick="submitReturnDo()">提交回库</button>
+              <button class="btn ghost" onclick="clearReturnSelection()">清除已选内容</button>
+            </div>
+          </div>
+          <div id="fix_scan_return_area" style="margin-top:16px;"></div>
+        </div>
+      </div>
+    `;
+    bindReturnPage();
+    returnSearch();
+  }
+
+  /* 页面重绘后重新绑定：输入法守卫 + 扫码枪前缀解析 + 表单“不丢输入” */
+  function bindOutPage() {
+    const wrapFixes = (id) => {
+      const el = $(id); if (!el) return;
+      if (!el.dataset.bound) {
+        imeGuard(el, outSearch);
+        el.addEventListener('change', () => {
+          if (id === '#out_code') {
+            const code = parseQRToken(el.value);
+            if (code && code !== el.value.trim()) { el.value = code; outSearch(); }
+          } else {
+            outSearch();
+          }
+        });
+        el.dataset.bound = '1';
+      }
+    };
+    ['#out_code', '#out_name', '#out_spec', '#out_location'].forEach(wrapFixes);
+  }
+
+  function bindReturnPage() {
+    const wrapFixes = (id) => {
+      const el = $(id); if (!el) return;
+      if (!el.dataset.bound) {
+        imeGuard(el, returnSearch);
+        el.addEventListener('change', () => {
+          if (id === '#return_code') {
+            const code = parseQRToken(el.value);
+            if (code && code !== el.value.trim()) { el.value = code; returnSearch(); }
+          } else {
+            returnSearch();
+          }
+        });
+        el.dataset.bound = '1';
+      }
+    };
+    ['#return_code', '#return_name', '#return_spec', '#return_location'].forEach(wrapFixes);
+  }
+
+  /* ============================================================
+   * 出库 / 回库通用：按「名称 + 机种名称」分组选择 + 数量控制
+   * 同一种夹具可能登记多台（只是编号不同），在此归为一组一次性勾选。
+   * ============================================================ */
+  function groupFixtures(list) {
+    const map = new Map();
+    const order = [];
+    list.forEach((f) => {
+      const models = Array.isArray(f.lineModels) ? f.lineModels.slice().sort() : [];
+      const key = (f.name || '') + '||' + models.join('+');
+      let g = map.get(key);
+      if (!g) { g = { name: f.name || '（未命名）', models, items: [] }; map.set(key, g); order.push(g); }
+      g.items.push(f);
+    });
+    order.forEach((g) => g.items.sort((a, b) => natCompare(a.code, b.code)));
+    return order;
+  }
+
+  function renderPickGroups(container, list, prefix, emptyTip, unit) {
+    if (!container) return;
+    if (!list.length) { container.innerHTML = `<div class="empty-tip">${esc(emptyTip)}</div>`; return; }
+    const groups = groupFixtures(list);
+    container.innerHTML = `
+      <div class="pick-groups">
+        ${groups.map((g, gi) => `
+          <div class="pick-group">
+            <div class="pick-group-head">
+              <label class="pick-all">
+                <input type="checkbox" class="${prefix}-pick-all" data-gi="${gi}" onchange="${prefix}ToggleGroup(this)">
+                <b>${esc(g.name)}</b>
+                ${g.models.length ? `<span class="muted">${esc(g.models.join(' / '))}</span>` : ''}
+              </label>
+              <span class="pick-group-count">${g.items.length} ${esc(unit)}</span>
+            </div>
+            <div class="pick-codes">
+              ${g.items.map((f) => `
+                <label class="pick-code" title="${esc(f.name)}">
+                  <input type="checkbox" class="${prefix}-pick" data-id="${f.id}" data-gi="${gi}" onchange="${prefix}ToggleOne()">
+                  <span class="pick-code-no">${esc(f.code)}</span>
+                  <span class="muted">${esc(f.location || '未分配')}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+  }
+
+  function pickedIds(prefix) {
+    return $$('.' + prefix + '-pick').filter((c) => c.checked).map((c) => Number(c.dataset.id));
+  }
+
+  /* 组标题复选框状态随组内编号联动（全选 / 半选 / 未选） */
+  function syncGroupHead(prefix) {
+    $$('.' + prefix + '-pick-all').forEach((all) => {
+      const gi = all.dataset.gi;
+      const items = $$('.' + prefix + '-pick[data-gi="' + gi + '"]');
+      all.checked = items.length > 0 && items.every((i) => i.checked);
+      all.indeterminate = !all.checked && items.some((i) => i.checked);
     });
   }
 
+  /* 已选摘要：自动带出所选夹具的关联字段（名称 / 机种 / 库位），避免“选了却看不到值” */
+  function renderPickedSummary(prefix) {
+    const el = $('#' + prefix + '_picked_summary');
+    if (!el) return;
+    const list = pickedIds(prefix)
+      .map((id) => state.fixtures.find((f) => f.id === id))
+      .filter(Boolean);
+    if (!list.length) { el.innerHTML = '<span class="muted">未选择夹具</span>'; return; }
+    const first = list[0];
+    const models = formatLineModels(first, '');
+    const detail = [
+      first.name || '',
+      models,
+      first.location ? '库位 ' + first.location : ''
+    ].filter(Boolean).join(' · ');
+    el.innerHTML = `
+      <div class="summary-line">
+        <b>已选 ${list.length} 台</b>
+        <span class="summary-codes">${list.map((f) => esc(f.code)).join('、')}</span>
+        <span class="muted">${esc(detail)}${list.length > 1 ? '（多台同名夹具，编号如上）' : ''}</span>
+      </div>
+    `;
+  }
+
+  /* 勾选 → 数量（勾选为唯一数据源，数量随之自动回填） */
+  function syncPickToQty(prefix) {
+    const n = pickedIds(prefix).length;
+    const input = $('#' + prefix + '_qty'); if (input) input.value = String(n);
+    renderPickedSummary(prefix);
+  }
+
+  /* 数量输入 → 自动勾选前 N 台（超上限归正到上限并提示） */
+  function syncQtyToPick(prefix) {
+    const input = $('#' + prefix + '_qty');
+    const items = $$('.' + prefix + '-pick');
+    if (!input || !items.length) return;
+    const max = items.length;
+    let n = parseInt(input.value, 10);
+    if (isNaN(n) || n < 1) { input.value = String(Math.min(1, max)); n = 1; }
+    if (n > max) {
+      input.value = String(max);
+      toast(`数量不能超过当前可操作 ${max} 台`, 'warn');
+      n = max;
+    }
+    items.forEach((c, i) => { c.checked = i < n; });
+    syncGroupHead(prefix);
+  }
+
+  function clearPickState(prefix) {
+    $$('.' + prefix + '-pick').forEach((c) => { c.checked = false; });
+    $$('.' + prefix + '-pick-all').forEach((c) => { c.checked = false; c.indeterminate = false; });
+    const input = $('#' + prefix + '_qty'); if (input) input.value = '1';
+    renderPickedSummary(prefix);
+  }
+
+  /* ============================================================
+   * 出库页面逻辑
+   * ============================================================ */
   window.outSearch = function () {
     const code = ($('#out_code') || {}).value.trim().toLowerCase();
     const name = ($('#out_name') || {}).value.trim().toLowerCase();
     const lm = ($('#out_spec') || {}).value.trim().toLowerCase();
     const location = ($('#out_location') || {}).value.trim().toLowerCase();
+    const nav = $('#out_nav'); if (nav) nav.hidden = false;
     const inStock = state.fixtures.filter((f) => f.status === 'stocked');
     const filtered = inStock.filter((f) =>
       (!code || codeLike(f.code, code)) &&
@@ -682,89 +967,75 @@
       (!lm || lineModelsMatch(f, lm)) &&
       (!location || (f.location || '').toLowerCase().includes(location))
     );
+    state.outAvailable = filtered.length;
+    const availEl = $('#out_avail'); if (availEl) availEl.textContent = String(filtered.length);
     const container = $('#out_candidates');
     if (!container) return;
-    if (!code && !name && !lm && !location) { container.innerHTML = ''; return; }
-    if (filtered.length === 0) {
-      container.innerHTML = '<div class="empty-tip">未找到在库夹具</div>';
-    } else if (filtered.length === 1) {
-      container.innerHTML = '';
-      outPick(filtered[0].id);
-    } else {
-      container.innerHTML = `
-        <div class="candidate-list">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">匹配到 ${filtered.length} 条，请点击选择：</div>
-          ${filtered.map((f) => `
-            <div class="candidate-item" onclick="outPick(${f.id})">
-              <b>${esc(f.code)}</b> ${esc(f.name)} <span class="muted">${esc(formatLineModels(f, '—'))}</span>
-              <span class="muted" style="margin-left:auto;">${esc(f.location || '未分配库位')}</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
+    if (!code && !name && !lm && !location) {
+      container.innerHTML = '<div class="empty-tip">在上方任一栏输入即可检索在库夹具</div>';
+      renderPickedSummary('out');
+      return;
     }
+    renderPickGroups(container, filtered, 'out', '未找到匹配的在库夹具', '台在库');
+    syncPickToQty('out');
   };
 
-  window.outPick = function (id) {
-    const f = state.fixtures.find((x) => x.id === id);
-    if (!f) { toast('夹具不存在', 'err'); return; }
-    if (f.status !== 'stocked') { toast('夹具 ' + f.code + ' 不在库', 'err'); return; }
-    fillOutFields(f);
-    fixtureOut(f.id);
+  window.outToggleOne = function () { syncGroupHead('out'); syncPickToQty('out'); };
+
+  window.outToggleGroup = function (el) {
+    const gi = el.dataset.gi;
+    $$('.out-pick[data-gi="' + gi + '"]').forEach((c) => { c.checked = el.checked; });
+    syncGroupHead('out');
+    syncPickToQty('out');
   };
 
-  function fillOutFields(f) {
-    const codeEl = $('#out_code'); if (codeEl) codeEl.value = f.code;
-    const nameEl = $('#out_name'); if (nameEl) nameEl.value = f.name;
-    const specEl = $('#out_spec'); if (specEl) specEl.value = formatLineModels(f, '');
-    const locEl = $('#out_location'); if (locEl) locEl.value = f.location || '';
-  }
+  window.outQtyChange = function () {
+    syncQtyToPick('out');
+    syncPickToQty('out');
+  };
 
+  /* 页面表单：清空与夹具相关的选择结果，避免残留上一次内容 */
   window.clearOutSelection = function () {
     const codeEl = $('#out_code'); if (codeEl) codeEl.value = '';
     const nameEl = $('#out_name'); if (nameEl) nameEl.value = '';
     const specEl = $('#out_spec'); if (specEl) specEl.value = '';
     const locEl = $('#out_location'); if (locEl) locEl.value = '';
-    const container = $('#out_candidates'); if (container) container.innerHTML = '';
+    const remarkEl = $('#out_remark'); if (remarkEl) remarkEl.value = '';
+    clearPickState('out');
+    outSearch();
     $('#out_code') && $('#out_code').focus();
   };
 
-  /* ============================================================
-   * 夹具回库（快速操作页面）
-   * ============================================================ */
-  function renderReturn() {
-    $('#content').innerHTML = `
-      <div class="panel">
-        <div class="panel-title">📥 夹具回库</div>
-        <div style="padding:16px;">
-          <p class="muted">输入编号/名称/规格/库位检索已出库夹具，命中唯一自动回填；或扫码回库。</p>
-          <div class="multi-search" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0;">
-            <input type="text" id="return_code" placeholder="编号" oninput="returnSearch()">
-            <input type="text" id="return_name" placeholder="名称" oninput="returnSearch()">
-            <input type="text" id="return_spec" placeholder="规格" oninput="returnSearch()">
-            <input type="text" id="return_location" placeholder="库位" oninput="returnSearch()">
-          </div>
-          <div id="return_candidates" style="margin-bottom:12px;"></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-            <button class="btn primary" onclick="scanForFixReturn()">📷 扫码回库</button>
-            <button class="btn" onclick="clearReturnSelection()">清除已选内容</button>
-            <button class="btn" onclick="showView('fixtures')">返回列表选择</button>
-          </div>
-          <div id="fix_scan_return_area" style="margin-top:16px;"></div>
-        </div>
-      </div>
-    `;
-    imeGuard($('#return_code'), returnSearch);
-    imeGuard($('#return_name'), returnSearch);
-    imeGuard($('#return_spec'), returnSearch);
-    imeGuard($('#return_location'), returnSearch);
-    $('#return_code').addEventListener('change', () => {
-      const el = $('#return_code');
-      const code = parseQRToken(el.value);
-      if (code && code !== el.value.trim()) { el.value = code; returnSearch(); }
-    });
-  }
+  /* 一次提交多台：每台各出库 1 件，共用经办人/领用人/时间/备注 */
+  window.submitOutDo = async function () {
+    // 提交前按数量框同步一次勾选，确保「数量 = 实际出库台数」且不超过可用库存
+    syncQtyToPick('out');
+    const ids = pickedIds('out');
+    if (!ids.length) { toast('请先勾选要出库的夹具，或填写出库数量', 'err'); return; }
+    const operator = ($('#out_operator') || {}).value.trim();
+    const counterparty = ($('#out_party') || {}).value.trim();
+    const time = inputToMs(($('#out_time') || {}).value);
+    const remark = ($('#out_remark') || {}).value.trim();
+    if (!operator) { toast('请填写经办人', 'err'); return; }
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark });
+        ok++;
+      } catch (e) { fail++; }
+    }
+    await reloadAll();
+    // 只清理本次的选择结果，保留经办人/领用人/时间便于连续录入
+    clearPickState('out');
+    const remarkEl = $('#out_remark'); if (remarkEl) remarkEl.value = '';
+    outSearch();
+    if (ok) toast(`出库成功 ${ok} 台${fail ? `，失败 ${fail} 台` : ''}`, fail ? 'warn' : 'ok');
+    else toast('出库失败，请检查夹具状态', 'err');
+  };
 
+  /* ============================================================
+   * 回库页面逻辑（与出库保持一致：同样的数据源规则、数量默认值与校验）
+   * ============================================================ */
   window.returnSearch = function () {
     const code = ($('#return_code') || {}).value.trim().toLowerCase();
     const name = ($('#return_name') || {}).value.trim().toLowerCase();
@@ -777,51 +1048,67 @@
       (!lm || lineModelsMatch(f, lm)) &&
       (!location || (f.location || '').toLowerCase().includes(location))
     );
+    state.returnAvailable = filtered.length;
+    const availEl = $('#return_avail'); if (availEl) availEl.textContent = String(filtered.length);
     const container = $('#return_candidates');
     if (!container) return;
-    if (!code && !name && !lm && !location) { container.innerHTML = ''; return; }
-    if (filtered.length === 0) {
-      container.innerHTML = '<div class="empty-tip">未找到已出库夹具</div>';
-    } else if (filtered.length === 1) {
-      container.innerHTML = '';
-      returnPick(filtered[0].id);
-    } else {
-      container.innerHTML = `
-        <div class="candidate-list">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">匹配到 ${filtered.length} 条，请点击选择：</div>
-          ${filtered.map((f) => `
-            <div class="candidate-item" onclick="returnPick(${f.id})">
-              <b>${esc(f.code)}</b> ${esc(f.name)} <span class="muted">${esc(formatLineModels(f, '—'))}</span>
-              <span class="muted" style="margin-left:auto;">${esc(f.location || '未分配库位')}</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
+    if (!code && !name && !lm && !location) {
+      container.innerHTML = '<div class="empty-tip">在上方任一栏输入即可检索已出库夹具</div>';
+      renderPickedSummary('return');
+      return;
     }
+    renderPickGroups(container, filtered, 'return', '未找到匹配的已出库夹具', '台待回库');
+    syncPickToQty('return');
   };
 
-  window.returnPick = function (id) {
-    const f = state.fixtures.find((x) => x.id === id);
-    if (!f) { toast('夹具不存在', 'err'); return; }
-    if (f.status !== 'checked_out') { toast('夹具 ' + f.code + ' 未出库', 'err'); return; }
-    fillReturnFields(f);
-    fixtureReturn(f.id);
+  window.returnToggleOne = function () { syncGroupHead('return'); syncPickToQty('return'); };
+
+  window.returnToggleGroup = function (el) {
+    const gi = el.dataset.gi;
+    $$('.return-pick[data-gi="' + gi + '"]').forEach((c) => { c.checked = el.checked; });
+    syncGroupHead('return');
+    syncPickToQty('return');
   };
 
-  function fillReturnFields(f) {
-    const codeEl = $('#return_code'); if (codeEl) codeEl.value = f.code;
-    const nameEl = $('#return_name'); if (nameEl) nameEl.value = f.name;
-    const specEl = $('#return_spec'); if (specEl) specEl.value = formatLineModels(f, '');
-    const locEl = $('#return_location'); if (locEl) locEl.value = f.location || '';
-  }
+  window.returnQtyChange = function () {
+    syncQtyToPick('return');
+    syncPickToQty('return');
+  };
 
   window.clearReturnSelection = function () {
     const codeEl = $('#return_code'); if (codeEl) codeEl.value = '';
     const nameEl = $('#return_name'); if (nameEl) nameEl.value = '';
     const specEl = $('#return_spec'); if (specEl) specEl.value = '';
     const locEl = $('#return_location'); if (locEl) locEl.value = '';
-    const container = $('#return_candidates'); if (container) container.innerHTML = '';
+    const remarkEl = $('#return_remark'); if (remarkEl) remarkEl.value = '';
+    clearPickState('return');
+    returnSearch();
     $('#return_code') && $('#return_code').focus();
+  };
+
+  window.submitReturnDo = async function () {
+    // 提交前按数量框同步一次勾选，确保「数量 = 实际回库台数」且不超过可回库台数
+    syncQtyToPick('return');
+    const ids = pickedIds('return');
+    if (!ids.length) { toast('请先勾选要回库的夹具，或填写回库数量', 'err'); return; }
+    const operator = ($('#return_operator') || {}).value.trim();
+    const counterparty = ($('#return_party') || {}).value.trim();
+    const time = inputToMs(($('#return_time') || {}).value);
+    const remark = ($('#return_remark') || {}).value.trim();
+    if (!operator) { toast('请填写经办人', 'err'); return; }
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, time, remark });
+        ok++;
+      } catch (e) { fail++; }
+    }
+    await reloadAll();
+    clearPickState('return');
+    const remarkEl = $('#return_remark'); if (remarkEl) remarkEl.value = '';
+    returnSearch();
+    if (ok) toast(`回库成功 ${ok} 台${fail ? `，失败 ${fail} 台` : ''}`, fail ? 'warn' : 'ok');
+    else toast('回库失败，请检查夹具状态', 'err');
   };
 
   /* ============================================================
@@ -837,6 +1124,49 @@
     const t = txs[txs.length - 1];
     const label = (FIX_TX_TYPE[t.type] || { label: t.type }).label;
     return `${label} · ${fmtTime(t.time)}`;
+  }
+
+  /* 最近操作时间戳（用于排序）：最后一条流水时间，无流水则用 updatedAt/createdAt */
+  function fixtureLastTime(f) {
+    const txs = state.fixTransactions.filter((t) => t.fixtureId === f.id);
+    if (txs.length) return txs[txs.length - 1].time || 0;
+    return f.updatedAt || f.createdAt || 0;
+  }
+
+  /* 当前借用人：仅「已出库」时取最近一条 out 交易的领用人（外借单位） */
+  function fixtureCurrentBorrower(f) {
+    if (f.status !== 'checked_out') return '';
+    const txs = state.fixTransactions.filter((t) => t.fixtureId === f.id && (t.type === 'out' || t.type === 'return'));
+    for (let i = txs.length - 1; i >= 0; i--) {
+      if (txs[i].type === 'out') return txs[i].counterparty || '';
+    }
+    return '';
+  }
+
+  /* 责任人/借用人展示：
+   * - 已出库：借用人（领用部门/外借单位）即当前责任人
+   * - 其他状态：最近一次操作的经办人 */
+  function fixtureResponsible(f) {
+    if (f.status === 'checked_out') return fixtureCurrentBorrower(f) || '—';
+    const txs = state.fixTransactions.filter((t) => t.fixtureId === f.id);
+    const op = txs.length ? (txs[txs.length - 1].operator || '') : '';
+    return op || '—';
+  }
+
+  /* 当前所在位置（车间/仓库/工位/外借单位）：
+   * - 在库：库位
+   * - 已出库：外借单位（领用人）
+   * - 维修中：库位 + （维修中）
+   * - 已报废：已报废 */
+  function fixtureLocationLabel(f) {
+    if (f.status === 'checked_out') return '外借 · ' + (fixtureCurrentBorrower(f) || '（未知）');
+    if (f.status === 'repair') return (f.location || LOC_UNASSIGNED) + '（维修中）';
+    if (f.status === 'retired') return '已报废';
+    return f.location || LOC_UNASSIGNED;
+  }
+
+  function uniqueSorted(arr) {
+    return [...new Set(arr.filter((x) => x != null && String(x).trim() !== ''))].sort((a, b) => natCompare(a, b));
   }
 
   function renderLocation() {
@@ -1009,6 +1339,243 @@
     `;
     container.innerHTML = html;
   }
+
+  /* ============================================================
+   * 夹具查询（多条件组合检索：编号/名称/机种/库位/状态/借用人/关联设备）
+   * 沿用夹具列表的 panel / table-wrap / badge 风格，结果可直接查看详情或在库位中定位
+   * ============================================================ */
+  function renderQuery() {
+    const container = $('#content');
+    if (!container) return;
+    const q = state.query;
+    const locations = uniqueSorted(state.fixtures.map((f) => f.location || LOC_UNASSIGNED));
+    const lineModels = uniqueSorted(state.fixtures.flatMap((f) => (Array.isArray(f.lineModels) ? f.lineModels : [])));
+    const borrowers = uniqueSorted(state.fixTransactions
+      .filter((t) => t.type === 'out' && t.counterparty)
+      .map((t) => t.counterparty));
+
+    const opt = (val, sel) => `<option value="${esc(val)}"${sel === val ? ' selected' : ''}>${esc(val)}</option>`;
+    const locOpts = ['<option value="">全部</option>'].concat(locations.map((v) => opt(v, q.location))).join('');
+    const lmOpts = ['<option value="">全部</option>'].concat(lineModels.map((v) => opt(v, q.lineModel))).join('');
+    const brOpts = ['<option value="">全部</option>'].concat(borrowers.map((v) => opt(v, q.borrower))).join('');
+
+    const chip = (st) => {
+      const active = q.statuses.includes(st);
+      const label = (FIX_STATUS[st] || { label: st }).label;
+      return `<button type="button" class="chip ${active ? 'active' : ''}" data-status="${st}" onclick="queryToggleStatus('${st}')">${label}</button>`;
+    };
+    const sortOpt = (f) => opt(f, q.sortBy);
+
+    container.innerHTML = `
+      <div class="panel">
+        <div class="panel-title">🔎 夹具查询
+          <span class="panel-actions"><span id="query_count" class="muted"></span></span>
+        </div>
+        <div class="query-bar">
+          <div class="query-field"><label>关键字</label><input type="text" id="q_keyword" placeholder="编号/名称/机种/库位/责任人…" value="${esc(q.keyword)}" oninput="queryApply()"></div>
+          <div class="query-field"><label>编号</label><input type="text" id="q_code" placeholder="如 2001" value="${esc(q.code)}" oninput="queryApply()"></div>
+          <div class="query-field"><label>名称/规格</label><input type="text" id="q_name" placeholder="名称或机种" value="${esc(q.name)}" oninput="queryApply()"></div>
+          <div class="query-field"><label>存放位置</label><select id="q_location" class="query-select" onchange="queryApply()">${locOpts}</select></div>
+          <div class="query-field"><label>关联设备/产品</label><select id="q_lm" class="query-select" onchange="queryApply()">${lmOpts}</select></div>
+          <div class="query-field"><label>借用人</label><select id="q_borrower" class="query-select" onchange="queryApply()">${brOpts}</select></div>
+        </div>
+        <div class="query-bar">
+          <div class="query-field"><label>使用状态</label>
+            <span class="chip-row">
+              ${chip('stocked')}${chip('checked_out')}${chip('repair')}${chip('retired')}
+              ${q.statuses.length ? '<button type="button" class="chip-clear" onclick="queryClearStatus()">清除状态</button>' : ''}
+            </span>
+          </div>
+          <div class="query-field"><label>排序</label>
+            <div class="query-control-row">
+              <select id="q_sort" class="query-select" onchange="querySortSel()">
+                ${sortOpt('code')}${sortOpt('name')}${sortOpt('status')}${sortOpt('time')}
+              </select>
+              <button type="button" class="btn sm ghost" onclick="querySortDir()" id="q_sortdir" title="切换升/降序">${q.sortDir === 'asc' ? '↑' : '↓'}</button>
+            </div>
+          </div>
+          <div class="query-field"><label>&nbsp;</label>
+            <button type="button" class="btn sm ghost" onclick="queryReset()">重置筛选</button>
+          </div>
+        </div>
+        <div class="tip">支持多条件组合；状态可多选；「关联设备/产品」即夹具关联机种。点击表头可排序。</div>
+        <div id="query_results"></div>
+      </div>
+    `;
+    imeGuard($('#q_keyword'), queryApply);
+    const sd = $('#q_sortdir'); if (sd) sd.textContent = q.sortDir === 'asc' ? '↑' : '↓';
+    queryApply();
+  }
+
+  /* 应用筛选条件，返回结果数组（不触及 DOM） */
+  function applyQueryFilters(q) {
+    const kw = (q.keyword || '').trim().toLowerCase();
+    const code = (q.code || '').trim();
+    const name = (q.name || '').trim().toLowerCase();
+    const location = q.location || '';
+    const lineModel = (q.lineModel || '').trim().toLowerCase();
+    const borrower = q.borrower || '';
+    const statuses = q.statuses || [];
+    let list = state.fixtures.filter((f) => {
+      if (kw) {
+        const hit = codeLike(f.code, kw) ||
+          (f.name || '').toLowerCase().includes(kw) ||
+          lineModelsMatch(f, kw) ||
+          (f.category || '').toLowerCase().includes(kw) ||
+          (f.location || '').toLowerCase().includes(kw) ||
+          (fixtureResponsible(f) || '').toLowerCase().includes(kw);
+        if (!hit) return false;
+      }
+      if (code && !codeLike(f.code, code)) return false;
+      if (name) {
+        if (!((f.name || '').toLowerCase().includes(name) || lineModelsMatch(f, name))) return false;
+      }
+      if (location && (f.location || LOC_UNASSIGNED) !== location) return false;
+      if (statuses.length && !statuses.includes(f.status)) return false;
+      if (borrower) {
+        if (f.status !== 'checked_out') return false;
+        if (fixtureCurrentBorrower(f).indexOf(borrower) < 0) return false;
+      }
+      if (lineModel && !lineModelsMatch(f, lineModel)) return false;
+      return true;
+    });
+    const dir = q.sortDir === 'desc' ? -1 : 1;
+    const sb = q.sortBy;
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sb === 'code') cmp = natCompare(a.code, b.code);
+      else if (sb === 'name') cmp = natCompare(a.name, b.name);
+      else if (sb === 'status') cmp = natCompare(a.status, b.status);
+      else if (sb === 'time') cmp = fixtureLastTime(a) - fixtureLastTime(b);
+      return cmp * dir;
+    });
+    return list;
+  }
+
+  function renderQueryResults(list) {
+    const box = $('#query_results');
+    if (!box) return;
+    const cnt = $('#query_count');
+    if (cnt) cnt.textContent = '命中 ' + list.length + ' / ' + state.fixtures.length + ' 件';
+    if (!list.length) {
+      box.innerHTML = '<div class="empty-tip">未找到匹配的夹具，请调整查询条件</div>';
+      return;
+    }
+    const q = state.query;
+    const sortInd = (f) => q.sortBy === f ? (q.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    const thSort = (f, label) => `<th class="th-sort" onclick="querySortCol('${f}')">${label}${sortInd(f)}</th>`;
+    box.innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr>
+          ${thSort('code', '编号')}${thSort('name', '名称')}<th>关联机种</th><th>分类</th><th>当前位置</th><th>责任人/借用人</th>
+          ${thSort('status', '状态')}${thSort('time', '最近操作时间')}<th>操作</th>
+        </tr></thead>
+        <tbody>
+          ${list.map((f) => {
+            const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
+            const canLocate = !!f.location && f.status !== 'retired';
+            return `<tr>
+              <td>${esc(f.code)}</td>
+              <td>${esc(f.name)}</td>
+              <td>${esc(formatLineModels(f, '—'))}</td>
+              <td>${esc(f.category || '—')}</td>
+              <td>${esc(fixtureLocationLabel(f))}</td>
+              <td>${esc(fixtureResponsible(f))}</td>
+              <td><span class="badge ${st.cls}">${st.label}</span></td>
+              <td>${esc(lastMove(f.id))}</td>
+              <td><span class="row-actions">
+                <button class="btn sm" onclick="openQueryDetail(${f.id})">详情</button>
+                ${canLocate ? `<button class="btn sm ghost" onclick="queryGotoLocationById(${f.id})">定位</button>` : ''}
+              </span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>`;
+  }
+
+  window.queryApply = function () {
+    const q = state.query;
+    q.keyword = ($('#q_keyword') || {}).value || '';
+    q.code = ($('#q_code') || {}).value || '';
+    q.name = ($('#q_name') || {}).value || '';
+    q.location = ($('#q_location') || {}).value || '';
+    q.lineModel = ($('#q_lm') || {}).value || '';
+    q.borrower = ($('#q_borrower') || {}).value || '';
+    renderQueryResults(applyQueryFilters(q));
+  };
+
+  window.queryToggleStatus = function (st) {
+    const q = state.query;
+    const i = q.statuses.indexOf(st);
+    if (i >= 0) q.statuses.splice(i, 1); else q.statuses.push(st);
+    const chipEl = $('.chip[data-status="' + st + '"]');
+    if (chipEl) chipEl.classList.toggle('active', q.statuses.includes(st));
+    queryApply();
+  };
+
+  window.queryClearStatus = function () {
+    state.query.statuses = [];
+    $$('.chip[data-status]').forEach((c) => c.classList.remove('active'));
+    queryApply();
+  };
+
+  window.querySortSel = function () {
+    state.query.sortBy = ($('#q_sort') || {}).value || 'code';
+    queryApply();
+  };
+
+  window.querySortDir = function () {
+    state.query.sortDir = state.query.sortDir === 'asc' ? 'desc' : 'asc';
+    const sd = $('#q_sortdir'); if (sd) sd.textContent = state.query.sortDir === 'asc' ? '↑' : '↓';
+    queryApply();
+  };
+
+  window.querySortCol = function (field) {
+    const q = state.query;
+    if (q.sortBy === field) q.sortDir = q.sortDir === 'asc' ? 'desc' : 'asc';
+    else { q.sortBy = field; q.sortDir = 'asc'; }
+    const sel = $('#q_sort'); if (sel) sel.value = field;
+    const sd = $('#q_sortdir'); if (sd) sd.textContent = q.sortDir === 'asc' ? '↑' : '↓';
+    queryApply();
+  };
+
+  window.queryReset = function () {
+    state.query = { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', statuses: [], sortBy: 'code', sortDir: 'asc' };
+    renderQuery();
+  };
+
+  window.openQueryDetail = function (id) {
+    const f = state.fixtures.find((x) => x.id === id);
+    if (!f) return;
+    const st = FIX_STATUS[f.status] || { label: f.status, cls: '' };
+    const loc = fixtureLocationLabel(f);
+    const holder = fixtureResponsible(f);
+    const canLocate = !!f.location && f.status !== 'retired';
+    const html = `
+      <div class="form-group"><label>编号</label><input type="text" value="${esc(f.code)}" disabled></div>
+      <div class="form-group"><label>名称</label><input type="text" value="${esc(f.name)}" disabled></div>
+      <div class="form-group"><label>机种名称</label><input type="text" value="${esc(formatLineModels(f, '—'))}" disabled></div>
+      <div class="form-group"><label>分类</label><input type="text" value="${esc(f.category || '—')}" disabled></div>
+      <div class="form-group"><label>存放位置（库位）</label><input type="text" value="${esc(f.location || '（未分配）')}" disabled></div>
+      <div class="form-group"><label>当前所在位置</label><input type="text" value="${esc(loc)}" disabled></div>
+      <div class="form-group"><label>责任人/借用人</label><input type="text" value="${esc(holder)}" disabled></div>
+      <div class="form-group"><label>状态</label><input type="text" value="${esc(st.label)}" disabled></div>
+      <div class="form-group"><label>累计出库 / 回库</label><input type="text" value="${esc((f.totalOutCount || 0) + ' / ' + (f.totalReturnCount || 0))}" disabled></div>
+      ${f.remark ? `<div class="form-group"><label>备注</label><input type="text" value="${esc(f.remark)}" disabled></div>` : ''}
+      ${canLocate ? `<div class="form-actions"><button class="btn" onclick="queryGotoLocationById(${f.id})">🗺 在库位管理中定位</button></div>` : ''}
+      <div class="panel-title mt">最近动态</div>
+      <div id="q_detail_tx"></div>
+    `;
+    openModal('夹具详情 · ' + f.code + ' ' + f.name, html);
+    renderFixTransactions($('#q_detail_tx'), state.fixTransactions, id);
+  };
+
+  window.queryGotoLocationById = function (id) {
+    const f = state.fixtures.find((x) => x.id === id);
+    closeModal();
+    if (f && f.location) state.locFilter = f.location;
+    showView('location');
+  };
 
   /* ============================================================
    * 数据备份
@@ -1379,42 +1946,47 @@
     return null;
   };
 
+  /* 扫码命中：自动填入编号并勾选该台（不再额外弹窗，与新表单流程统一） */
+  function scanPickOne(code, type) {
+    const f = state.fixtures.find((x) => x.code === code);
+    if (!f) { toast('未找到夹具 ' + code, 'err'); return; }
+    const want = type === 'out' ? 'stocked' : 'checked_out';
+    if (f.status !== want) {
+      toast(type === 'out' ? '夹具 ' + f.code + ' 不在库' : '夹具 ' + f.code + ' 未出库', 'err');
+      return;
+    }
+    const prefix = type === 'out' ? 'out' : 'return';
+    const codeEl = $('#' + prefix + '_code'); if (codeEl) codeEl.value = f.code;
+    const q = type === 'out' ? outSearch : returnSearch;
+    q();
+    const cb = $('.' + prefix + '-pick[data-id="' + f.id + '"]');
+    if (cb) cb.checked = true;
+    syncGroupHead(prefix);
+    syncPickToQty(prefix);
+    toast('已选中 ' + f.code, 'ok');
+  }
+
   window.scanForFixOut = function () {
     const container = $('#fix_scan_out_area');
     if (!container) return;
-    startScan('fix_scan_out_area', (code) => {
-      const f = state.fixtures.find((x) => x.code === code);
-      if (!f) { toast('未找到夹具 ' + code, 'err'); return; }
-      if (f.status !== 'stocked') { toast('夹具 ' + f.code + ' 不在库', 'err'); return; }
-      fixtureOut(f.id);
-    });
+    startScan('fix_scan_out_area', (code) => scanPickOne(code, 'out'));
   };
 
   window.scanForFixReturn = function () {
     const container = $('#fix_scan_return_area');
     if (!container) return;
-    startScan('fix_scan_return_area', (code) => {
-      const f = state.fixtures.find((x) => x.code === code);
-      if (!f) { toast('未找到夹具 ' + code, 'err'); return; }
-      if (f.status !== 'checked_out') { toast('夹具 ' + f.code + ' 未出库', 'err'); return; }
-      fixtureReturn(f.id);
-    });
+    startScan('fix_scan_return_area', (code) => scanPickOne(code, 'return'));
   };
 
+  /* 批量扫码：逐台加入勾选，最后统一提交（不再逐个弹窗） */
   window.scanForFixBatch = function () {
     const container = $('#fix_scan_batch_area');
     if (!container) return;
-    let count = 0;
-    startScan('fix_scan_batch_area', (code) => {
-      const f = state.fixtures.find((x) => x.code === code);
-      if (!f) { toast('未找到夹具 ' + code, 'err'); return; }
-      if (f.status !== 'stocked') { toast('夹具 ' + f.code + ' 不在库，跳过', 'warn'); return; }
-      count++;
-      fixtureOut(f.id);
-    });
+    let picked = 0;
+    startScan('fix_scan_batch_area', (code) => scanPickOne(code, 'out') && picked++);
     setTimeout(() => {
       const tip = $('#fix_scan_batch_tip');
-      if (tip) tip.textContent = '已扫码 ' + count + ' 个夹具';
+      if (tip) tip.textContent = '已扫码 ' + picked + ' 个夹具';
     }, 100);
   };
 
@@ -1555,6 +2127,17 @@
   /* ============================================================
    * 初始化
    * ============================================================ */
+
+  /* 全局键盘：Esc 关闭模态；出库 / 回库表单内回车直接提交（扫描枪作业习惯）。
+   * 用具名函数注册，便于页面卸载时移除，避免 Electron 窗口重载后重复绑定。 */
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') { closeModal(); return; }
+    if (e.key !== 'Enter') return;
+    const id = (e.target && e.target.id) || '';
+    if (/^out_/.test(id)) { e.preventDefault(); submitOutDo(); }
+    else if (/^return_/.test(id)) { e.preventDefault(); submitReturnDo(); }
+  }
+
   async function init() {
     try {
       await DB.open();
@@ -1569,10 +2152,15 @@
     $$('.nav-item').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
     $('#modalClose').addEventListener('click', closeModal);
     $('#modalOverlay').addEventListener('click', (e) => { if (e.target === $('#modalOverlay')) closeModal(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    document.addEventListener('keydown', handleKeyDown);
     showView('dashboard');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
+
+  // 页面卸载时清理 keydown 监听，避免 Electron 窗口重载后重复绑定导致 Enter 多次提交
+  window.addEventListener('beforeunload', () => {
+    document.removeEventListener('keydown', handleKeyDown);
+  });
 })();
