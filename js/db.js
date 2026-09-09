@@ -2,7 +2,7 @@
  * db.js v2.1 — 工装夹具出入库管理系统数据层
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '2.1';
+  const APP_VERSION = '2.2';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   if (electronApi) {
