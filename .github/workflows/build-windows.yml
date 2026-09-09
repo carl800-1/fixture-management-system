@@ -53,13 +53,17 @@ jobs:
         shell: bash
         run: |
           # 输出目录与产品名一律从 package.json 读取，避免改版本时 workflow 与配置脱节
-          v=$(node -p "require('./package.json').version")
+          # 版本号分两层：package.json 的 version 必须是完整 semver（x.y.z，electron-builder 硬性要求）；
+          # 对外展示（zip / Artifact / 产物名）用两位短版本（x.y），由下面 raw_version 派生。
+          raw=$(node -p "require('./package.json').version")
+          v="${raw%.*}"
           d=$(node -p "const p=require('./package.json'); (p.build && p.build.directories && p.build.directories.output) || 'release'")
           n=$(node -p "const p=require('./package.json'); (p.build && p.build.productName) || p.name")
+          echo "raw_version=$raw" >> "$GITHUB_OUTPUT"
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "outdir=$d" >> "$GITHUB_OUTPUT"
           echo "product=$n" >> "$GITHUB_OUTPUT"
-          echo "当前版本: $v"
+          echo "展示版本: $v (package.json: $raw)"
           echo "构建输出目录: $d"
           echo "产品名: $n"
 
