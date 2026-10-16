@@ -81,7 +81,7 @@ const NEW_FIXTURE_FN = `
     setV('#fix_name', o.name);
     setV('#fix_loc', o.location); setV('#fix_cat', o.cat || '');
     if (o.remark) setV('#fix_remark', o.remark);
-    (o.models || []).forEach((m) => { setV('#fix_lm_new', m); window.fixFormAddModelNew(); });
+    setV('#fix_lm_text', (o.models || []).join(' / ')); window.fixFormModelsInput();
     await sleep(100);
     for (const nm of (o.lines || [])) {
       const sel = $('#fix_line_pick');
@@ -240,12 +240,12 @@ async function main() {
     const out = {};
     window.showView('fixtures'); await sleep(200);
     window.fixtureNew(); await sleep(250);
-    out.fields = ['#fix_serial','#fix_name','#fix_lm_pick','#fix_lm_new','#fix_loc','#fix_cat','#fix_ls_box','#fix_remark']
+    out.fields = ['#fix_serial','#fix_name','#fix_lm_text','#fix_loc','#fix_cat','#fix_ls_box','#fix_remark']
       .every(s=>!!$(s));
     out.labelText = (($('#modalBody')||{}).textContent||'');
     /* 未选产线/工位直接提交 → 必须被拒 */
     setV('#fix_serial','SN-DENY'); setV('#fix_name','缺产线夹具'); setV('#fix_loc','ZP1-U-9-9');
-    setV('#fix_lm_new','WJ-100'); window.fixFormAddModelNew(); await sleep(80);
+    setV('#fix_lm_text','WJ-100'); window.fixFormModelsInput(); await sleep(80);
     window.submitFixForm(); await sleep(350);
     const toastTxt1 = (($('#toast')||{}).textContent||'');
     out.deniedNoLine = /至少选择 1 个工位|至少选择 1 条产线/.test(toastTxt1);
@@ -254,20 +254,20 @@ async function main() {
     /* 非法库位被拒 */
     window.fixtureNew(); await sleep(200);
     setV('#fix_serial','SN-BAD'); setV('#fix_name','非法库位'); setV('#fix_loc','A-9');
-    setV('#fix_lm_new','WJ-100'); window.fixFormAddModelNew(); await sleep(60);
+    setV('#fix_lm_text','WJ-100'); window.fixFormModelsInput(); await sleep(60);
     const sel0 = $('#fix_line_pick'); sel0.value=String(${cfg.l1}); window.fixFormAddLine(); await sleep(120);
     const cb0 = $$('#fix_ls_box input[type=checkbox]')[0]; if (cb0) { cb0.checked=true; cb0.dispatchEvent(new Event('change')); }
     await sleep(80);
     window.submitFixForm(); await sleep(350);
     out.deniedBadLoc = /4 段式/.test((($('#toast')||{}).textContent||''));
     window.closeModal(); await sleep(120);
-    /* 机种上限 7：加第 8 个必须被拒 */
+    /* 机种上限 7：输入 8 个（用 / 分隔）应只保留前 7 个并给出提示 */
     window.fixtureNew(); await sleep(200);
-    for (let i=1;i<=7;i++) { setV('#fix_lm_new','MX-'+i); window.fixFormAddModelNew(); await sleep(40); }
-    setV('#fix_lm_new','MX-8'); window.fixFormAddModelNew(); await sleep(80);
+    const eight = [1,2,3,4,5,6,7,8].map((i)=>'MX-'+i).join(' / ');
+    setV('#fix_lm_text', eight); window.fixFormModelsInput(); await sleep(80);
     out.chipCount = $$('#fix_lm_chips .chip-tag').length;
     out.lmCountText = (($('#fix_lm_count')||{}).textContent||'');
-    out.pickDisabled = !!$('#fix_lm_pick') && $('#fix_lm_pick').disabled;
+    out.lmHint = (($('#fix_lm_hint')||{}).textContent||'');
     window.closeModal(); window.resetFixForm(); await sleep(120);
     return out;
   })()`);
@@ -277,9 +277,9 @@ async function main() {
     (formRes.labelText || '').slice(0, 120));
   ok('零产线零工位提交被拒（弹窗保持打开）', formRes.deniedNoLine === true && formRes.deniedStillOpen === true);
   ok('非法库位（A-9）提交被拒', formRes.deniedBadLoc === true);
-  ok('机种最多 7 个：第 8 个被拒', formRes.chipCount === 7, String(formRes.chipCount));
+  ok('机种最多 7 个：第 8 个被截断', formRes.chipCount === 7, String(formRes.chipCount));
   ok('机种计数文案 7 / 7', formRes.lmCountText === '7 / 7', formRes.lmCountText);
-  ok('机种达上限后选择器被禁用', formRes.pickDisabled === true);
+  ok('机种超过 7 个时给出截断提示', /超过 7 个/.test(formRes.lmHint || ''), formRes.lmHint);
 
   /* 正式建 4 套（第 4 套与第 1 套同实物编号，验证「多套追踪」） */
   const mkRes = await wc.executeJavaScript(`(async () => {

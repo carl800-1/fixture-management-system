@@ -327,7 +327,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     const fns = ['fixtureNew','fixtureEdit','fixtureOut','fixtureReturn','fixtureRepair',
       'fixtureRepairComplete','fixtureRetire','fixtureSearch','submitFixForm',
       'fixFormAddLine','fixFormRemoveLine','fixFormToggleSec','fixFormToggleStation',
-      'fixFormAddModelNew','fixFormAddModelFromSelect','fixFormCheckSerial','fixFormGotoLineCfg',
+      'fixFormModelsInput','fixFormRemoveModel','fixFormCheckSerial','fixFormGotoLineCfg',
       'lineCfgLineForm','lineCfgSaveLine','lineCfgPickLine','lineCfgStationForm','lineCfgSaveStation',
       'lineCfgDelLine','lineCfgImport','lineQueryChangeLine','lineQueryReset',
       'openFixtureQR','printSingleLabel','batchPrintLabels','clearAllData','exportData'];
@@ -378,7 +378,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       $('#fix_serial').value='SMOKE-NOLINE-001';
       $('#fix_name').value='零产线夹具';
       $('#fix_loc').value='ZP1-U-1-1';
-      const lm=$('#fix_lm_new'); if(lm){ lm.value='冒烟机种X'; window.fixFormAddModelNew(); }
+      const lm=$('#fix_lm_text'); if(lm){ lm.value='冒烟机种X'; window.fixFormModelsInput(); }
       await sleep(300);
       window.submitFixForm(); await sleep(700);
       const t=$('#toast');
@@ -405,8 +405,8 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       $('#fix_loc').value='ZP1-U-1-1';
       $('#fix_cat').value='测试';
       /* 机种 */
-      $('#fix_lm_new').value='冒烟机种X';
-      window.fixFormAddModelNew(); await sleep(300);
+      $('#fix_lm_text').value='冒烟机种X';
+      window.fixFormModelsInput(); await sleep(300);
       /* 产线 */
       const pick=$('#fix_line_pick');
       if(!pick) return JSON.stringify({step:'no-line-pick'});

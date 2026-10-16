@@ -224,6 +224,48 @@ ok('数据行「序号 在前」共 5 处（3 单行 + 2 跨行）', goodRow ===
 const exportSeqFirst = appJs.indexOf("const headers = ['序号', '夹具编号'") >= 0;
 ok('夹具列表导出 CSV：序号 为第 1 列', exportSeqFirst);
 
+/* ---------- 10. 机种名称输入：单框 + / 分隔 ---------- */
+section('10. 机种名称输入（单框，多个用 / 分隔）');
+/* 新控件存在、旧三件套控件已消失 */
+ok('表单含单框输入 #fix_lm_text', appJs.includes('id="fix_lm_text"'));
+ok('单框输入挂 datalist #fix_lm_list', appJs.includes('id="fix_lm_list"') && appJs.includes('list="fix_lm_list"'));
+ok('输入事件绑定 fixFormModelsInput', appJs.includes("oninput=\"fixFormModelsInput()\""));
+ok('挂载 window.fixFormModelsInput', appJs.includes('window.fixFormModelsInput = function'));
+ok('旧控件「从机种字典选择」已移除', !appJs.includes('fix_lm_pick') && !appJs.includes('从机种字典选择'));
+ok('旧控件「新增机种 + 添加按钮」已移除', !appJs.includes('fix_lm_new') && !appJs.includes('fix_lm_add') && !appJs.includes('fixFormAddModelNew'));
+/* 执行真实源码：抽取 MODEL_SEP + parseModelText 独立跑 */
+const mmSep = appJs.match(/const MODEL_SEP = (\/[^\n]*\/);/);
+const mmFn = appJs.match(/function parseModelText\s*\([^)]*\)\s*\{[\s\S]*?\n {2}\}/);
+ok('app.js 中存在 MODEL_SEP 与 parseModelText 实现', !!mmSep && !!mmFn);
+if (mmSep && mmFn) {
+  let parseModelText = null;
+  try {
+    parseModelText = new Function('const MODEL_SEP = ' + mmSep[1] + ';\n' + mmFn[0] + '; return parseModelText;')();
+    ok('parseModelText 可独立执行', typeof parseModelText === 'function');
+  } catch (e) {
+    ok('parseModelText 可独立执行', false, e.message);
+  }
+  if (parseModelText) {
+    const cases = [
+      ['', [], '/ 空串'],
+      [null, [], '/ null'],
+      ['A', ['A'], '/ 单个'],
+      ['A / B', ['A', 'B'], '/ 斜杠分隔'],
+      ['A/B', ['A', 'B'], '/ 无空格斜杠'],
+      ['A、B，C；D;E', ['A', 'B', 'C', 'D', 'E'], '/ 中英文分隔符混用'],
+      ['A / A / B', ['A', 'B'], '/ 去重'],
+      ['  A  /  B  ', ['A', 'B'], '/ 两端空白'],
+      ['A /  / B', ['A', 'B'], '/ 空段落'],
+      ['DH40MC / DH50MC', ['DH40MC', 'DH50MC'], '/ 真实机种名']
+    ];
+    cases.forEach(([input, expect, tag]) => {
+      let got;
+      try { got = JSON.stringify(parseModelText(input)); } catch (e) { got = 'THROW:' + e.message; }
+      ok('parseModelText(' + JSON.stringify(input) + ') ' + tag, got === JSON.stringify(expect), '实际 ' + got);
+    });
+  }
+}
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

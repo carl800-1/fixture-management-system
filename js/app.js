@@ -653,7 +653,7 @@
    * 建档 / 编辑夹具表单
    *
    * 三段式：① 基本信息（实物编号 / 名称 / 库位 / 分类 / 备注）
-   *         ② 机种名称（≤7，从机种字典多选，可现场新增）
+   *         ② 机种名称（≤7，单框输入，多个用 / 分隔，可下拉选取或直接新建）
    *         ③ 产线工位（按产线折叠扇区，≥1 产线 ≥1 工位，≤5 产线 ≤10 工位）
    *
    * ⚠️ 表单内的「产线 / 工位 / 机种」暂存在 state.fixForm，扇区重绘只重写
@@ -668,57 +668,63 @@
   }
   window.resetFixForm = resetFixForm;   // 表单「取消」按钮为内联 onclick，必须挂到 window
 
-  /* ---- 机种名称 chips ---- */
+  /* ---- 机种名称：单框输入，多个用 / 分隔 ----
+   * 分隔符与批量导入保持一致（, ， ; ； / 、），既可直接手输新建，
+   * 也可借 <datalist> 从机种字典下拉选取；未登记的新名称按「孤儿机种」
+   * 处理（可在「机种管理」一键补登），不阻塞建档。 */
+  const MODEL_SEP = /[,，;；/、]/;
+
+  function parseModelText(text) {
+    const out = [];
+    String(text == null ? '' : text).split(MODEL_SEP).forEach((v) => {
+      const s = v.trim();
+      if (s && !out.includes(s)) out.push(s);
+    });
+    return out;
+  }
+
+  // 只重绘 chips 预览与计数，不回写输入框（避免打断光标位置）
   function renderLineModelChips() {
     const box = $('#fix_lm_chips');
-    if (!box) return;
     const arr = state.fixForm.lineModels;
-    box.innerHTML = arr.length
-      ? arr.map((m, i) => `<span class="chip-tag">${esc(m)}<button type="button" class="chip-x" title="移除" onclick="fixFormRemoveModel(${i})">×</button></span>`).join('')
-      : '<span class="muted">尚未选择机种</span>';
+    if (box) {
+      box.innerHTML = arr.length
+        ? arr.map((m, i) => `<span class="chip-tag">${esc(m)}<button type="button" class="chip-x" title="移除" onclick="fixFormRemoveModel(${i})">×</button></span>`).join('')
+        : '';
+    }
     const cnt = $('#fix_lm_count');
     if (cnt) cnt.textContent = arr.length + ' / ' + MAX_LINE_MODELS;
-    const full = arr.length >= MAX_LINE_MODELS;
-    const sel = $('#fix_lm_pick');
-    if (sel) {
-      const rest = state.productions
-        .map((p) => p.name)
-        .filter((n) => !arr.includes(n))
-        .sort(natCompare);
-      sel.innerHTML = ['<option value="">— 从机种字典选择 —</option>']
-        .concat(rest.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`)).join('');
-      sel.disabled = full;
+  }
+
+  // 输入变化 → 解析 → 同步 state.fixForm.lineModels → 刷新预览与提示
+  window.fixFormModelsInput = function () {
+    const inp = $('#fix_lm_text');
+    const raw = parseModelText(inp ? inp.value : '');
+    const valid = [], invalid = [];
+    raw.forEach((n) => { (isValidProductionName(n) ? valid : invalid).push(n); });
+    let over = 0;
+    let arr = valid;
+    if (arr.length > MAX_LINE_MODELS) { over = arr.length - MAX_LINE_MODELS; arr = arr.slice(0, MAX_LINE_MODELS); }
+    state.fixForm.lineModels = arr;
+    renderLineModelChips();
+    const hint = $('#fix_lm_hint');
+    if (hint) {
+      const msgs = [];
+      if (over) msgs.push('超过 ' + MAX_LINE_MODELS + ' 个，仅保留前 ' + MAX_LINE_MODELS + ' 个');
+      if (invalid.length) msgs.push('已忽略不合法名称：' + invalid.join('、'));
+      hint.textContent = msgs.join('；');
+      hint.className = 'hint' + (msgs.length ? ' hint-warn' : '');
     }
-    const inp = $('#fix_lm_new');
-    if (inp) { inp.disabled = full; if (full) inp.value = ''; }
-    const btn = $('#fix_lm_add');
-    if (btn) btn.disabled = full;
-  }
-
-  function pushLineModel(name) {
-    const n = String(name == null ? '' : name).trim();
-    if (!n) return false;
-    if (!isValidProductionName(n)) { toast('机种名称需为 1~' + MAX_PROD_NAME + ' 字符，且不含竖线', 'err'); return false; }
-    if (state.fixForm.lineModels.includes(n)) { toast('该机种已添加', 'warn'); return false; }
-    if (state.fixForm.lineModels.length >= MAX_LINE_MODELS) { toast('机种名称最多 ' + MAX_LINE_MODELS + ' 个', 'err'); return false; }
-    state.fixForm.lineModels.push(n);
-    return true;
-  }
-
-  window.fixFormAddModelFromSelect = function () {
-    const sel = $('#fix_lm_pick');
-    if (!sel || !sel.value) return;
-    if (pushLineModel(sel.value)) { renderLineModelChips(); toast('已添加机种 ' + sel.value, 'ok'); }
   };
-  window.fixFormAddModelNew = function () {
-    const inp = $('#fix_lm_new');
-    const v = inp ? inp.value.trim() : '';
-    if (!v) { toast('请输入机种名称', 'err'); return; }
-    if (pushLineModel(v)) { if (inp) inp.value = ''; renderLineModelChips(); toast('已添加机种 ' + v, 'ok'); }
-  };
+
+  // 点 chips 的 × → 从输入框同步移除该机种
   window.fixFormRemoveModel = function (i) {
     state.fixForm.lineModels.splice(i, 1);
+    const inp = $('#fix_lm_text');
+    if (inp) inp.value = state.fixForm.lineModels.join(' / ');
     renderLineModelChips();
+    const hint = $('#fix_lm_hint');
+    if (hint) { hint.textContent = ''; hint.className = 'hint'; }
   };
 
   /* ---- 产线工位折叠扇区 ---- */
@@ -866,6 +872,9 @@
     }
     if (state.fixForm.lines.length) lsExpanded.add(state.fixForm.lines[0]);
     const locList = locationCandidates().map((v) => `<option value="${esc(v)}"></option>`).join('');
+    const lmInitText = state.fixForm.lineModels.join(' / ');
+    const lmOptions = (state.productions || []).map((p) => p.name).slice().sort(natCompare)
+      .map((n) => `<option value="${esc(n)}"></option>`).join('');
     const html = `
       <div class="form-group"><label>夹具编号 <span class="req">*</span></label>
         <input type="text" id="fix_serial" placeholder="如 DH40MC-921-001-001（同一机种多套可共用同一编号）"
@@ -873,13 +882,13 @@
         <small class="hint" id="fix_serial_hint"></small></div>
       <div class="form-group"><label>夹具名称 <span class="req">*</span></label>
         <input type="text" id="fix_name" placeholder="夹具名称" value="${esc(f ? f.name || '' : '')}"></div>
-      <div class="form-group"><label>机种名称 <span class="req">*</span>（最多 ${MAX_LINE_MODELS} 个）<span class="muted" id="fix_lm_count"></span></label>
+      <div class="form-group"><label>机种名称 <span class="req">*</span>（最多 ${MAX_LINE_MODELS} 个，多个用 / 分隔）<span class="muted" id="fix_lm_count"></span></label>
+        <input type="text" id="fix_lm_text" list="fix_lm_list" oninput="fixFormModelsInput()"
+          placeholder="如 DH40MC / DH50MC（多个用 / 分隔，可从下拉选取，也可直接输入新建）"
+          value="${esc(lmInitText)}">
+        <datalist id="fix_lm_list">${lmOptions}</datalist>
         <div id="fix_lm_chips" class="chip-box"></div>
-        <div class="chip-add">
-          <select id="fix_lm_pick" class="query-select" onchange="fixFormAddModelFromSelect()"></select>
-          <input type="text" id="fix_lm_new" placeholder="或输入新机种名称后点「添加」">
-          <button type="button" class="btn sm" id="fix_lm_add" onclick="fixFormAddModelNew()">添加</button>
-        </div></div>
+        <small class="hint" id="fix_lm_hint"></small></div>
       <div class="form-group"><label>库位 <span class="req">*</span></label>
         <input type="text" id="fix_loc" list="fix_loc_list" placeholder="如 ZP1-U-1-1（4 段式，≤${MAX_LOCATION} 字符）"
           maxlength="${MAX_LOCATION}" value="${esc(f ? f.location || '' : '')}">
@@ -923,6 +932,7 @@
     const location = (($('#fix_loc') || {}).value || '').trim();
     const category = (($('#fix_cat') || {}).value || '').trim();
     const remark = (($('#fix_remark') || {}).value || '').trim();
+    if ($('#fix_lm_text')) window.fixFormModelsInput();   // 兜底：从输入框重新解析，防止有未触发的 input 事件
     const lineModels = state.fixForm.lineModels.slice();
     const lines = state.fixForm.lines.map(Number);
     const stations = state.fixForm.stations.map(Number);
