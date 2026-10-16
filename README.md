@@ -1,6 +1,6 @@
-# 工装夹具管理程序 v4.0.0（桌面版 / 独立 exe）
+# 工装夹具管理程序 v4.0.1（桌面版 / 独立 exe）
 
-**v4.0.0 是一个打包好的桌面程序**（基于 Electron）。双击 `工装夹具管理程序.exe` 即可使用，**无需安装、无需联网、无需浏览器**，所有数据保存在本机文件里。
+**v4.0.1 是一个打包好的桌面程序**（基于 Electron）。双击 `工装夹具管理程序.exe` 即可使用，**无需安装、无需联网、无需浏览器**，所有数据保存在本机文件里。
 
 > 系统覆盖夹具从建档、出库、回库、送修、维修完成到报废的全生命周期管理，并支持二维码标签、扫码作业、流水追溯与数据备份。
 >
@@ -9,6 +9,8 @@
 > **序号**（4 位纯数字、唯一、二维码内容、不参与模糊搜索）分离；**数量不再存储，而是按
 > 「夹具编号 + 库位」实时派生**；「夹具 ↔ 产线 / 工位」改为夹具记录上的扁平关联字段。
 > 升级细节见 `修改日志.md` 的 v4.0.0 条目；已知问题、待确认事项与环境限制见 `问题清单.md`。
+>
+> **v4.0.1（PATCH）**：显示层术语统一 —— `实物编号`→`夹具编号`、`桥梁编号/桥梁号`→`序号`（底层字段 `serialNo` / `code` 不变，旧模板表头仍可导入）；夹具批量导入不再因产线/工位未建档而整表跳过，改为**按名称自动补建**（同名复用）。
 
 ## 功能模块
 
@@ -202,10 +204,10 @@ v4.0.0 把「关联」全部收敛到夹具记录上，只保留几条独立关�
 
 ## 数据说明（重要）
 
-- v4.0.0 的数据保存在 **exe 同目录**下的 `fixture-data.json`：
+- v4.0.1 的数据保存在 **exe 同目录**下的 `fixture-data.json`：
 
   ```
-  D:\project\fixture\v4.0.0\fixture-data.json
+  D:\project\fixture\v4.0.1\fixture-data.json
   ```
 
 - 该文件是普通 JSON，**可直接整文件复制备份**；也可在程序内「数据备份」中导出/导入业务数据 JSON。
@@ -250,7 +252,7 @@ fixtures/v1.0/
 ├─ preload.js                     渲染进程桥：contextBridge 暴露 window.api（安全）
 ├─ store.js                       主进程数据层：Node fs 写 fixture-data.json
 ├─ package.json                   electron-builder 配置
-├─ index.html                     页面骨架（标题/品牌已标注 v4.0.0）
+├─ index.html                     页面骨架（标题/品牌已标注 v4.0.1）
 ├─ css/style.css                  界面样式
 ├─ js/
 │  ├─ db.js                       双模式数据层（Electron IPC / 浏览器回退）
@@ -263,8 +265,8 @@ fixtures/v1.0/
 ├─ test_render.js                 渲染层静态检查（42 项，Node，含版本号一致性校验）
 ├─ test_xlsx.js                   xlsx 解析器测试（45 项，Node）
 ├─ test_make_xlsx.py              生成真实 xlsx 测试夹具（Python，辅助脚本）
-├─ test_import.js                 导入映射逻辑测试（80 项，Node，vm 沙箱）
-├─ test_e2e_import.js             导入端到端验证（64 项，Node，真实 xlsx → 落库）
+├─ test_import.js                 导入映射逻辑测试（81 项，Node，vm 沙箱）
+├─ test_e2e_import.js             导入端到端验证（65 项，Node，真实 xlsx → 落库）
 ├─ test_line.js                   产线 / 工位 / 机种模块测试（204 项，Node）
 ├─ test_e2e.js                    真实运行测试（177 项，Electron）
 ├─ smoke_packed.js                打包产物冒烟测试（44 项，自包含，直连真实 exe）
@@ -276,7 +278,7 @@ fixtures/v1.0/
 ## 使用方法（exe）
 
 1. 将 `工装夹具管理程序.exe` 复制到你常用的任意位置（如桌面或 `D:\工具\`）。
-2. **双击运行**即可，无需安装。首次启动为 1280×820 窗口，标题「工装夹具管理程序 v4.0.0」。
+2. **双击运行**即可，无需安装。首次启动为 1280×820 窗口，标题「工装夹具管理程序 v4.0.1」。
 3. **首次使用顺序建议**：先去「⚙️ 产线配置」建好线体与工位 → 再到「夹具管理」点击 **新建夹具**，填写**夹具编号**、名称、机种（≤7）、库位，并**至少勾选 1 条产线 + 1 个工位**（序号由系统分配，不用手填）。
 4. 日常通过「出库管理 / 回库管理」登记业务，状态自动变化；「流水记录」追溯历史并导出。
 5. 仪表盘顶部会显示夹具统计与最近动态，确认系统已正常启动。
@@ -334,10 +336,10 @@ node test_render.js
 python test_make_xlsx.py test_fixture.xlsx
 node test_xlsx.js
 
-# 4. 导入映射逻辑测试（80 项）— 纯 Node，vm 沙箱抽取 app.js 纯函数
+# 4. 导入映射逻辑测试（81 项）— 纯 Node，vm 沙箱抽取 app.js 纯函数
 node test_import.js
 
-# 5. 导入端到端验证（64 项）— 真实 xlsx → 解析 → 落库
+# 5. 导入端到端验证（65 项）— 真实 xlsx → 解析 → 落库
 node test_e2e_import.js
 
 # 6. 产线 / 工位 / 机种模块测试（204 项）— 数据层 / 工位排序 / 配置表 / 产线图 / 导入落库 / 撤销接口 / 按机种查询
@@ -352,10 +354,10 @@ unset ELECTRON_RUN_AS_NODE
 #    需先打包并部署，再执行（同样必须先清 ELECTRON_RUN_AS_NODE）
 node smoke_packed.js
 #    也可显式指定被测 exe：
-#    node smoke_packed.js "D:/project/fixture/v4.0.0/工装夹具管理程序.exe"
+#    node smoke_packed.js "D:/project/fixture/v4.0.1/工装夹具管理程序.exe"
 ```
 
-> 前 6 项为纯 Node 测试，合计 **575 项**；第 7 项 `test_e2e.js` 启动真实 Electron 窗口驱动 UI，**177 项**；第 8 项 `smoke_packed.js` 直连真实 exe 的调试端口，**44 项**。总计 **796 项，零失败**。
+> 前 6 项为纯 Node 测试，合计 **577 项**；第 7 项 `test_e2e.js` 启动真实 Electron 窗口驱动 UI，**177 项**；第 8 项 `smoke_packed.js` 直连真实 exe 的调试端口，**44 项**。总计 **798 项，零失败**。
 >
 > 注意：`test_xlsx.js` 与 `test_e2e_import.js` 依赖 `test_fixture.xlsx`，需先执行上面的 `python test_make_xlsx.py test_fixture.xlsx` 生成。
 >
@@ -379,7 +381,7 @@ node smoke_packed.js
 
 ```
 D:\project\fixture\
-├── v4.0.0\                 ← 版本子文件夹（以版本号命名）
+├── v4.0.1\                 ← 版本子文件夹（以版本号命名）
 │   ├── 工装夹具管理程序.exe    ← 双击直接运行
 │   ├── *.dll / locales\ / resources\ ...
 │   └── fixture-data.json             ← 运行后自动生成，数据同目录落盘
@@ -389,7 +391,7 @@ D:\project\fixture\
 发布步骤（升版时）：
 1. 改源码 + 同步版本号标记（见 `修改日志.md` 顶部规则）。
 2. 构建后 `release_v21/` 下会生成 `win-unpacked`。
-3. 将 `win-unpacked` **重命名**为 `v<语义化版本号>`（如 `v4.0.0`）。
+3. 将 `win-unpacked` **重命名**为 `v<语义化版本号>`（如 `v4.0.1`）。
 4. 若需保留旧数据，把上一版本的 `fixture-data.json` 复制进新版本目录（v4 首启会自动迁移）。
 
 ## 常见问题
