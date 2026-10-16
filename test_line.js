@@ -136,8 +136,8 @@ const fx2 = store.add('fixtures', {
 });
 ok(store.getAll('fixtures').length === 2, '同实物编号写入 2 套夹具（允许重复）');
 const codes = store.getAll('fixtures').map((f) => String(f.code));
-ok(codes.every((c) => /^\d{4}$/.test(c)), '桥梁编号为 4 位纯数字且自动分配', codes);
-ok(new Set(codes).size === 2, '桥梁编号唯一');
+ok(codes.every((c) => /^\d{4}$/.test(c)), '序号为 4 位纯数字且自动分配', codes);
+ok(new Set(codes).size === 2, '序号唯一');
 
 /* 数量为派生值，不落库 */
 ok(store.stockCountBySerial('DH40MC-921-001-001') === 2, '在库套数 = 按实物编号分组计数', store.stockCountBySerial('DH40MC-921-001-001'));
@@ -324,7 +324,7 @@ ok(svg.includes('<line'), '直线形使用折线轨迹');
 const svgNoSerial = M.renderLineDiagram(lineObj, M.buildStationRows(svgStations, [
   { id: 1, code: '2001', serialNo: '', name: '焊接夹具', status: 'stocked', lineModels: [], lines: [1], stations: [20] }
 ]));
-ok(svgNoSerial.includes('#2001'), '无实物编号时徽标退回「#桥梁编号」', svgNoSerial.match(/ld-code[^>]*>([^<]*)</g));
+ok(svgNoSerial.includes('#2001'), '无实物编号时徽标退回「#序号」', svgNoSerial.match(/ld-code[^>]*>([^<]*)</g));
 const svgU = M.renderLineDiagram({ name: 'L2', type: 'u' }, rowsForSvg);
 ok(svgU.includes('<polyline'), 'U型使用折线轨迹');
 ok(svgU.includes('U型产线示意图'), 'U型图标题含形态名');
@@ -352,7 +352,7 @@ const idxAlias = M.mapLineImportHeader(['产线', '形态', '工位号', '顺序
 ok(idxAlias.line === 0 && idxAlias.lineType === 1 && idxAlias.station === 2 && idxAlias.seq === 3 && idxAlias.fixtureSerial === 4,
   '别名表头映射正确（编号 → 夹具编号/实物编号）', idxAlias);
 ok(M.mapLineImportHeader(['实物编号']).fixtureSerial === 0, '「实物编号」→ fixtureSerial');
-ok(M.mapLineImportHeader(['夹具编号']).fixtureSerial === 0, '「夹具编号」→ fixtureSerial（语义已反转，不再指桥梁号）');
+ok(M.mapLineImportHeader(['夹具编号']).fixtureSerial === 0, '「夹具编号」→ fixtureSerial（语义已反转，不再指序号）');
 ok(M.mapLineImportHeader(['线体（必填）']).line === 0, '括号注释被忽略');
 ok(M.mapLineImportHeader([]).line === undefined, '空表头安全');
 
@@ -384,7 +384,7 @@ ok(plan.newStations.find((s) => s.name === '压装工位').seq === 20, '工位�
 ok(plan.appends.length === 4, '4 条追加关联（SN-A×2 / SN-B×1 / SN-C×1）', plan.appends.map((a) => a.serialNo + '@' + a.stationName));
 ok(plan.appends[0].addLine === true && plan.appends[0].addStation === true, '首行：产线与工位都要新增', plan.appends[0]);
 ok(plan.appends[1].addLine === false && plan.appends[1].addStation === true, '同夹具第二行：产线已在计划内（虚拟状态），只新增工位', plan.appends[1]);
-ok(plan.appends.every((a) => typeof a.fixtureId === 'number' && a.code), '每条追加项带 fixtureId 与桥梁编号');
+ok(plan.appends.every((a) => typeof a.fixtureId === 'number' && a.code), '每条追加项带 fixtureId 与序号');
 ok(plan.skipped.length === 1 && plan.skipped[0].row === 5 && /空缺/.test(plan.skipped[0].reason),
   '跳过第 5 行（工位为空，1-based 行号）', plan.skipped);
 
@@ -565,7 +565,7 @@ ok(M.buildLineImportPlan([['线体', '工位', '夹具编号'], [null, null, nul
   ok(r2.lines === 1 && r2.stations === 0, 'removeFixtureLine 摘产线并连带摘其工位', r2);
   let notFound = null;
   try { store.removeFixtureLine('9999', il); } catch (e) { notFound = e; }
-  ok(notFound && notFound.name === 'NotFoundError', '对不存在的桥梁编号调用撤销接口 → NotFoundError', notFound && notFound.name);
+  ok(notFound && notFound.name === 'NotFoundError', '对不存在的序号调用撤销接口 → NotFoundError', notFound && notFound.name);
 
   /* ============ J. 按机种查询 ============ */
   section('J. buildProdQueryRows 按机种查询（机种 → 夹具 → 产线 1 跳推导）');

@@ -3,7 +3,7 @@
  * test_store.js — store.js 数据层功能测试（纯 Node，无需 Electron）v4.0.0
  * 运行：node test_store.js
  *
- * v4.0.0 覆盖：桥梁编号自动分配、实物编号（可重复）、产线/工位扁平关联强校验、
+ * v4.0.0 覆盖：序号自动分配、实物编号（可重复）、产线/工位扁平关联强校验、
  *   出库冻结库位 / 回库可改库位、撤销接口、级联删除重写、机种字典保护与重命名写穿、
  *   派生数量、v3.0.x → v4.0.0 数据迁移。
  * ============================================================ */
@@ -48,13 +48,13 @@ function fix(extra) {
 }
 
 /* ---------- 1. 建档 ---------- */
-section('1. 夹具建档（桥梁编号自动 / 实物编号手动）');
+section('1. 夹具建档（序号自动 / 实物编号手动）');
 store.open();
 const id1 = store.addFixture(fix());
 ok('建档返回 id', typeof id1 === 'number' && id1 > 0, 'id=' + id1);
 
 let f1 = store.getAll('fixtures').find((f) => f.id === id1);
-ok('桥梁编号自动分配为 1001', f1.code === '1001', f1.code);
+ok('序号自动分配为 1001', f1.code === '1001', f1.code);
 ok('实物编号按输入保存', f1.serialNo === 'DH40MC-921-001-001', f1.serialNo);
 ok('初始状态 stocked', f1.status === 'stocked', f1.status);
 ok('计数归零', f1.totalOutCount === 0 && f1.totalReturnCount === 0 && f1.repairCount === 0);
@@ -77,8 +77,8 @@ ok('机种超过 7 个被拒绝', throws(() => store.addFixture(fix({ lineModels
 ok('库位空被拒绝', throws(() => store.addFixture(fix({ location: '' })), '库位号需为 4 段式'));
 ok('库位非 4 段被拒绝', throws(() => store.addFixture(fix({ location: 'A1-03' })), '库位号需为 4 段式'));
 ok('库位超 20 字符被拒绝', throws(() => store.addFixture(fix({ location: 'ZP12345678901-U-12-15' })), '库位号需为 4 段式'));
-ok('重复桥梁编号被拒绝', throws(() => store.addFixture(fix({ code: '1001' })), '编号已存在'));
-ok('指定未占用的桥梁编号可用', (() => { const i = store.addFixture(fix({ code: '3001', serialNo: 'S-1' })); return store.getAll('fixtures').find((f) => f.id === i).code === '3001'; })());
+ok('重复序号被拒绝', throws(() => store.addFixture(fix({ code: '1001' })), '编号已存在'));
+ok('指定未占用的序号可用', (() => { const i = store.addFixture(fix({ code: '3001', serialNo: 'S-1' })); return store.getAll('fixtures').find((f) => f.id === i).code === '3001'; })());
 
 section('1c. 编号分配填补空洞');
 store.addFixture(fix({ serialNo: 'S-2' }));
@@ -97,7 +97,7 @@ ok('出库次数 +1', f1.totalOutCount === 1, String(f1.totalOutCount));
 ok('出库不改动库位（冻结）', f1.location === 'ZP1-U-1-1', f1.location);
 
 let r1 = store.getAll('fixTransactions').find((x) => x.id === txOut1);
-ok('流水记录桥梁编号正确', r1.fixtureCode === '1001', r1.fixtureCode);
+ok('流水记录序号正确', r1.fixtureCode === '1001', r1.fixtureCode);
 ok('流水快照实物编号', r1.fixtureSerialNo === 'DH40MC-921-001-001', r1.fixtureSerialNo);
 ok('流水快照库位 from/to', r1.fromLocation === 'ZP1-U-1-1' && r1.toLocation === 'ZP1-U-1-1', r1.fromLocation + '->' + r1.toLocation);
 ok('重复出库被拒绝（不在库）', throws(() => store.addFixTransaction({ fixtureId: id1, type: 'out', operator: '李四', time: t }), '不在库'));
@@ -242,8 +242,8 @@ section('10. 校验函数');
 ['', 'A1-03', 'ZP1-U-1', 'ZP1U11', 'ZP1-U-1-1-1'].forEach((l) => ok('非法库位 ' + JSON.stringify(l), !store.isValidLocation(l)));
 ['DH40MC-921-001-001', 'A-1', '12345'].forEach((s) => ok('合法实物编号 ' + s, store.isValidSerialNo(s)));
 ['', 'A|B', 'X\nY'].forEach((s) => ok('非法实物编号 ' + JSON.stringify(s), !store.isValidSerialNo(s)));
-['1001', '0001', '9999'].forEach((c) => ok('合法桥梁编号 ' + c, store.isBridgeCode(c)));
-['201', '20001', '20A1', '', null].forEach((c) => ok('非法桥梁编号 ' + JSON.stringify(c), !store.isBridgeCode(c)));
+['1001', '0001', '9999'].forEach((c) => ok('合法序号 ' + c, store.isBridgeCode(c)));
+['201', '20001', '20A1', '', null].forEach((c) => ok('非法序号 ' + JSON.stringify(c), !store.isBridgeCode(c)));
 ok('编号归一化忽略连字符', store.codeEq('SPMS1|1-0-0-1', '1001'));
 ok('机种名校验长度上限', store.isValidProductionName('a'.repeat(30)) && !store.isValidProductionName('a'.repeat(31)));
 

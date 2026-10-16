@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 工装夹具管理程序主进程（v4.0.0）
+ * main.js — 工装夹具管理程序主进程（v4.0.1）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -32,7 +32,7 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 700,
-    title: '工装夹具管理程序 v4.0.0',
+    title: '工装夹具管理程序 v4.0.1',
     backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

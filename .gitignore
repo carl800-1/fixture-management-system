@@ -21,3 +21,15 @@ fixture-data.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 本地版本快照文件夹（含大体积打包 exe 与运行时，不入库；打包由 CI 完成）
+/1.8.0/
+/2.1.0/
+/2.2/
+/3.0.1/
+/4.0.0/
+/4.0.1/
+/FMS-*-win-x64/
+
+# 工作区数据
+/.workbuddy/

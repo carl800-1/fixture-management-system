@@ -441,7 +441,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       ok('落盘无 quantity 字段（数量为派生值）', (db.fixtures || []).every((f) => f.quantity === undefined));
       const f = (db.fixtures || []).find((x) => x.serialNo === 'SMOKE-921-001-001');
       ok('新夹具已写入 JSON', !!f, JSON.stringify((db.fixtures || []).map((x) => x.serialNo)));
-      ok('桥梁编号为 4 位纯数字', f && /^\d{4}$/.test(f.code), f && f.code);
+      ok('序号为 4 位纯数字', f && /^\d{4}$/.test(f.code), f && f.code);
       ok('夹具携带 lines 数组', f && Array.isArray(f.lines) && f.lines.length === 1, f && JSON.stringify(f.lines));
       ok('夹具携带 stations 数组', f && Array.isArray(f.stations) && f.stations.length === 1, f && JSON.stringify(f.stations));
       ok('机种存名称数组', f && Array.isArray(f.lineModels) && f.lineModels.includes('冒烟机种X'), f && JSON.stringify(f.lineModels));

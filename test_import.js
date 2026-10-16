@@ -3,7 +3,7 @@
  * test_import.js — 验证 app.js 的「夹具批量导入」纯函数（v4.0.0）
  *
  * v4.0.0 语义变化：
- *   · 表格**不再提供**桥梁编号 code（一律系统自动分配）
+ *   · 表格**不再提供**序号 code（一律系统自动分配）
  *   · 实物编号 serialNo 为必填、允许重复
  *   · 库位 location 为必填且须 4 段式
  *   · 产线 / 工位按名称引用，**必须已在产线配置建档**（不自动补建）
@@ -89,7 +89,7 @@ ok(M.normalizeHeader('\uFEFF实物编号') === '实物编号', '剥离 BOM');
 /* ---------- 2. 表头映射 · 标准顺序（v4 的 14 列模板） ---------- */
 section('[表头映射 · 标准]');
 ok(M.FIX_IMPORT_HEADERS.length === 14, '模板为 14 列', M.FIX_IMPORT_HEADERS.length);
-ok(M.FIX_IMPORT_HEADERS[0] === '实物编号' && M.FIX_IMPORT_HEADERS[9] === '分类'
+ok(M.FIX_IMPORT_HEADERS[0] === '夹具编号' && M.FIX_IMPORT_HEADERS[9] === '分类'
   && M.FIX_IMPORT_HEADERS[10] === '库位' && M.FIX_IMPORT_HEADERS[11] === '产线'
   && M.FIX_IMPORT_HEADERS[12] === '工位', '模板列序符合定稿',
   M.FIX_IMPORT_HEADERS.join('|'));
@@ -146,7 +146,7 @@ p = M.parseImportRow(['SN-1', '', 'M', 'ZP1-U-1-1', 'L1', '工位A'], idxV);
 ok(!p.ok && /名称为空/.test(p.reason), '名称为空被拒绝', p.reason);
 
 p = M.parseImportRow(['', '夹具E', 'M', 'ZP1-U-1-1', 'L1', '工位A'], idxV);
-ok(!p.ok && /实物编号/.test(p.reason), '实物编号为空被拒绝', p.reason);
+ok(!p.ok && /夹具编号/.test(p.reason), '夹具编号为空被拒绝', p.reason);
 
 p = M.parseImportRow(['SN-1', '夹具E', 'M', '', 'L1', '工位A'], idxV);
 ok(!p.ok && /库位/.test(p.reason), '库位为空被拒绝', p.reason);
@@ -186,31 +186,32 @@ const fixRows = [
   ['实物编号', '名称', '机种名称1', '分类', '库位', '产线', '工位', '备注'],
   ['SN-OLD', '追加另一条产线', 'MODEL-A', '冲压', 'ZP1-U-1-1', 'L2 U型线', '工位一', 'ok'],
   ['SN-NEW', '全新夹具', 'MODEL-B', '焊接', 'ZP1-U-2-1', 'L1 总装线', '上料工位', 'ok'],
-  ['SN-OLD', '产线未建档', 'MODEL-C', '装配', 'ZP1-U-3-1', 'LX 未知线', '工位X', '产线不存在'],
+  ['SN-OLD', '产线未建档', 'MODEL-C', '装配', 'ZP1-U-3-1', 'LX 未知线', '工位X', '产线未建档→自动补建'],
   ['', '实物编号为空', 'MODEL-D', '装配', 'ZP1-U-4-1', 'L1 总装线', '上料工位', '必填缺失'],
-  ['SN-OLD', '工位不属该产线', 'MODEL-E', '装配', 'ZP1-U-5-1', 'L1 总装线', '工位一', '工位归属错误'],
+  ['SN-OLD', '工位不属该产线', 'MODEL-E', '装配', 'ZP1-U-5-1', 'L1 总装线', '工位一', '工位未在该产线下→自动补建'],
   ['SN-DUP', '重号记录', 'MODEL-F', '冲压', 'ZP1-U-6-1', 'L1 总装线', '压装工位', '重号提示'],
   ['SN-OLD', '', 'MODEL-G', '冲压', 'ZP1-U-7-1', 'L1 总装线', '上料工位', '名称为空']
 ];
 const fxPlan = M.buildImportPlan(fixRows, ctxFix);
 ok(fxPlan.ok, '生成夹具导入计划成功', fxPlan.error);
-ok(fxPlan.plan.length === 3, '3 条有效数据', fxPlan.plan.length);
-ok(fxPlan.skipped.length === 4, '4 条被跳过', fxPlan.skipped.length);
+ok(fxPlan.plan.length === 5, '5 条有效数据（未建档产线/工位改为自动补建，不再整行跳过）', fxPlan.plan.length);
+ok(fxPlan.skipped.length === 2, '2 条被跳过（仅必填缺失 / 名称为空）', fxPlan.skipped.length);
 const fxSkip = fxPlan.skipped.map((s) => s.reason).join(' | ');
-ok(/产线「LX 未知线」未建档/.test(fxSkip), '未建档产线被跳过', fxSkip);
-ok(/实物编号为空或格式不合法/.test(fxSkip), '实物编号缺失被跳过', fxSkip);
-ok(/工位「工位一」不属于已选产线/.test(fxSkip), '工位归属错误被跳过', fxSkip);
+ok(/夹具编号为空或格式不合法/.test(fxSkip), '夹具编号缺失被跳过', fxSkip);
 ok(/名称为空/.test(fxSkip), '名称为空被跳过', fxSkip);
+ok(fxPlan.plan._autoLines.indexOf('LX 未知线') >= 0, '未建档产线被登记为待自动补建', fxPlan.plan._autoLines);
+ok(fxPlan.plan._autoStations.some((s) => s.lineName === 'LX 未知线' && s.name === '工位X'), '未建档产线下的工位被登记为待自动补建', fxPlan.plan._autoStations);
+ok(fxPlan.plan._autoStations.some((s) => s.lineName === 'L1 总装线' && s.name === '工位一'), '跨产线重名工位自动补建到本行产线', fxPlan.plan._autoStations);
 
 const fxByName = {};
 fxPlan.plan.forEach((p) => { fxByName[p.fixture.name] = p; });
-ok(fxByName['追加另一条产线'].fixture.lines.join(',') === '22'
-  && fxByName['追加另一条产线'].fixture.stations.join(',') === '221',
-  '产线 / 工位名称被正确反查为 id', fxByName['追加另一条产线'].fixture);
+ok(fxByName['追加另一条产线'].fixture.lineNames.join(',') === 'L2 U型线'
+  && fxByName['追加另一条产线'].fixture.stationNames.join(',') === '工位一',
+  '产线 / 工位名称原样保留供落库时解析', fxByName['追加另一条产线'].fixture);
 ok(fxByName['全新夹具'].fixture.serialNo === 'SN-NEW', '实物编号原样保留');
 ok(typeof fxByName['重号记录'].dupHint === 'string' && /已有 2 套/.test(fxByName['重号记录'].dupHint),
   '重号给出持有量提示', fxByName['重号记录'].dupHint);
-ok(fxByName['重号记录'].fixture.code === undefined, '桥梁编号不由表格提供（系统分配）',
+ok(fxByName['重号记录'].fixture.code === undefined, '序号不由表格提供（系统分配）',
   fxByName['重号记录'].fixture.code);
 
 /* ---------- 7. buildLineImportPlan（产线导入）· 端到端 ---------- */

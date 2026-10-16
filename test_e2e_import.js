@@ -7,7 +7,7 @@
  *
  * v4.0.0 变更：夹具导入表头 9 列 → 14 列（实物编号 / 名称 / 机种名称1~7 /
  *   分类 / 库位 / 产线 / 工位 / 备注）；`产线 / 工位` 为**必填**（建档强校验
- *   「至少 1 条产线 1 个工位」）；桥梁编号由 store 自动分配，导入不再处理编号；
+ *   「至少 1 条产线 1 个工位」）；序号由 store 自动分配，导入不再处理编号；
  *   `qrToken` 改为派生值不再落库。
  *
  * 运行：node test_e2e_import.js
@@ -89,23 +89,24 @@ sandbox.state.fixtures = [{ id: 99, code: '1001', serialNo: 'DH40MC-921-001-001'
 
 const plan = M.buildImportPlan(xrows);
 ok(plan.ok, '生成导入计划成功', plan.error);
-ok(plan.plan.length === 3, '3 条有效行（行 2/3/4）', plan.plan.length);
-ok(plan.skipped.length === 2, '2 条被跳过（库位非法 + 产线未建档）', plan.skipped);
+ok(plan.plan.length === 4, '4 条有效行（行 2/3/4/6：未建档产线改为自动补建，不再整行跳过）', plan.plan.length);
+ok(plan.skipped.length === 1, '1 条被跳过（仅库位非法）', plan.skipped);
 ok(plan.skipped[0].row === 5 && /库位/.test(plan.skipped[0].reason), '第 5 行按库位非法跳过', plan.skipped[0]);
-ok(plan.skipped[1].row === 6 && /幽灵线/.test(plan.skipped[1].reason), '第 6 行按产线未建档跳过', plan.skipped[1]);
+ok(plan.plan._autoLines.indexOf('幽灵线') >= 0, '未建档产线「幽灵线」被登记为待自动补建', plan.plan._autoLines);
+ok(Array.isArray(plan.plan._autoStations) && plan.plan._autoStations.some((s) => s.lineName === '幽灵线'), '未建档产线下的工位被登记为待自动补建', plan.plan._autoStations);
 ok(plan.skipped.every((s) => s.row !== 7), '全空行（第 7 行）不产生跳过记录（静默过滤）');
 ok(plan.hasSerialColumn === true && plan.hasLineColumn === true && plan.hasStationColumn === true,
   'hasSerialColumn / hasLineColumn / hasStationColumn 均为 true', [plan.hasSerialColumn, plan.hasLineColumn, plan.hasStationColumn]);
 
 const names = plan.plan.map((p) => p.fixture.name);
-ok(JSON.stringify(names) === JSON.stringify(['定位销压板', '焊接夹具', '装配工装']),
-  '三条夹具名称按顺序解析正确', names);
+ok(JSON.stringify(names) === JSON.stringify(['定位销压板', '焊接夹具', '装配工装', '产线缺失夹具']),
+  '四条夹具名称按顺序解析正确（含自动补建的幽灵线行）', names);
 
 // 实物编号（主搜索键）不再处理「自动分配」，原样保留
 ok(plan.plan[0].fixture.serialNo === 'DH40MC-921-001-001', '第 1 条实物编号原样保留', plan.plan[0].fixture.serialNo);
 ok(plan.plan[1].fixture.serialNo === 'XXK-D10VG-002', '第 2 条实物编号原样保留', plan.plan[1].fixture.serialNo);
 ok(plan.plan[0].fixture.code === undefined && plan.plan[0].autoCode === undefined,
-  '导入计划不产桥梁编号（由 store 自动分配）', Object.keys(plan.plan[0]));
+  '导入计划不产序号（由 store 自动分配）', Object.keys(plan.plan[0]));
 
 // 机种 / 分类 / 库位 / 产线 / 工位 / 备注
 ok(JSON.stringify(plan.plan[0].fixture.lineModels) === JSON.stringify(['MODEL-A', 'MODEL-B']),
@@ -120,12 +121,12 @@ ok(plan.plan[0].fixture.remark === '用于冲压定位，含 & <特殊字符>',
   '第 1 条备注 XML 实体正确解码', plan.plan[0].fixture.remark);
 ok(plan.plan[1].fixture.remark === 'inline 字符串备注', '第 2 条 inlineStr 备注', plan.plan[1].fixture.remark);
 ok(plan.plan[2].fixture.category === '装配', '第 3 条分类 = 装配', plan.plan[2].fixture.category);
-ok(JSON.stringify(plan.plan[0].fixture.lines) === JSON.stringify([1]), '第 1 条产线解析为 L1 的 id', plan.plan[0].fixture.lines);
-ok(JSON.stringify(plan.plan[0].fixture.stations) === JSON.stringify([11]), '第 1 条工位解析为「上料工位」的 id', plan.plan[0].fixture.stations);
-ok(JSON.stringify(plan.plan[1].fixture.stations) === JSON.stringify([12]), '第 2 条工位为「压装工位」', plan.plan[1].fixture.stations);
-ok(JSON.stringify(plan.plan[2].fixture.lines) === JSON.stringify([1, 2]), '第 3 条多产线（逗号分隔）解析为 2 条', plan.plan[2].fixture.lines);
-ok(JSON.stringify(plan.plan[2].fixture.stations) === JSON.stringify([11, 21]),
-  '第 3 条「上料工位」跨产线重名，两条产线下的同名工位都命中', plan.plan[2].fixture.stations);
+ok(plan.plan[0].fixture.lineNames.join(',') === 'L1 总装线', '第 1 条产线名原样保留', plan.plan[0].fixture.lineNames);
+ok(plan.plan[0].fixture.stationNames.join(',') === '上料工位', '第 1 条工位名原样保留', plan.plan[0].fixture.stationNames);
+ok(plan.plan[1].fixture.stationNames.join(',') === '压装工位', '第 2 条工位为「压装工位」', plan.plan[1].fixture.stationNames);
+ok(plan.plan[2].fixture.lineNames.join(',') === 'L1 总装线,L2 U型线', '第 3 条多产线（逗号分隔）保留为 2 个产线名', plan.plan[2].fixture.lineNames);
+ok(plan.plan[2].fixture.stationNames.join(',') === '上料工位',
+  '第 3 条工位名原样保留（落库时再按各产线创建同名工位）', plan.plan[2].fixture.stationNames);
 
 // 重号提示（实物编号允许重复，只提示不拦截）
 ok(/已有 1 套/.test(plan.plan[0].dupHint), '第 1 条给出重号提示', plan.plan[0].dupHint);
@@ -137,7 +138,7 @@ ok(noLine.ok === false && /模板缺少「产线」列/.test(noLine.error), '缺
 const noSt = M.buildImportPlan([['实物编号', '名称', '库位', '产线'], ['S1', 'N', 'ZP1-U-1-1', 'L']]);
 ok(noSt.ok === false && /模板缺少「工位」列/.test(noSt.error), '缺「工位」列 → 报错', noSt.error);
 const noSn = M.buildImportPlan([['名称', '库位', '产线', '工位'], ['N', 'ZP1-U-1-1', 'L', 'W']]);
-ok(noSn.ok === false && /模板缺少「实物编号」列/.test(noSn.error), '缺「实物编号」列 → 报错', noSn.error);
+ok(noSn.ok === false && /模板缺少「夹具编号」列/.test(noSn.error), '缺「夹具编号」列 → 报错', noSn.error);
 
 /* ---- 4. 真正落库（临时目录，不污染真实数据） ---- */
 console.log('\n[真实落库]');
@@ -154,13 +155,26 @@ const stIdByKey = new Map();
 [['上料工位', 'L1 总装线', 10], ['压装工位', 'L1 总装线', 20], ['上料工位', 'L2 U型线', 10]].forEach(([n, ln, seq]) => {
   stIdByKey.set(n + '\u0000' + ln, store.add('stations', { lineId: lineIdByName.get(ln), name: n, seq }));
 });
-// ctx id → 名称 的映射（计划里带的是沙箱 ctx 的 id）
-const ctxLineName = new Map(sandbox.state.lines.map((l) => [l.id, l.name]));
-const ctxStInfo = new Map(sandbox.state.stations.map((s) => [s.id, { name: s.name, lineName: ctxLineName.get(s.lineId) }]));
+// 模拟 confirmImportPlan：先按导入计划补建缺失的产线 / 工位（同名复用），再按名称解析为 id 落库
+const ensureLine = (n) => {
+  if (!lineIdByName.has(n)) lineIdByName.set(n, store.add('lines', { name: n, type: 'linear', remark: '导入自动建档' }));
+  return lineIdByName.get(n);
+};
+const ensureStation = (sn, ln) => {
+  const key = sn + '\u0000' + ln;
+  if (!stIdByKey.has(key)) stIdByKey.set(key, store.add('stations', { lineId: ensureLine(ln), name: sn, seq: null, remark: '导入自动建档' }));
+  return stIdByKey.get(key);
+};
 
 let added = 0;
 for (const p of plan.plan) {
   const f = p.fixture;
+  const lineIds = [];
+  f.lineNames.forEach((n) => { const id = ensureLine(n); if (id != null && !lineIds.includes(id)) lineIds.push(id); });
+  const stationIds = [];
+  f.lineNames.forEach((ln) => {
+    f.stationNames.forEach((sn) => { const id = ensureStation(sn, ln); if (id != null && !stationIds.includes(id)) stationIds.push(id); });
+  });
   store.addFixture({
     serialNo: f.serialNo,
     name: f.name,
@@ -168,20 +182,17 @@ for (const p of plan.plan) {
     category: f.category,
     location: f.location,
     remark: f.remark,
-    lines: f.lines.map((id) => lineIdByName.get(ctxLineName.get(id))),
-    stations: f.stations.map((id) => {
-      const info = ctxStInfo.get(id);
-      return stIdByKey.get(info.name + '\u0000' + info.lineName);
-    })
+    lines: lineIds,
+    stations: stationIds
   });
   added++;
 }
-ok(added === 3, '写入 3 条成功', added);
+ok(added === 4, '写入 4 条成功（含未建档产线行）', added);
 
 const all = store.getAll('fixtures');
-ok(all.length === 3, '库中共 3 条', all.length);
-ok(all.every((f) => /^\d{4}$/.test(String(f.code))), '桥梁编号由 store 自动分配为 4 位纯数字', all.map((f) => f.code));
-ok(new Set(all.map((f) => String(f.code))).size === 3, '桥梁编号互不相同');
+ok(all.length === 4, '库中共 4 条（含自动补建的幽灵线行）', all.length);
+ok(all.every((f) => /^\d{4}$/.test(String(f.code))), '序号由 store 自动分配为 4 位纯数字', all.map((f) => f.code));
+ok(new Set(all.map((f) => String(f.code))).size === all.length, '序号互不相同（各夹具独立分配）');
 
 const bySerial = {};
 all.forEach((f) => { bySerial[f.serialNo] = f; });
@@ -193,7 +204,7 @@ ok(!!f1 && f1.lineModels.length === 2 && f1.lineModels[1] === 'MODEL-B', '机种
 ok(!!f1 && f1.lines.length === 1 && f1.stations.length === 1, '产线/工位已落库', f1 && [f1.lines, f1.stations]);
 ok(!!f1 && f1.location === 'ZP1-U-1-1', '库位落库正确');
 ok(!!f1 && f1.qrToken === undefined, 'qrToken 不再落库（改为渲染层派生值）', f1 && f1.qrToken);
-ok(store.findFixtureByCode(f1.code) !== null, 'findFixtureByCode 能按桥梁编号反查');
+ok(store.findFixtureByCode(f1.code) !== null, 'findFixtureByCode 能按序号反查');
 ok(store.stockCountBySerial('DH40MC-921-001-001') === 1, '在库套数为派生值（1 套）', store.stockCountBySerial('DH40MC-921-001-001'));
 
 const f3 = bySerial['DH40MC-921-001-002'];
@@ -215,10 +226,10 @@ ok(store.stockCountBySerial('DH40MC-921-001-001', 'ZP1-U-1-9') === 1, '按「实
 /* 重跑计划：应给出「已有 2 套」的重号提示 */
 sandbox.state.fixtures = store.getAll('fixtures');
 const planAgain = M.buildImportPlan(xrows);
-ok(planAgain.ok && planAgain.plan.length === 3, '二次导入计划仍 3 条', planAgain.error);
+ok(planAgain.ok && planAgain.plan.length === 4, '二次导入计划仍 4 条', planAgain.error);
 ok(/已有 2 套/.test(planAgain.plan[0].dupHint), '二次导入重号提示更新为 2 套', planAgain.plan[0].dupHint);
 
-/* 桥梁编号重复保护（store 层） */
+/* 序号重复保护（store 层） */
 let threw = false;
 try {
   store.addFixture({
@@ -226,7 +237,7 @@ try {
     location: 'ZP1-U-1-5', lines: [lineIdByName.get('L1 总装线')], stations: [stIdByKey.get('上料工位\u0000L1 总装线')]
   });
 } catch (e) { threw = /编号已存在/.test(e.message); }
-ok(threw, '重复桥梁编号被 store 层拒绝并抛出「编号已存在」');
+ok(threw, '重复序号被 store 层拒绝并抛出「编号已存在」');
 
 /* 建档强校验：无产线 / 无工位 直接拒绝 */
 let noLineErr = null, noStErr = null;
@@ -251,7 +262,7 @@ ok(csvPlan.plan[0].fixture.serialNo === 'CSV-SN-001', 'CSV 实物编号保留', 
 ok(csvPlan.plan[0].fixture.name === 'CSV夹具A', 'CSV 名称正确');
 ok(csvPlan.plan[1].fixture.serialNo === 'CSV-SN-002', 'CSV 第 2 条实物编号正确', csvPlan.ok ? csvPlan.plan[1].fixture.serialNo : null);
 ok(csvPlan.plan[1].fixture.remark === '', 'CSV 空备注正确为空串', csvPlan.ok ? csvPlan.plan[1].fixture.remark : null);
-ok(JSON.stringify(csvPlan.plan[0].fixture.stations) === JSON.stringify([11]), 'CSV 工位名同样能反查到 id', csvPlan.plan[0].fixture.stations);
+ok(csvPlan.plan[0].fixture.stationNames.join(',') === '上料工位', 'CSV 工位名原样保留', csvPlan.plan[0].fixture.stationNames);
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);

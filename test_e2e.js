@@ -312,8 +312,8 @@ async function main() {
 
   const db3 = readDb();
   ok('fixtures 落盘 4 条', db3.fixtures.length === 4, String(db3.fixtures.length));
-  ok('桥梁编号为 4 位纯数字', db3.fixtures.every((f) => /^\d{4}$/.test(String(f.code))), db3.fixtures.map((f) => f.code));
-  ok('桥梁编号互不相同', new Set(db3.fixtures.map((f) => String(f.code))).size === 4);
+  ok('序号为 4 位纯数字', db3.fixtures.every((f) => /^\d{4}$/.test(String(f.code))), db3.fixtures.map((f) => f.code));
+  ok('序号互不相同', new Set(db3.fixtures.map((f) => String(f.code))).size === 4);
   ok('每条夹具都落盘了 lines / stations 数组',
     db3.fixtures.every((f) => Array.isArray(f.lines) && f.lines.length >= 1 && Array.isArray(f.stations) && f.stations.length >= 1),
     db3.fixtures.map((f) => [f.lines, f.stations]));
@@ -328,7 +328,7 @@ async function main() {
   const codeOf = {};
   db3.fixtures.forEach((f) => { codeOf[f.location] = f.code; });
 
-  /* 编辑夹具：桥梁编号不可改，只有提示 */
+  /* 编辑夹具：序号不可改，只有提示 */
   const editRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     const card = $$('.fixture-card').find(c=>c.textContent.includes('SN-C-003'));
@@ -345,8 +345,8 @@ async function main() {
     out.closed = $('#modalOverlay').hidden === true;
     return out;
   })()`);
-  ok('编辑弹窗含实物编号输入但无桥梁编号输入', editRes.hasSerial === true && editRes.noCodeInput === true, JSON.stringify(editRes));
-  ok('编辑弹窗提示桥梁编号不可修改', editRes.tip === true);
+  ok('编辑弹窗含实物编号输入但无序号输入', editRes.hasSerial === true && editRes.noCodeInput === true, JSON.stringify(editRes));
+  ok('编辑弹窗提示序号不可修改', editRes.tip === true);
   ok('编辑弹窗标题显示实物编号', /SN-C-003/.test(editRes.title), editRes.title);
   ok('编辑保存后弹窗关闭', editRes.closed === true);
 
@@ -647,7 +647,7 @@ async function main() {
     out.hasCanvas=!!canvas;
     out.qrDrawn=!!canvas && canvas.width>0 && canvas.height>0;
     out.tokenShown=/SPMS1\\|\\d{4}/.test(modalText);
-    out.hasBridgeLabel=modalText.includes('桥梁编号');
+    out.hasBridgeLabel=modalText.includes('序号');
     out.hasDownload=!!btnByText('下载 PNG');
     out.hasPrint=!!btnByText('打印');
     out.modalTitle=(($('#modalTitle')||{}).textContent||'');
@@ -656,8 +656,8 @@ async function main() {
   ok('夹具卡片含「二维码」按钮', !qrRes.err, JSON.stringify(qrRes));
   ok('「批量打印标签」按钮存在', qrRes.hasBatch === true);
   ok('二维码弹窗打开并绘制二维码', qrRes.hasCanvas === true && qrRes.qrDrawn === true, JSON.stringify(qrRes));
-  ok('弹窗展示二维码内容 SPMS1|<桥梁编号>', qrRes.tokenShown === true);
-  ok('弹窗区分「实物编号」与「桥梁编号」两个概念', qrRes.hasBridgeLabel === true);
+  ok('弹窗展示二维码内容 SPMS1|<序号>', qrRes.tokenShown === true);
+  ok('弹窗区分「实物编号」与「序号」两个概念', qrRes.hasBridgeLabel === true);
   ok('二维码弹窗标题显示实物编号', /XXK-D10VG-002/.test(qrRes.modalTitle), qrRes.modalTitle);
   ok('「下载 PNG」「打印」按钮存在', qrRes.hasDownload === true && qrRes.hasPrint === true);
 
@@ -785,8 +785,8 @@ async function main() {
   ok('查询页可进入', lqRes.navOk === true, lqRes.navOk);
   ok('线体下拉 = 2 条线体 + 1 占位 = 3 项', lqRes.lineOptCount === 3, String(lqRes.lineOptCount));
   ok('v4：产品级联下拉已移除（无 #lq_product）', lqRes.hasProductSelect === false, String(lqRes.hasProductSelect));
-  ok('结果表为 7 列（工位名称/顺序/实物编号/桥梁号/名称/状态/备注）',
-    ['工位名称', '工位顺序', '实物夹具编号', '桥梁号', '夹具名称', '状态', '备注'].every((h) => lqRes.headText.includes(h)),
+  ok('结果表为 7 列（工位名称/顺序/实物编号/序号/名称/状态/备注）',
+    ['工位名称', '工位顺序', '实物夹具编号', '序号', '夹具名称', '状态', '备注'].every((h) => lqRes.headText.includes(h)),
     lqRes.headText);
   ok('L1 配置表渲染 3 行（上料工位 2 套 → 2 行，压装工位 1 套 → 1 行）', lqRes.rowsL1 === 3, String(lqRes.rowsL1));
   ok('表格显示实物夹具编号', lqRes.l1HasSerial === true);

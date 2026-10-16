@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v4.0.0 — 工装夹具管理程序数据层
+ * db.js v4.0.1 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '4.0.0';
+  const APP_VERSION = '4.0.1';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
@@ -156,8 +156,8 @@ const DB = (function () {
   function clearColl(name) { lsWrite(name, []); return Promise.resolve(); }
 
   function validateFixture(f) {
-    if (!isBridgeCode(f.code)) bad('桥梁编号必须是 4 位纯数字');
-    if (!isValidSerialNo(f.serialNo)) bad('请填写实物夹具编号（≤' + MAX_SERIAL_NO + ' 字符，不能含 | 或换行）');
+    if (!isBridgeCode(f.code)) bad('序号必须是 4 位纯数字');
+    if (!isValidSerialNo(f.serialNo)) bad('请填写夹具编号（≤' + MAX_SERIAL_NO + ' 字符，不能含 | 或换行）');
     if (!f.name) bad('请填写夹具名称');
     if (f.lineModels.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
     if (!f.lines.length) bad('请至少选择 1 条产线');

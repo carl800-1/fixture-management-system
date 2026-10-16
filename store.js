@@ -236,7 +236,7 @@ function setMeta(key, value) { load(); data.meta[key] = value; save(); }
 /* 建档前的业务校验（v4.0.0 强校验 7 条里的 5 条落在这里，UI 另有即时校验） */
 function validateFixture(f, opts) {
   const skipCode = !!(opts && opts.skipCode);
-  if (!skipCode && !isBridgeCode(f.code)) bad('桥梁编号必须是 4 位纯数字');
+  if (!skipCode && !isBridgeCode(f.code)) bad('序号必须是 4 位纯数字');
   if (!isValidSerialNo(f.serialNo)) bad('请填写实物夹具编号（≤' + MAX_SERIAL_NO + ' 字符，不能含 | 或换行）');
   if (!f.name || !String(f.name).trim()) bad('请填写夹具名称');
   const lms = Array.isArray(f.lineModels) ? f.lineModels.filter((x) => String(x).trim() !== '') : [];
