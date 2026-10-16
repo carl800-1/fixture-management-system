@@ -580,3 +580,91 @@ tbody tr.selected { background: var(--primary-soft); }
 .ld-name { font-size: 12px; fill: var(--text); }
 .ld-code { font-size: 11px; font-weight: 700; fill: var(--primary-dark); }
 .ld-code.ld-none { fill: #9ca3af; font-weight: 400; }
+
+/* ============================================================
+ * v4.0.0 新增：机种 chips、产线工位折叠扇区、派生数量合计、
+ *            机种分组视图、库位卡片计数、字段提示
+ * ============================================================ */
+
+/* ---------- 机种名称 chips ---------- */
+.chip-box {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  min-height: 34px; padding: 6px 8px; border: 1px dashed var(--border);
+  border-radius: 8px; background: #fafbfd; margin-bottom: 6px;
+}
+.chip-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px 2px 10px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary-dark);
+  font-size: 12px; font-weight: 600; line-height: 1.6;
+}
+.chip-x {
+  border: none; background: none; cursor: pointer; padding: 0 2px;
+  color: var(--primary-dark); font-size: 14px; line-height: 1; opacity: .7;
+}
+.chip-x:hover { opacity: 1; color: var(--danger); }
+.chip-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip-add select { min-width: 190px; }
+.chip-add input[type="text"] { flex: 1; min-width: 180px; }
+
+/* ---------- 产线工位折叠扇区 ---------- */
+.ls-box { border: 1px solid var(--border); border-radius: 8px; background: #fafbfd; padding: 10px; }
+.ls-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.ls-toolbar select { min-width: 220px; }
+.ls-list { display: flex; flex-direction: column; gap: 8px; }
+.ls-sec { border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden; }
+.ls-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; cursor: pointer; background: #f8fafc; user-select: none;
+}
+.ls-head:hover { background: var(--primary-soft); }
+.ls-caret { color: var(--muted); font-size: 12px; width: 12px; }
+.ls-count { font-size: 12px; color: var(--muted); }
+.ls-body { padding: 8px 12px 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+.ls-st {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: #fff; font-size: 13px; cursor: pointer;
+}
+.ls-st.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.ls-st.off { opacity: .5; cursor: not-allowed; }
+.ls-st span { font-size: 11px; color: var(--muted); }
+.ls-st.on span { color: var(--primary-dark); }
+
+/* ---------- 库位卡片：在库套数 ---------- */
+.loc-card { flex-direction: column; gap: 2px; }
+.loc-card-num {
+  font-size: 16px; font-weight: 700; color: var(--primary);
+  line-height: 1.1; letter-spacing: .3px;
+}
+.loc-card.unassigned .loc-card-num { color: var(--muted); }
+
+/* ---------- 夹具卡片 / 列表：实物编号优先 ---------- */
+.fixture-serial { font-size: 14px; font-weight: 700; color: var(--primary-dark); word-break: break-all; }
+.bridge-code { font-size: 11px; font-weight: 600; color: var(--muted); }
+
+/* ---------- 派生数量合计（夹具查询页第 ① 段） ---------- */
+.agg-head {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 8px 16px 0; font-size: 13px; color: var(--muted);
+}
+.agg-tag {
+  padding: 2px 10px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary-dark); font-size: 12px;
+}
+.agg-total td { background: #f8fafc; font-weight: 700; color: var(--text); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- 按机种分组视图 ---------- */
+.pq-group { margin: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pq-head {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+  padding: 9px 14px; background: #f8fafc; border-bottom: 1px solid var(--border);
+}
+.pq-head b { font-size: 14px; color: var(--primary-dark); }
+
+/* ---------- 字段必备标记与提示 ---------- */
+.req { color: var(--danger); font-weight: 700; margin-left: 2px; }
+.hint { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.hint-warn { color: var(--warn); font-weight: 600; }
+.tip.hint-warn { color: var(--warn); }

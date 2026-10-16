@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
-"""手工构造真实 .xlsx（zip + sharedStrings），用于验证 xlsx_reader.js 解析器。
-覆盖：共享字符串、inlineStr、纯数字、空单元格、多工作表。
+"""手工构造真实 .xlsx（zip + sharedStrings），用于验证 xlsx_reader.js 解析器
+与 v4.0.0 的夹具导入链路（14 列表头）。
+
+覆盖：
+  • 共享字符串 / inlineStr / 纯数字单元格 / 真·空单元格（缺 <c> 节点）/ 全空行
+  • 多工作表
+  • 有效行（2 机种 / 单机种 / 多机种合并成串 + 多产线）与无效行（库位非法 / 产线未建档）
+
+用法：python test_make_xlsx.py test_fixture.xlsx
 """
 import zipfile, sys, os
 
@@ -11,16 +18,18 @@ def col_letter(n):
         s = chr(65 + r) + s
     return s
 
-# 共享字符串表
-shared = [
-    '编号', '名称', '机种名称1', '机种名称2', '机种名称3', '机种名称4', '分类', '库位', '备注',  # 0-8
-    '定位销压板', '焊接夹具', '装配工装', 'MODEL-A', 'MODEL-B', 'MODEL-C',  # 9-14
-    '冲压', '焊接', '装配', 'A-01-01', 'B-02-03', 'C-03-05',  # 15-20
-    '用于冲压定位，含 & <特殊字符>', '第二页占位',  # 21-22
-]
+# 共享字符串池（动态登记，避免手数下标出错）
+_shared = []
+_si = {}
 
-def s_cell(ref, idx):
-    return f'<c r="{ref}" t="s"><v>{idx}</v></c>'
+def sid(text):
+    if text not in _si:
+        _si[text] = len(_shared)
+        _shared.append(text)
+    return _si[text]
+
+def s_cell(ref, text):
+    return f'<c r="{ref}" t="s"><v>{sid(text)}</v></c>'
 
 def n_cell(ref, val):
     return f'<c r="{ref}"><v>{val}</v></c>'
@@ -28,36 +37,61 @@ def n_cell(ref, val):
 def inline_cell(ref, text):
     return f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>'
 
-# 第 1 张表：表头 + 3 行数据
+def e_cell(ref):
+    """真·空单元格：sharedStrings 里的空串"""
+    return s_cell(ref, '')
+
+# v4.0.0 标准表头（14 列）
+HEADERS = ['实物编号', '名称',
+           '机种名称1', '机种名称2', '机种名称3', '机种名称4', '机种名称5', '机种名称6', '机种名称7',
+           '分类', '库位', '产线', '工位', '备注']
+
 rows_xml = []
-rows_xml.append('<row r="1">' + ''.join(s_cell(f'{col_letter(i+1)}1', i) for i in range(9)) + '</row>')
-# 行 2：2001 定位销压板 MODEL-A MODEL-B （机种3/4 真空） 冲压 A-01-01 带特殊字符
+rows_xml.append('<row r="1">' + ''.join(s_cell(f'{col_letter(i + 1)}1', h) for i, h in enumerate(HEADERS)) + '</row>')
+
+# 行 2：双机种；E2~I2 完全没有 <c> 节点（模拟 Excel 中真正的空单元格）；备注含 XML 实体
 rows_xml.append('<row r="2">' +
-    n_cell('A2', 2001) + s_cell('B2', 9) + s_cell('C2', 12) + s_cell('D2', 13) +
-    '' + '' +  # E2/F2 完全没有 <c> 节点，模拟 Excel 中真正的空单元格
-    s_cell('G2', 15) + s_cell('H2', 18) + s_cell('I2', 21) + '</row>')
-# 行 3：2002 焊接夹具（纯数字单元格 2002）
+    s_cell('A2', 'DH40MC-921-001-001') + s_cell('B2', '定位销压板') +
+    s_cell('C2', 'MODEL-A') + s_cell('D2', 'MODEL-B') +
+    s_cell('J2', '冲压') + s_cell('K2', 'ZP1-U-1-1') + s_cell('L2', 'L1 总装线') + s_cell('M2', '上料工位') +
+    s_cell('N2', '用于冲压定位，含 & <特殊字符>') + '</row>')
+
+# 行 3：单机种 + inlineStr 备注 + 真·空单元格（分类/机种2）
 rows_xml.append('<row r="3">' +
-    n_cell('A3', 2002) + s_cell('B3', 10) + s_cell('C3', 14) +
-    s_cell('D3', 0) + s_cell('E3', 0) + s_cell('F3', 0) +
-    s_cell('G3', 16) + s_cell('H3', 19) + inline_cell('I3', 'inline 字符串备注') + '</row>')
-# 行 3：编号留空（模拟自动分配），且中间有稀疏列 C3/E3 空着
+    s_cell('A3', 'XXK-D10VG-002') + s_cell('B3', '焊接夹具') + s_cell('C3', 'MODEL-C') +
+    e_cell('D3') + e_cell('E3') + e_cell('F3') +
+    s_cell('J3', '焊接') + s_cell('K3', 'ZP1-U-1-2') + s_cell('L3', 'L1 总装线') + s_cell('M3', '压装工位') +
+    inline_cell('N3', 'inline 字符串备注') + '</row>')
+
+# 行 4：单格内的多机种（斜杠分隔）+ inlineStr 机种 + 多产线（逗号分隔）
 rows_xml.append('<row r="4">' +
-    '' + s_cell('B4', 11) +
-    '' + s_cell('D4', 12) +
-    '' +
-    s_cell('F4', 13) + s_cell('G4', 17) + '</row>')
-# 行 5：全空行（应被过滤）
+    s_cell('A4', 'DH40MC-921-001-002') + s_cell('B4', '装配工装') +
+    inline_cell('C4', 'MODEL-D/MODEL-E') +
+    s_cell('J4', '装配') + s_cell('K4', 'ZP1-U-1-3') +
+    s_cell('L4', 'L1 总装线, L2 U型线') + s_cell('M4', '上料工位') + '</row>')
+
+# 行 5：库位用纯数字单元格 → 非 4 段式，应跳过
+rows_xml.append('<row r="5">' +
+    s_cell('A5', 'SN-BAD-001') + s_cell('B5', '库位错误夹具') + s_cell('C5', 'MODEL-F') +
+    s_cell('J5', '冲压') + n_cell('K5', 1234) + s_cell('L5', 'L1 总装线') + s_cell('M5', '上料工位') + '</row>')
+
+# 行 6：产线未建档 → 应跳过
+rows_xml.append('<row r="6">' +
+    s_cell('A6', 'SN-BAD-002') + s_cell('B6', '产线缺失夹具') + s_cell('C6', 'MODEL-G') +
+    s_cell('J6', '焊接') + s_cell('K6', 'ZP1-U-1-4') + s_cell('L6', '幽灵线') + s_cell('M6', '上料工位') + '</row>')
+
+# 行 7：全空行（无任何 <c> 节点）→ 应被解析为空数组并被导入逻辑过滤
+rows_xml.append('<row r="7"></row>')
 
 sheet1 = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{''.join(rows_xml)}</sheetData></worksheet>'''
 
 # 第 2 张表：只有表头
-sheet2 = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+sheet2 = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>第二页占位</t></is></c></row></sheetData></worksheet>'''
 
 shared_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{len(shared)}" uniqueCount="{len(shared)}">{''.join(f'<si><t>{s}</t></si>' for s in shared)}</sst>'''
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{len(_shared)}" uniqueCount="{len(_shared)}">{''.join(f'<si><t>{s}</t></si>' for s in _shared)}</sst>'''
 
 workbook = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="夹具清单" sheetId="1" r:id="rId1"/><sheet name="第二页" sheetId="2" r:id="rId2"/></sheets></workbook>'''
@@ -81,4 +115,4 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
     z.writestr('xl/worksheets/sheet1.xml', sheet1)
     z.writestr('xl/worksheets/sheet2.xml', sheet2)
 
-print(f'生成 {out} ({os.path.getsize(out)} bytes)')
+print(f'生成 {out} ({os.path.getsize(out)} bytes, sharedStrings={len(_shared)})')

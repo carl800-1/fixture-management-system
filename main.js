@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 工装夹具管理程序主进程（v3.0.1）
+ * main.js — 工装夹具管理程序主进程（v4.0.0）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -32,7 +32,7 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 700,
-    title: '工装夹具管理程序 v3.0.1',
+    title: '工装夹具管理程序 v4.0.0',
     backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -63,13 +63,19 @@ const handlers = {
   'fixture-getAll': () => store.getAll('fixtures'),
   'fixture-addTransaction': (e, tx) => store.addFixTransaction(tx),
   'fixture-getTransactions': () => store.getAll('fixTransactions'),
-  // 产线配置（v3.0.1）：线体 / 产品 / 工位 / 工位夹具绑定
-  // 线体、产品、工位的「增改查」走通用 db-add / db-put / db-getAll（集合名 lines/products/stations），
-  // 删除需级联清理子级，故走专用通道。
+  // 桥梁编号分配（4 位纯数字，1001 起顺延填补空洞）
+  'next-free-code': () => store.nextFreeCode(),
+  // 关联维护（v4.0.0）：线体 / 工位 / 机种 的「增改查」走通用 db-add / db-put / db-getAll
+  //（集合名 lines / stations / productions），删除需级联清理，故走专用通道。
   'line-del': (e, id) => store.delLine(id),
-  'product-del': (e, id) => store.delProduct(id),
   'station-del': (e, id) => store.delStation(id),
-  'set-station-fixtures': (e, p) => store.setStationFixtures(p),
+  'production-del': (e, id) => store.delProduction(id),
+  'production-rename': (e, p) => store.renameProduction(p.id, p.name),
+  /* 撤销接口：产线导入只做「追加」，误加需能撤销。
+   * 三者共用「编辑夹具」扇区的移除按钮代码路径。 */
+  'fixture-line-remove': (e, p) => store.removeFixtureLine(p.code, p.lineId),
+  'fixture-station-remove': (e, p) => store.removeFixtureStation(p.code, p.stationId),
+  'fixture-lines-removeBatch': (e, p) => store.removeFixtureLinesByBatch(p.codes, p.lineId),
   /* Excel 导入：渲染进程读不到 zlib，故由它把文件字节传进来，此处解 zip + 解析 XML。
    * 返回首张工作表的二维数组；出错时返回 { ok:false, error } 而非 reject，便于 UI 提示。 */
   'read-spreadsheet': (e, buf) => {

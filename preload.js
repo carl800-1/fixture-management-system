@@ -1,11 +1,11 @@
 'use strict';
 /* ============================================================
- * preload.js — 渲染进程桥（v3.0.1）
+ * preload.js — 渲染进程桥（v4.0.0）
  * ============================================================ */
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  version: '3.0.1',
+  version: '4.0.0',
   invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
   // 打印二维码标签：opts = { pageSize, copies }，返回 { ok, reason? }
   printLabels: (opts) => ipcRenderer.invoke('print-labels', opts),
@@ -20,9 +20,13 @@ contextBridge.exposeInMainWorld('api', {
   fixtureGetAll: () => ipcRenderer.invoke('fixture-getAll'),
   fixtureAddTransaction: (tx) => ipcRenderer.invoke('fixture-addTransaction', tx),
   fixtureGetTransactions: () => ipcRenderer.invoke('fixture-getTransactions'),
-  // 产线配置（v3.0.1）
+  nextFreeCode: () => ipcRenderer.invoke('next-free-code'),
+  // 关联维护（v4.0.0）
   lineDel: (id) => ipcRenderer.invoke('line-del', id),
-  productDel: (id) => ipcRenderer.invoke('product-del', id),
   stationDel: (id) => ipcRenderer.invoke('station-del', id),
-  setStationFixtures: (payload) => ipcRenderer.invoke('set-station-fixtures', payload)
+  productionDel: (id) => ipcRenderer.invoke('production-del', id),
+  productionRename: (payload) => ipcRenderer.invoke('production-rename', payload),
+  removeFixtureLine: (payload) => ipcRenderer.invoke('fixture-line-remove', payload),
+  removeFixtureStation: (payload) => ipcRenderer.invoke('fixture-station-remove', payload),
+  removeFixtureLinesByBatch: (payload) => ipcRenderer.invoke('fixture-lines-removeBatch', payload)
 });
