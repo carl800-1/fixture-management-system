@@ -204,6 +204,26 @@ ok('package.json 描述含 v' + ver, pkg.description.indexOf('v' + ver) >= 0);
 const an = (pkg.build && pkg.build.win && pkg.build.win.artifactName) || (pkg.build && pkg.build.artifactName) || '';
 ok('artifactName 含 v' + ver, an.indexOf('v' + ver) >= 0, an);
 
+/* ---------- 9. 显示层表格列序：序号 排在 夹具编号 之前 ---------- */
+section('9. 显示层表格列序（序号 → 夹具编号）');
+/* 5 个显示层表格都应有「序号」表头 */
+const seqThCount = (appJs.match(/<th[^>]*>序号<\/th>/g) || []).length;
+ok('5 个表格含「序号」表头', seqThCount === 5, String(seqThCount));
+/* 表头不得再出现「夹具编号 … 序号」的旧列序 */
+const badHead = (appJs.match(/<th[^>]*>夹具编号<\/th>\s*<th[^>]*>序号<\/th>/g) || []).length;
+ok('表头无「夹具编号 在前、序号 在后」的旧列序', badHead === 0, String(badHead));
+/* 查询结果表：序号 在 可排序的「夹具编号」之前 */
+const qHeadOk = (appJs.match(/<th style="width:64px">序号<\/th>\$\{thSort\('serial', '夹具编号'\)\}/g) || []).length;
+ok('夹具查询结果表：序号 排在 夹具编号 之前', qHeadOk === 1, String(qHeadOk));
+/* 单行两单元格的数据行：序号 在前 */
+const badRow = (appJs.match(/^[ \t]*<td>\$\{esc\(f\.serialNo \|\| '—'\)\}<\/td><td class="muted">#\$\{esc\(f\.code\)\}<\/td>/gm) || []).length;
+ok('数据行无「夹具编号 在前、序号 在后」', badRow === 0, String(badRow));
+const goodRow = (appJs.match(/^[ \t]*<td class="muted">#\$\{esc\(f\.code\)\}<\/td>/gm) || []).length;
+ok('数据行「序号 在前」共 5 处（3 单行 + 2 跨行）', goodRow === 5, String(goodRow));
+/* CSV 导出列序（夹具列表导出本来就是序号在前，此处仅锁定现状，避免误改） */
+const exportSeqFirst = appJs.indexOf("const headers = ['序号', '夹具编号'") >= 0;
+ok('夹具列表导出 CSV：序号 为第 1 列', exportSeqFirst);
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

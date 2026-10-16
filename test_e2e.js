@@ -785,8 +785,9 @@ async function main() {
   ok('查询页可进入', lqRes.navOk === true, lqRes.navOk);
   ok('线体下拉 = 2 条线体 + 1 占位 = 3 项', lqRes.lineOptCount === 3, String(lqRes.lineOptCount));
   ok('v4：产品级联下拉已移除（无 #lq_product）', lqRes.hasProductSelect === false, String(lqRes.hasProductSelect));
-  ok('结果表为 7 列（工位名称/顺序/实物编号/序号/名称/状态/备注）',
-    ['工位名称', '工位顺序', '实物夹具编号', '序号', '夹具名称', '状态', '备注'].every((h) => lqRes.headText.includes(h)),
+  ok('结果表为 7 列，且「序号」排在「夹具编号」之前（工位名称/工位顺序/序号/夹具编号/夹具名称/状态/备注）',
+    ['工位名称', '工位顺序', '序号', '夹具编号', '夹具名称', '状态', '备注'].every((h) => lqRes.headText.includes(h))
+      && lqRes.headText.indexOf('序号') < lqRes.headText.indexOf('夹具编号'),
     lqRes.headText);
   ok('L1 配置表渲染 3 行（上料工位 2 套 → 2 行，压装工位 1 套 → 1 行）', lqRes.rowsL1 === 3, String(lqRes.rowsL1));
   ok('表格显示实物夹具编号', lqRes.l1HasSerial === true);

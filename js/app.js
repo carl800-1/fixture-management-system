@@ -1384,13 +1384,13 @@
     if (!fixtures.length) { container.innerHTML = '<div class="empty-tip">暂无夹具记录</div>'; return; }
     const html = `
       <div class="table-wrap"><table>
-        <thead><tr><th style="width:150px">夹具编号</th><th style="width:64px">序号</th><th>名称</th><th>机种名称</th><th>产线 / 工位</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>累计回库</th><th style="width:190px">操作</th></tr></thead>
+        <thead><tr><th style="width:64px">序号</th><th style="width:150px">夹具编号</th><th>名称</th><th>机种名称</th><th>产线 / 工位</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>累计回库</th><th style="width:190px">操作</th></tr></thead>
         <tbody>
           ${fixtures.map((f) => {
             const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
             const isSelected = f.id === selectedId;
             return `<tr class="${isSelected ? 'selected' : ''}" data-id="${f.id}" onclick="fixtureSelect(${f.id})">
-              <td>${esc(f.serialNo || '—')}</td><td class="muted">#${esc(f.code)}</td><td>${esc(f.name)}</td>
+              <td class="muted">#${esc(f.code)}</td><td>${esc(f.serialNo || '—')}</td><td>${esc(f.name)}</td>
               <td title="${esc(fullLineModels(f, '—'))}">${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
               <td title="${esc(stationNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</td>
               <td>${esc(f.category || '—')}</td><td>${esc(f.location || '—')}</td>
@@ -2111,12 +2111,12 @@
         <div class="panel loc-bottom" style="margin-bottom:0">
           <div class="panel-title">${filter ? '库位「' + esc(filter) + '」下夹具' : '全部夹具'}（${list.length} 套）</div>
           <div class="table-wrap"><table>
-            <thead><tr><th>夹具编号</th><th>序号</th><th>名称</th><th>机种名称</th><th>产线 / 工位</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>最近动态</th></tr></thead>
+            <thead><tr><th>序号</th><th>夹具编号</th><th>名称</th><th>机种名称</th><th>产线 / 工位</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>最近动态</th></tr></thead>
             <tbody>
               ${list.length ? list.map((f) => {
                 const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
                 return `<tr>
-                  <td>${esc(f.serialNo || '—')}</td><td class="muted">#${esc(f.code)}</td>
+                  <td class="muted">#${esc(f.code)}</td><td>${esc(f.serialNo || '—')}</td>
                   <td>${esc(f.name)}</td><td title="${esc(fullLineModels(f, '—'))}">${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
                   <td title="${esc(stationNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</td>
                   <td>${esc(f.category || '—')}</td><td>${esc(f.location || '—')}</td>
@@ -2463,7 +2463,7 @@
     box.innerHTML = `
       <div class="table-wrap"><table>
         <thead><tr>
-          ${thSort('serial', '夹具编号')}<th style="width:64px">序号</th>${thSort('name', '名称')}<th>关联机种</th>
+          <th style="width:64px">序号</th>${thSort('serial', '夹具编号')}${thSort('name', '名称')}<th>关联机种</th>
           <th>产线 / 工位</th><th>分类</th><th>库位</th><th>责任人/借用人</th>
           ${thSort('status', '状态')}${thSort('time', '最近操作时间')}<th style="width:130px">操作</th>
         </tr></thead>
@@ -2472,8 +2472,8 @@
             const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
             const canLocate = !!f.location && f.status !== 'retired';
             return `<tr>
-              <td>${esc(f.serialNo || '—')}</td>
               <td class="muted">#${esc(f.code)}</td>
+              <td>${esc(f.serialNo || '—')}</td>
               <td>${esc(f.name)}</td>
               <td title="${esc(fullLineModels(f, '—'))}">${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
               <td title="${esc(stationNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</td>
@@ -3749,8 +3749,8 @@
         <thead><tr>
           <th style="width:130px">工位名称</th>
           <th style="width:80px">工位顺序</th>
-          <th style="width:170px">夹具编号</th>
           <th style="width:70px">序号</th>
+          <th style="width:170px">夹具编号</th>
           <th>夹具名称</th>
           <th style="width:100px">状态</th>
           <th>备注</th>
@@ -3772,8 +3772,8 @@
               return `<tr>
                 ${i === 0 ? `<td rowspan="${r.fixtures.length}">${esc(r.station.name || '—')}</td>
                   <td rowspan="${r.fixtures.length}">${esc(r.seq == null ? '—' : String(r.seq))}</td>` : ''}
-                <td>${esc(f.serialNo || '—')}</td>
                 <td class="muted">#${esc(f.code)}</td>
+                <td>${esc(f.serialNo || '—')}</td>
                 <td><a href="javascript:;" onclick="fixtureEdit(${f.id})" title="编辑该夹具">${esc(f.name || '—')}</a></td>
                 <td><span class="badge ${st.cls}">${st.label}</span></td>
                 ${i === 0 ? `<td rowspan="${r.fixtures.length}">${remark}</td>` : ''}
@@ -3912,11 +3912,11 @@
     if (list.length === 1) { fixtureEdit(list[0].id); return; }
     openModal('选择要编辑的夹具', `
       <div class="table-wrap"><table>
-        <thead><tr><th>夹具编号</th><th>序号</th><th>名称</th><th>状态</th><th style="width:90px">操作</th></tr></thead>
+        <thead><tr><th>序号</th><th>夹具编号</th><th>名称</th><th>状态</th><th style="width:90px">操作</th></tr></thead>
         <tbody>${list.map((f) => {
           const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
           return `<tr>
-            <td>${esc(f.serialNo || '—')}</td><td class="muted">#${esc(f.code)}</td>
+            <td class="muted">#${esc(f.code)}</td><td>${esc(f.serialNo || '—')}</td>
             <td>${esc(f.name)}</td><td><span class="badge ${st.cls}">${st.label}</span></td>
             <td><button class="btn sm primary" onclick="closeModal(); fixtureEdit(${f.id})">编辑</button></td>
           </tr>`;

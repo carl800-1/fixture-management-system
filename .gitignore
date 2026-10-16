@@ -15,6 +15,9 @@ fixture-data.json
 # 日志
 *.log
 
+# 测试生成的二进制夹具（用 python test_make_xlsx.py 现场生成，不入库）
+test_fixture.xlsx
+
 # 编辑器 / 系统
 .vscode/
 .idea/
