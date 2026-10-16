@@ -66,10 +66,14 @@ async function main() {
   }
 
   section('0. 应用启动');
-  const boot = await wc.executeJavaScript('({title: document.title, hasContent: !!document.querySelector("#content"), navCount: document.querySelectorAll(".nav-item").length})');
-  ok('页面标题正确 v1.9', /v1\.9/.test(boot.title), boot.title);
+  /* 版本号一律从 package.json 现取，避免每升一版就要改一次断言（本文件曾因此冻结在 v2.1） */
+  const PKG_VER = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
+  const boot = await wc.executeJavaScript('({title: document.title, hasContent: !!document.querySelector("#content"), navCount: document.querySelectorAll(".nav-item").length, brand: (document.querySelector(".brand-name")||{}).textContent||""})');
+  ok('页面标题含当前版本 v' + PKG_VER, boot.title.includes('v' + PKG_VER), boot.title);
+  ok('侧边栏品牌名含当前版本 v' + PKG_VER, boot.brand.includes('v' + PKG_VER), boot.brand);
   ok('主内容容器存在', boot.hasContent);
-  ok('导航项 7 个（含库位管理）', boot.navCount === 7, String(boot.navCount));
+  /* 断言下限而非精确值：新增模块会增加导航项，精确值会让每次加功能都误报 */
+  ok('导航项 >= 7 个（含库位管理）', boot.navCount >= 7, String(boot.navCount));
   const cssLoaded = await wc.executeJavaScript('getComputedStyle(document.body).backgroundColor');
   ok('CSS 已生效（v1.0 曾丢失样式）', cssLoaded !== 'rgba(0, 0, 0, 0)' && cssLoaded !== 'transparent', cssLoaded);
 
@@ -81,10 +85,11 @@ async function main() {
       try { window.showView(v); out[v] = 'OK'; }
       catch (e) { out[v] = 'FAIL:' + e.message; }
     }
-    // 直接点击「返回列表选择」按钮（v1.0 中该按钮点击必崩）
+    // 点击出库页的「清除已选内容」按钮（回归 v1.0 中同类列表按钮一点就崩的问题）
+    // 注：旧断言的「返回列表选择」按钮自 v1.5 起已不存在，属脚本漂移，一并修正。
     window.showView('outbound');
     await new Promise(r=>setTimeout(r,80));
-    const btn = [...document.querySelectorAll('button')].find(b=>b.textContent.includes('返回列表选择'));
+    const btn = [...document.querySelectorAll('button')].find(b=>b.textContent.includes('清除已选内容'));
     if (btn) { try { btn.click(); out.btnClick='OK'; } catch(e){ out.btnClick='FAIL:'+e.message; } }
     else out.btnClick = 'NO_BTN';
     await new Promise(r=>setTimeout(r,150));
@@ -94,7 +99,7 @@ async function main() {
   Object.keys(svRes).filter((k) => k !== 'finalTitle' && k !== 'btnClick').forEach((v) => {
     ok('showView(' + v + ')', svRes[v] === 'OK', svRes[v]);
   });
-  ok('点击「返回列表选择」不报错', svRes.btnClick === 'OK', svRes.btnClick);
+  ok('点击出库页「清除已选内容」不报错', svRes.btnClick === 'OK', svRes.btnClick);
 
   /* ---------- 2. 建档 ---------- */
   section('2. 夹具建档（走真实 UI）');
@@ -105,7 +110,7 @@ async function main() {
     const set = (id,v)=>{ const el=document.querySelector(id); if(el) el.value=v; return !!el; };
     const found = {
       code: set('#fix_new_code','2001'), name: set('#fix_new_name','焊接夹具A'),
-      spec: set('#fix_new_spec','WJ-100'), cat: set('#fix_new_cat','焊接'),
+      lm1: set('#fix_new_lm1','WJ-100'), cat: set('#fix_new_cat','焊接'),
       loc: set('#fix_new_loc','A1-01'), remark: set('#fix_new_remark','测试建档')
     };
     [...document.querySelectorAll('button')].find(b=>b.textContent.includes('建档')).click();
@@ -192,26 +197,32 @@ async function main() {
   ok('流水状态迁移 recorded', txOut && txOut.fromStatus === 'stocked' && txOut.toStatus === 'checked_out');
 
   /* ---------- 4. 回库 ---------- */
-  section('4. 回库流程（v1.4 改为四栏互查）');
+  /* 现状（v1.5+）：回库页为「四栏互查」，输入编号后不做自动弹窗，
+     而是在 #return_candidates 里按名称分组渲染候选，勾选编号再统一提交。
+     注意 #fix_return_op 属于夹具卡片上的「单台回库」弹窗（fixtureReturn），
+     与回库页不是同一条路径，不能再用它断言。 */
+  section('4. 回库流程（四栏互查 → 勾选 → 提交）');
   const retRes = await wc.executeJavaScript(`(async () => {
     const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
     window.showView('return'); await sleep(250);
-    // v1.4 回库页改为四栏互查：输入编号后命中唯一自动弹出回库表单
     const codeBox = document.querySelector('#return_code');
     if (!codeBox) return { err:'回库页无编号输入框' };
     codeBox.value='2001';
     codeBox.dispatchEvent(new Event('input'));
     await sleep(400);
-    const hasOp = !!document.querySelector('#fix_return_op');
-    if (hasOp) {
-      document.querySelector('#fix_return_op').value='王五';
-      document.querySelector('#fix_return_remark').value='归还完好';
-      [...document.querySelectorAll('button')].find(b=>b.textContent.includes('确认回库')).click();
-    }
-    await sleep(600);
-    return { hasOp };
+    const picks=[...document.querySelectorAll('.return-pick')];
+    if (!picks.length) return { hasPick:false };
+    picks.forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
+    await sleep(150);
+    const op=document.querySelector('#return_operator'); if (op) op.value='王五';
+    const rm=document.querySelector('#return_remark'); if (rm) rm.value='归还完好';
+    const btn=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('提交回库'));
+    if (btn) btn.click();
+    await sleep(700);
+    return { hasPick:true, n:picks.length, clicked:!!btn };
   })()`);
-  ok('回库弹窗打开且字段存在', retRes.hasOp === true, JSON.stringify(retRes));
+  ok('回库候选列表命中 1 台待回库夹具', retRes.hasPick === true && retRes.n === 1, JSON.stringify(retRes));
+  ok('「提交回库」按钮存在且已点击', retRes.clicked === true, JSON.stringify(retRes));
 
   const db2 = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
   const f2001b = db2.fixtures.find((f) => f.code === '2001');
@@ -231,15 +242,21 @@ async function main() {
       document.querySelector('#fix_out_op').value='李四';
       [...document.querySelectorAll('button')].find(b=>b.textContent.includes('确认出库')).click();
       await sleep(450);
-      // v1.4 回库改为四栏互查
+      // 回库：四栏互查 → 勾选候选编号 → 提交（与第 4 节同一路径）
       window.showView('return'); await sleep(200);
       const codeBox = document.querySelector('#return_code');
       codeBox.value='2001';
       codeBox.dispatchEvent(new Event('input'));
       await sleep(400);
-      document.querySelector('#fix_return_op').value='王五';
-      [...document.querySelectorAll('button')].find(b=>b.textContent.includes('确认回库')).click();
-      await sleep(450);
+      const picks=[...document.querySelectorAll('.return-pick')];
+      if (!picks.length) throw new Error('第 ' + (i+1) + ' 轮未渲染出回库候选');
+      picks.forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
+      await sleep(120);
+      const op=document.querySelector('#return_operator'); if (op) op.value='王五';
+      const rbtn=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('提交回库'));
+      if (!rbtn) throw new Error('第 ' + (i+1) + ' 轮未找到提交回库按钮');
+      rbtn.click();
+      await sleep(500);
     })()`);
   }
   const db3 = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
@@ -603,8 +620,169 @@ async function main() {
     return document.querySelectorAll('.fixture-card').length;
   })()`) === 0);
 
-  /* ---------- 9. 错误捕获 ---------- */
-  section('9. 运行期错误捕获');
+  /* ---------- 9. 产线模块（v3.0.1）真实 UI 覆盖 ---------- */
+  /* 8.5 已把数据清空，这里从零建：夹具 → 线体 → 产品 → 工位 → 绑定 → 查询，全程走真实 UI */
+  section('9. 产线配置 / 产线夹具查询（v3.0.1）');
+  const lineRes = await wc.executeJavaScript(`(async () => {
+    const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+    const $=(s)=>document.querySelector(s);
+    const $$=(s)=>[...document.querySelectorAll(s)];
+    const setV=(s,v)=>{ const el=$(s); if(!el) return false; el.value=v; el.dispatchEvent(new Event('input')); return true; };
+    const byOnclick=(fn)=>$$('button').find(b=>String(b.getAttribute('onclick')||'').startsWith(fn));
+    const out={};
+
+    /* 1) 建一个夹具供工位绑定引用 */
+    window.showView('fixtures'); await sleep(200);
+    window.fixtureNew(); await sleep(150);
+    setV('#fix_new_code','3001'); setV('#fix_new_name','定位工装'); setV('#fix_new_loc','A1-01');
+    $$('button').find(b=>b.textContent.includes('建档')).click();
+    await sleep(400);
+    out.fixtureOk = (($('#fixture_list')||{}).textContent||'').includes('3001');
+
+    /* 2) 产线配置页 */
+    window.showView('linecfg'); await sleep(450);
+    out.cfgNavOk = (($('#viewTitle')||{}).textContent||'').includes('产线配置');
+
+    /* 直线形线体 L1 */
+    window.lineCfgLineForm(0); await sleep(150);
+    out.lineFormOk = setV('#lc_line_name','L1 总装线') && !!$('#lc_line_type');
+    out.lineTypeOpts = $$('#lc_line_type option').map(o=>o.value);
+    window.lineCfgSaveLine(0); await sleep(400);
+
+    /* U型线体 L2 */
+    window.lineCfgLineForm(0); await sleep(150);
+    setV('#lc_line_name','L2 U型线'); $('#lc_line_type').value='u';
+    window.lineCfgSaveLine(0); await sleep(400);
+
+    /* 选中 L1 → 建产品甲 */
+    const pickL = byOnclick('lineCfgPickLine'); if (pickL) { pickL.click(); await sleep(400); }
+    window.lineCfgProductForm(0); await sleep(150);
+    setV('#lc_pd_name','产品甲'); setV('#lc_pd_code','P-01');
+    window.lineCfgSaveProduct(0); await sleep(400);
+    const pickP = byOnclick('lineCfgPickProduct'); if (pickP) { pickP.click(); await sleep(400); }
+
+    /* L1 两个工位 */
+    window.lineCfgStationForm(0); await sleep(150);
+    setV('#lc_st_name','上料工位'); setV('#lc_st_seq','10');
+    window.lineCfgSaveStation(0); await sleep(400);
+    window.lineCfgStationForm(0); await sleep(150);
+    setV('#lc_st_name','压装工位'); setV('#lc_st_seq','20');
+    window.lineCfgSaveStation(0); await sleep(400);
+
+    /* 给「压装工位」绑定 3001（默认渲染的第一行，seq 10 = 上料工位） */
+    const bindBtns = $$('button').filter(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgBindForm'));
+    out.bindBtnCount = bindBtns.length;
+    const lastBind = bindBtns[bindBtns.length - 1];
+    if (lastBind) { lastBind.click(); await sleep(200); }
+    out.bindFormOk = !!$('#lc_bind_codes');
+    setV('#lc_bind_codes','3001');
+    const sid = Number(String(lastBind && lastBind.getAttribute('onclick')).match(/[0-9]+/)[0]);
+    window.lineCfgSaveBind(sid); await sleep(450);
+
+    /* 切到 L2 → 建产品乙 + 三个工位（用于验证 U型图） */
+    const pickL2 = $$('button').filter(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgPickLine')).pop();
+    if (pickL2) { pickL2.click(); await sleep(400); }
+    window.lineCfgProductForm(0); await sleep(150);
+    setV('#lc_pd_name','产品乙');
+    window.lineCfgSaveProduct(0); await sleep(400);
+    const pickP2 = byOnclick('lineCfgPickProduct'); if (pickP2) { pickP2.click(); await sleep(400); }
+    let si = 10;
+    for (const nm of ['左一','底一','右一']) {
+      window.lineCfgStationForm(0); await sleep(150);
+      setV('#lc_st_name', nm); setV('#lc_st_seq', String(si)); si += 10;
+      window.lineCfgSaveStation(0); await sleep(400);
+    }
+
+    /* 3) 查询页：级联 + 表格 + 示意图 */
+    window.showView('linequery'); await sleep(600);
+    out.qNavOk = (($('#viewTitle')||{}).textContent||'').includes('产线夹具查询');
+    out.lineOptCount = $$('#lq_line option').length;
+    out.prodOptCount = $$('#lq_product option').length;
+    out.hasTable = !!$('#lq_body table');
+    out.rowsL1 = $$('#lq_body table tbody tr').length;
+    const bodyL1 = (($('#lq_body')||{}).textContent||'');
+    out.l1Text = bodyL1;
+    out.l1HasCode = bodyL1.includes('3001');
+    out.l1HasNone = bodyL1.includes('无');
+    out.l1SvgLines = $$('#lq_body svg line.ld-track').length;
+    out.l1SvgPoly = $$('#lq_body svg polyline.ld-track').length;
+    out.l1Title = (($('#lq_body .ld-title')||{}).textContent||'');
+    out.l1Count = (($('#lq_count')||{}).textContent||'');
+    const prodBefore = $('#lq_product') ? $('#lq_product').selectedOptions[0].textContent : '';
+
+    /* 切换线体 → 产品应级联重置为 L2 自己的第一个产品 */
+    const sel = $('#lq_line');
+    const uOpt = $$('#lq_line option').find(o=>o.textContent.includes('U型'));
+    if (uOpt) { sel.value = uOpt.value; sel.dispatchEvent(new Event('change')); await sleep(500); }
+    out.prodAfter = $('#lq_product') ? $('#lq_product').selectedOptions[0].textContent : '';
+    out.prodBefore = prodBefore;
+    out.rowsL2 = $$('#lq_body table tbody tr').length;
+    out.l2SvgPoly = $$('#lq_body svg polyline.ld-track').length;
+    out.l2SvgLines = $$('#lq_body svg line.ld-track').length;
+    out.l2Title = (($('#lq_body .ld-title')||{}).textContent||'');
+
+    /* 重置筛选按钮 */
+    const rst = $$('button').find(b=>b.textContent.includes('重置筛选'));
+    out.hasResetBtn = !!rst;
+    if (rst) { rst.click(); await sleep(400); }
+
+    window.closeModal();
+    return out;
+  })()`);
+
+  ok('产线配置页可进入', lineRes.cfgNavOk === true, lineRes.cfgNavOk);
+  ok('建夹具成功（供绑定引用）', lineRes.fixtureOk === true);
+  ok('线体表单字段齐全', lineRes.lineFormOk === true);
+  ok('线体形态下拉只有 直线形 / U型 两项',
+     JSON.stringify(lineRes.lineTypeOpts) === JSON.stringify(['linear', 'u']), lineRes.lineTypeOpts);
+  ok('工位行「配置夹具」按钮已渲染', lineRes.bindBtnCount >= 2, String(lineRes.bindBtnCount));
+  ok('绑定表单字段存在', lineRes.bindFormOk === true);
+
+  ok('查询页可进入', lineRes.qNavOk === true, lineRes.qNavOk);
+  ok('线体下拉含 2 条线体 + 1 个占位 = 3 项', lineRes.lineOptCount === 3, String(lineRes.lineOptCount));
+  ok('产品下拉已按线体级联出选项', lineRes.prodOptCount >= 2, String(lineRes.prodOptCount));
+  ok('L1 工位夹具配置表已渲染 2 行', lineRes.rowsL1 === 2, String(lineRes.rowsL1));
+  ok('表格标注了绑定的夹具编号 3001', lineRes.l1HasCode === true);
+  ok('无配置的工位显示「无」', lineRes.l1HasNone === true);
+  ok('直线形用折线轨迹（line.ld-track）', lineRes.l1SvgLines >= 1, String(lineRes.l1SvgLines));
+  ok('直线形不使用 polyline 轨迹', lineRes.l1SvgPoly === 0, String(lineRes.l1SvgPoly));
+  ok('L1 图标题含「直线形」', String(lineRes.l1Title).includes('直线形'), lineRes.l1Title);
+  ok('L1 统计文案含工位与夹具数量', /工位\s*2\s*个/.test(String(lineRes.l1Count)), lineRes.l1Count);
+  ok('切换线体后产品级联重置（产品甲 → 产品乙）',
+     lineRes.prodBefore.includes('产品甲') && lineRes.prodAfter.includes('产品乙'),
+     JSON.stringify([lineRes.prodBefore, lineRes.prodAfter]));
+  ok('L2 U型线配置表渲染 3 行', lineRes.rowsL2 === 3, String(lineRes.rowsL2));
+  ok('U型使用 polyline 轨迹', lineRes.l2SvgPoly === 1, String(lineRes.l2SvgPoly));
+  ok('U型不使用 line 轨迹', lineRes.l2SvgLines === 0, String(lineRes.l2SvgLines));
+  ok('L2 图标题含「U型」', String(lineRes.l2Title).includes('U型'), lineRes.l2Title);
+  ok('存在「重置筛选」按钮', lineRes.hasResetBtn === true);
+
+  /* 落盘校验：四个新集合确实写进了 fixture-data.json */
+  const dbLine = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+  ok('lines 已落盘 2 条', (dbLine.lines || []).length === 2, String((dbLine.lines || []).length));
+  ok('products 已落盘 2 个', (dbLine.products || []).length === 2, String((dbLine.products || []).length));
+  ok('stations 已落盘 5 个', (dbLine.stations || []).length === 5, String((dbLine.stations || []).length));
+  ok('stationFixtures 已落盘 1 条绑定', (dbLine.stationFixtures || []).length === 1, String((dbLine.stationFixtures || []).length));
+  ok('U型线体落盘 type=u', (dbLine.lines || []).some((l) => l.type === 'u'));
+
+  /* 级联删除：删掉 L2 → 其产品/工位/绑定一并清理 */
+  await wc.executeJavaScript(`(async () => {
+    const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+    const $$=(s)=>[...document.querySelectorAll(s)];
+    window.showView('linecfg'); await sleep(400);
+    const dels = $$('button').filter(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgDelLine'));
+    if (dels.length) {
+      window.lineCfgDelLineConfirm(Number(String(dels[dels.length-1].getAttribute('onclick')).match(/[0-9]+/)[0]));
+    }
+    await sleep(600);
+  })()`);
+  const dbAfter = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+  ok('删线体后只剩 1 条线体', (dbAfter.lines || []).length === 1, String((dbAfter.lines || []).length));
+  ok('级联删除了该线体的产品', (dbAfter.products || []).length === 1, String((dbAfter.products || []).length));
+  ok('级联删除了该线体的工位', (dbAfter.stations || []).length === 2, String((dbAfter.stations || []).length));
+
+  /* ---------- 10. 错误捕获 ---------- */
+  section('10. 运行期错误捕获');
   ok('无 console.error', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | '));
   ok('无页面加载失败', pageErrors.length === 0, pageErrors.join(' | '));
 

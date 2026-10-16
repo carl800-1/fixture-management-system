@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * store.js — 夹具管理系统数据层（Node fs，本地 JSON 文件）
+ * store.js — 工装夹具管理程序数据层（Node fs，本地 JSON 文件）
  * ============================================================ */
 const fs = require('fs');
 const path = require('path');
@@ -10,29 +10,63 @@ let data = { fixtures: [], fixTransactions: [], meta: {} };
 let loaded = false;
 let seq = 1;
 
+/* 数据集合清单：新增集合只需在此登记，load / save / 通用 CRUD 自动覆盖。
+ * lines / products / stations / stationFixtures 为 v3.0.1 产线配置新增：
+ *   line          { id, name, type:'linear'|'u', remark }   // u = U型（历史 'loop' 自动折算）
+ *   product       { id, lineId, name, code, remark }
+ *   station       { id, lineId, seq, name, remark }
+ *   stationFixture{ id, productId, stationId, fixtureCode }  ← 一个工位可有多条（一对多）
+ */
+const COLLECTIONS = ['fixtures', 'fixTransactions', 'lines', 'products', 'stations', 'stationFixtures'];
+
+function emptyData() {
+  const d = { meta: {} };
+  COLLECTIONS.forEach((c) => { d[c] = []; });
+  return d;
+}
+
 function setDataDir(dir) {
   DATA_DIR = dir;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 function file() { return path.join(DATA_DIR, 'fixture-data.json'); }
 
+function migrateFixtureLineModels() {
+  let changed = false;
+  (data.fixtures || []).forEach((f) => {
+    if (!Array.isArray(f.lineModels)) {
+      const models = [];
+      [f.lineNo, f.spec].forEach((v) => {
+        const s = typeof v === 'string' ? v.trim() : '';
+        if (s && !models.includes(s)) models.push(s);
+      });
+      f.lineModels = models.slice(0, 4);
+      changed = true;
+    }
+    // 保证数组长度<=4，且元素为字符串
+    if (f.lineModels.length > 4) { f.lineModels = f.lineModels.slice(0, 4); changed = true; }
+  });
+  return changed;
+}
+
 function load() {
   if (loaded) return;
   try {
     const raw = fs.readFileSync(file(), 'utf8');
     const j = JSON.parse(raw);
-    data = {
-      fixtures: j.fixtures || [],
-      fixTransactions: j.fixTransactions || [],
-      meta: j.meta || {}
-    };
+    data = emptyData();
+    // 旧数据文件缺少新集合时退回空数组，向后兼容
+    COLLECTIONS.forEach((c) => { if (Array.isArray(j[c])) data[c] = j[c]; });
+    data.meta = j.meta || {};
     let maxId = 0;
-    (j.fixtures || []).forEach((f) => { if (f && f.id > maxId) maxId = f.id; });
-    (j.fixTransactions || []).forEach((t) => { if (t && t.id > maxId) maxId = t.id; });
+    COLLECTIONS.forEach((c) => {
+      data[c].forEach((x) => { if (x && typeof x.id === 'number' && x.id > maxId) maxId = x.id; });
+    });
     seq = maxId + 1;
   } catch (e) {
-    data = { fixtures: [], fixTransactions: [], meta: {} };
+    data = emptyData();
   }
+  if (migrateFixtureLineModels()) save();
   loaded = true;
 }
 
@@ -198,10 +232,65 @@ function addFixTransaction(tx) {
   return record.id;
 }
 
+/* ============================================================
+ * 产线配置专用函数（v3.0.1）
+ * 层级：line ─┬─ product   （产品隶属线体，用于筛选级联）
+ *             └─ station   （工位隶属线体，按 seq 排序）
+ *   stationFixture 绑定「某产品的某工位 → 一个夹具编号」，一个工位可多条（一对多）。
+ *   删除父级时级联清理子级与绑定，避免留下悬空引用。
+ * ============================================================ */
+function delLine(id) {
+  load();
+  const pidSet = new Set(data.products.filter((p) => p.lineId === id).map((p) => p.id));
+  const stSet = new Set(data.stations.filter((s) => s.lineId === id).map((s) => s.id));
+  data.stationFixtures = data.stationFixtures.filter(
+    (sf) => !pidSet.has(sf.productId) && !stSet.has(sf.stationId)
+  );
+  data.products = data.products.filter((p) => p.lineId !== id);
+  data.stations = data.stations.filter((s) => s.lineId !== id);
+  data.lines = data.lines.filter((l) => l.id !== id);
+  save();
+}
+
+function delProduct(id) {
+  load();
+  data.stationFixtures = data.stationFixtures.filter((sf) => sf.productId !== id);
+  data.products = data.products.filter((p) => p.id !== id);
+  save();
+}
+
+function delStation(id) {
+  load();
+  data.stationFixtures = data.stationFixtures.filter((sf) => sf.stationId !== id);
+  data.stations = data.stations.filter((s) => s.id !== id);
+  save();
+}
+
+/* 覆盖式设置某「产品 × 工位」的夹具绑定（一对多）。
+ * 传空数组即清空该工位的配置；整体一次落盘。 */
+function setStationFixtures(payload) {
+  load();
+  const productId = payload.productId;
+  const stationId = payload.stationId;
+  const codes = Array.isArray(payload.codes) ? payload.codes : [];
+  data.stationFixtures = data.stationFixtures.filter(
+    (sf) => !(sf.productId === productId && sf.stationId === stationId)
+  );
+  codes.forEach((c) => {
+    const code = String(c == null ? '' : c).trim();
+    if (!code) return;
+    data.stationFixtures.push({ id: nextId(), productId, stationId, fixtureCode: code });
+  });
+  save();
+  return data.stationFixtures.length;
+}
+
 module.exports = {
   setDataDir, open, getAll, get, add, put, del, clear, count,
   getByIndex, getByRange, getMeta, setMeta,
   // 夹具管理
   addFixture, updateFixture, delFixture,
-  addFixTransaction
+  addFixTransaction,
+  // 产线配置（v3.0.1）
+  delLine, delProduct, delStation, setStationFixtures
 };

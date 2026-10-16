@@ -1,8 +1,8 @@
 /* ============================================================
- * db.js v1.9 — 夹具管理系统数据层
+ * db.js v3.0.1 — 工装夹具管理程序数据层
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '1.9';
+  const APP_VERSION = '3.0.1';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   if (electronApi) {
@@ -26,6 +26,11 @@ const DB = (function () {
       fixtureGetAll: () => invoke('fixture-getAll'),
       fixtureAddTransaction: (tx) => invoke('fixture-addTransaction', tx),
       fixtureGetTransactions: () => invoke('fixture-getTransactions'),
+      // 产线配置（v3.0.1）
+      lineDel: (id) => invoke('line-del', id),
+      productDel: (id) => invoke('product-del', id),
+      stationDel: (id) => invoke('station-del', id),
+      setStationFixtures: (payload) => invoke('set-station-fixtures', payload),
       currentBackend: () => 'electron-file'
     };
   }
@@ -47,6 +52,30 @@ const DB = (function () {
   function getAll(name) { return Promise.resolve(name === 'meta' ? lsRead(LS_META, {}) : lsRead(name, [])); }
   function getMeta(key) { const m = lsRead(LS_META, {}); return m[key] != null ? m[key] : null; }
   function setMeta(key, value) { const m = lsRead(LS_META, {}); m[key] = value; lsWrite(LS_META, m); }
+  function get(name, id) {
+    if (name === 'meta') return Promise.resolve(getMeta(id));
+    return Promise.resolve(lsRead(name, []).find((x) => x.id === id) || null);
+  }
+  /* 通用 CRUD（与主进程 store.js 同名同语义，供产线配置等集合复用） */
+  function add(name, item) {
+    const arr = lsRead(name, []);
+    item.id = lsSeq();
+    arr.push(item);
+    lsWrite(name, arr);
+    return Promise.resolve(item.id);
+  }
+  function put(name, item) {
+    const arr = lsRead(name, []);
+    const i = arr.findIndex((x) => x.id === item.id);
+    if (i >= 0) arr[i] = item; else arr.push(item);
+    lsWrite(name, arr);
+    return Promise.resolve(item.id);
+  }
+  function del(name, id) {
+    lsWrite(name, lsRead(name, []).filter((x) => x.id !== id));
+    return Promise.resolve();
+  }
+  function clearColl(name) { lsWrite(name, []); return Promise.resolve(); }
 
   async function fixtureAdd(fixture) {
     const fixtures = lsRead(LS_FIXTURES, []);
@@ -140,11 +169,45 @@ const DB = (function () {
     return record.id;
   }
 
+  /* ---- 产线配置（v3.0.1）：与主进程 store.js 语义保持一致 ---- */
+  async function lineDel(id) {
+    const pidSet = new Set(lsRead('products', []).filter((p) => p.lineId === id).map((p) => p.id));
+    const stSet = new Set(lsRead('stations', []).filter((s) => s.lineId === id).map((s) => s.id));
+    lsWrite('stationFixtures', lsRead('stationFixtures', [])
+      .filter((sf) => !pidSet.has(sf.productId) && !stSet.has(sf.stationId)));
+    lsWrite('products', lsRead('products', []).filter((p) => p.lineId !== id));
+    lsWrite('stations', lsRead('stations', []).filter((s) => s.lineId !== id));
+    lsWrite('lines', lsRead('lines', []).filter((l) => l.id !== id));
+  }
+  async function productDel(id) {
+    lsWrite('stationFixtures', lsRead('stationFixtures', []).filter((sf) => sf.productId !== id));
+    lsWrite('products', lsRead('products', []).filter((p) => p.id !== id));
+  }
+  async function stationDel(id) {
+    lsWrite('stationFixtures', lsRead('stationFixtures', []).filter((sf) => sf.stationId !== id));
+    lsWrite('stations', lsRead('stations', []).filter((s) => s.id !== id));
+  }
+  async function setStationFixtures(payload) {
+    const { productId, stationId } = payload;
+    const codes = Array.isArray(payload.codes) ? payload.codes : [];
+    const rest = lsRead('stationFixtures', [])
+      .filter((sf) => !(sf.productId === productId && sf.stationId === stationId));
+    codes.forEach((c) => {
+      const code = String(c == null ? '' : c).trim();
+      if (!code) return;
+      rest.push({ id: lsSeq(), productId, stationId, fixtureCode: code });
+    });
+    lsWrite('stationFixtures', rest);
+    return rest.length;
+  }
+
   return {
     APP_VERSION,
-    open, getAll, get, getMeta, setMeta,
+    open, getAll, get, add, put, del, getMeta, setMeta,
+    clear: clearColl,
     fixtureAdd, fixtureUpdate, fixtureDel,
     fixtureGetAll, fixtureGetTransactions, fixtureAddTransaction,
+    lineDel, productDel, stationDel, setStationFixtures,
     currentBackend: () => 'browser'
   };
 })();

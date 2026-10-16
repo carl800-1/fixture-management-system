@@ -1,11 +1,12 @@
 'use strict';
 /* ============================================================
- * main.js — 夹具管理系统主进程（v1.9）
+ * main.js — 工装夹具管理程序主进程（v3.0.1）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const store = require('./store');
+const { readWorkbook } = require('./js/xlsx_reader');
 
 // 【v1.2 关键修复】解决「窗口只剩标题框、无法关闭也无法切换」的致命问题。
 // 根因：受限环境（企业电脑 / 远程桌面 / 虚拟机 / 沙箱）下 Chromium 沙箱无法初始化，
@@ -31,7 +32,7 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 700,
-    title: '夹具管理系统 v1.9',
+    title: '工装夹具管理程序 v3.0.1',
     backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -62,6 +63,48 @@ const handlers = {
   'fixture-getAll': () => store.getAll('fixtures'),
   'fixture-addTransaction': (e, tx) => store.addFixTransaction(tx),
   'fixture-getTransactions': () => store.getAll('fixTransactions'),
+  // 产线配置（v3.0.1）：线体 / 产品 / 工位 / 工位夹具绑定
+  // 线体、产品、工位的「增改查」走通用 db-add / db-put / db-getAll（集合名 lines/products/stations），
+  // 删除需级联清理子级，故走专用通道。
+  'line-del': (e, id) => store.delLine(id),
+  'product-del': (e, id) => store.delProduct(id),
+  'station-del': (e, id) => store.delStation(id),
+  'set-station-fixtures': (e, p) => store.setStationFixtures(p),
+  /* Excel 导入：渲染进程读不到 zlib，故由它把文件字节传进来，此处解 zip + 解析 XML。
+   * 返回首张工作表的二维数组；出错时返回 { ok:false, error } 而非 reject，便于 UI 提示。 */
+  'read-spreadsheet': (e, buf) => {
+    try {
+      const wb = readWorkbook(Buffer.from(buf));
+      return { ok: true, sheetNames: wb.sheetNames, rows: wb.sheets[0].rows, sheetName: wb.sheets[0].name };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  },
+  /* 打开系统文件选择框读取表格文件。
+   * 返回 { ok, name, kind:'csv'|'xlsx', text? , bytes? }；取消返回 { ok:false, canceled:true } */
+  'pick-spreadsheet': async (e) => {
+    try {
+      const { dialog } = require('electron');
+      const r = await dialog.showOpenDialog({
+        title: '选择要导入的表格文件',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Excel 工作簿', extensions: ['xlsx'] },
+          { name: 'CSV 文件', extensions: ['csv'] },
+          { name: '所有文件', extensions: ['*'] }
+        ]
+      });
+      if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
+      const p = r.filePaths[0];
+      const name = path.basename(p);
+      if (/\.csv$/i.test(name)) {
+        return { ok: true, name, kind: 'csv', text: fs.readFileSync(p, 'utf8') };
+      }
+      return { ok: true, name, kind: 'xlsx', bytes: Array.from(fs.readFileSync(p)) };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  },
   /* 打印二维码标签：按传入的 pageSize（毫米换算的微米 / 标准尺寸名）与份数调用 Chromium 打印，
    * 由渲染进程设置 #printArea 的 CSS 变量控制对齐与边距，这里只负责把纸张规格交给打印引擎。 */
   'print-labels': (e, opts) => {

@@ -37,10 +37,20 @@ sources.forEach(([srcName, src]) => {
   re.lastIndex = 0;
   while ((m = re.exec(src))) {
     const expr = m[1];
+    // 模板拼接函数名：onchange="${prefix}ToggleGroup(this)" —— 按已知前缀展开后校验
+    const PREFIX_VALUES = { prefix: ['out', 'return'] };
+    const tplRe = /\$\{([A-Za-z_$][A-Za-z0-9_$]*)\}([A-Za-z0-9_$]+)\s*\(/g;
+    let tm;
+    while ((tm = tplRe.exec(expr))) {
+      const vals = PREFIX_VALUES[tm[1]];
+      if (vals) vals.forEach((p) => handlerNames.add(p + tm[2] + '|' + srcName));
+    }
     const fnRe = /([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
     let mm;
     while ((mm = fnRe.exec(expr))) {
       const fn = mm[1];
+      // 模板拼接里只取到后半段（${prefix}ToggleGroup → ToggleGroup）的已单独展开，跳过
+      if (expr.charAt(mm.index - 1) === '}') continue;
       // 排除内建/局部
       if (['event', 'this', 'if', 'return', 'alert', 'confirm', 'prompt', 'console', 'Number', 'String', 'parseInt', 'parseFloat', 'stopPropagation', 'preventDefault', 'target', 'value'].includes(fn)) continue;
       handlerNames.add(fn + '|' + srcName);
@@ -89,7 +99,8 @@ const preloadChRe = /ipcRenderer\.invoke\(\s*'([a-zA-Z0-9_-]+)'/g;
 while ((m = preloadChRe.exec(preloadJs))) channels.add(m[1]);
 
 const handled = new Set();
-const hRe = /'([a-zA-Z0-9_-]+)':\s*\(/g;
+// 允许 handler 写成 `'ch': (e, p) =>` 或 `'ch': async (e) =>` 等形式
+const hRe = /['"]([a-zA-Z0-9_-]+)['"]:\s*(?:async\s*)?\(/g;
 while ((m = hRe.exec(mainJs))) handled.add(m[1]);
 
 const chMissing = [...channels].filter((c) => !handled.has(c));
@@ -179,7 +190,9 @@ views.forEach((v) => {
 /* ---------- 8. 版本号一致性 ---------- */
 section('8. 版本号一致性');
 const pkg = JSON.parse(fs.readFileSync(path.join(DIR, 'package.json'), 'utf8'));
-const ver = pkg.version.split('.').slice(0, 2).join('.');
+// 语义化版本（主版本号.次版本号.修订号），全量比对，三处必须完全一致
+const ver = pkg.version;
+ok('package.json 版本为语义化三段式 x.y.z', /^\d+\.\d+\.\d+$/.test(ver), ver);
 ok('package.json 版本 = ' + ver, !!ver);
 ok('db.js APP_VERSION = ' + ver, dbJs.indexOf("APP_VERSION = '" + ver + "'") >= 0,
   (dbJs.match(/APP_VERSION = '([^']+)'/) || [])[1]);
