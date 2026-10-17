@@ -254,6 +254,9 @@ const DB = (function () {
     if (tx.type === 'out') {
       toStatus = 'checked_out';
       fixture.totalOutCount = (fixture.totalOutCount || 0) + 1;
+      // 出库原因为「维修」时记一次维修（与 store.js 同口径）
+      const outReason = (tx.outReason === 'repair' || tx.outReason === 'other') ? tx.outReason : 'use';
+      if (outReason === 'repair') fixture.repairCount = (fixture.repairCount || 0) + 1;
       if (!fromLocation) { fixture.location = wantLoc; toLocation = wantLoc; }
     } else if (tx.type === 'return') {
       toStatus = 'stocked';
@@ -281,6 +284,8 @@ const DB = (function () {
       type: tx.type,
       operator: tx.operator || '',
       counterparty: tx.counterparty || '',
+      outReason: tx.type === 'out' ? (tx.outReason || 'use') : '',
+      outReasonText: tx.type === 'out' ? (tx.outReasonText || '') : '',
       time: tx.time,
       remark: tx.remark || '',
       repairType: tx.repairType || '',

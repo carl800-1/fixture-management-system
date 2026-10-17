@@ -349,7 +349,7 @@
     repair_done: { label: '维修完成', icon: '✅' },
     retire: { label: '报废', icon: '🗑️' }
   };
-  const OUT_REASON_LABEL = { use: '使用', repair: '维修' };
+  const OUT_REASON_LABEL = { use: '使用', repair: '维修', other: '其它' };
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
@@ -1607,7 +1607,10 @@
           const tc = FIX_TX_TYPE[t.type] || { label: t.type, icon: '📋' };
           const fs = FIX_STATUS[t.fromStatus] || { label: t.fromStatus };
           const ts = FIX_STATUS[t.toStatus] || { label: t.toStatus };
-          const reasonLabel = t.outReason ? (OUT_REASON_LABEL[t.outReason] || t.outReason) : '';
+          const reasonLabel = t.outReason ? (() => {
+            if (t.outReason === 'other' && t.outReasonText) return '其它（' + esc(t.outReasonText) + '）';
+            return OUT_REASON_LABEL[t.outReason] || t.outReason;
+          })() : '';
           return `
             <div class="tx-row">
               <div class="tx-type">${tc.icon} ${tc.label}</div>
@@ -1743,7 +1746,16 @@
               </div>
             </div>
             <div class="form-group">
-              <label>备注或用途</label>
+              <label>用途</label>
+              <select id="out_reason">
+                <option value="use">使用</option>
+                <option value="repair">维修</option>
+                <option value="other">其它</option>
+              </select>
+              <input type="text" id="out_reason_text" placeholder="如选「其它」，请填写具体内容" style="display:none;">
+            </div>
+            <div class="form-group">
+              <label>备注</label>
               <input type="text" id="out_remark" placeholder="可选备注">
             </div>
             <div class="form-actions">
@@ -1826,7 +1838,16 @@
                 <datalist id="return_loc_list">${locationCandidates().map((v) => `<option value="${esc(v)}"></option>`).join('')}</datalist>
               </div>
               <div class="form-group">
-                <label>备注或用途</label>
+                <label>用途</label>
+                <select id="return_reason">
+                  <option value="use">使用</option>
+                  <option value="repair">维修</option>
+                  <option value="other">其它</option>
+                </select>
+                <input type="text" id="return_reason_text" placeholder="如选「其它」，请填写具体内容" style="display:none;">
+              </div>
+              <div class="form-group">
+                <label>备注</label>
                 <input type="text" id="return_remark" placeholder="可选备注">
               </div>
             </div>
@@ -1861,6 +1882,14 @@
       }
     };
     ['#out_code', '#out_name', '#out_spec', '#out_location'].forEach(wrapFixes);
+    // 用途下拉变化时显示/隐藏自填框
+    const outReasonEl = $('#out_reason');
+    if (outReasonEl) {
+      outReasonEl.addEventListener('change', () => {
+        const textEl = $('#out_reason_text');
+        if (textEl) textEl.style.display = (outReasonEl.value === 'other') ? '' : 'none';
+      });
+    }
   }
 
   function bindReturnPage() {
@@ -1880,6 +1909,14 @@
       }
     };
     ['#return_code', '#return_name', '#return_spec', '#return_location'].forEach(wrapFixes);
+    // 用途下拉变化时显示/隐藏自填框
+    const returnReasonEl = $('#return_reason');
+    if (returnReasonEl) {
+      returnReasonEl.addEventListener('change', () => {
+        const textEl = $('#return_reason_text');
+        if (textEl) textEl.style.display = (returnReasonEl.value === 'other') ? '' : 'none';
+      });
+    }
   }
 
   /* ============================================================
@@ -2050,6 +2087,8 @@
     const nameEl = $('#out_name'); if (nameEl) nameEl.value = '';
     const specEl = $('#out_spec'); if (specEl) specEl.value = '';
     const locEl = $('#out_location'); if (locEl) locEl.value = '';
+    const reasonEl = $('#out_reason'); if (reasonEl) reasonEl.value = 'use';
+    const reasonTextEl = $('#out_reason_text'); if (reasonTextEl) reasonTextEl.value = '';
     const remarkEl = $('#out_remark'); if (remarkEl) remarkEl.value = '';
     clearPickState('out');
     outSearch();
@@ -2065,12 +2104,14 @@
     const operator = ($('#out_operator') || {}).value.trim();
     const counterparty = ($('#out_party') || {}).value.trim();
     const time = inputToMs(($('#out_time') || {}).value);
+    const outReason = ($('#out_reason') || {}).value || 'use';
+    const outReasonText = ($('#out_reason_text') || {}).value.trim();
     const remark = ($('#out_remark') || {}).value.trim();
     if (!operator) { toast('请填写经办人', 'err'); return; }
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
-        await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark });
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark, outReason, outReasonText });
         ok++;
       } catch (e) { fail++; }
     }
@@ -2078,6 +2119,7 @@
     // 只清理本次的选择结果，保留经办人/领用人/时间便于连续录入
     clearPickState('out');
     const remarkEl = $('#out_remark'); if (remarkEl) remarkEl.value = '';
+    const reasonTextEl = $('#out_reason_text'); if (reasonTextEl) reasonTextEl.value = '';
     outSearch();
     if (ok) toast(`出库成功 ${ok} 套${fail ? `，失败 ${fail} 套` : ''}`, fail ? 'warn' : 'ok');
     else toast('出库失败，请检查夹具状态', 'err');
@@ -2132,6 +2174,8 @@
     const nameEl = $('#return_name'); if (nameEl) nameEl.value = '';
     const specEl = $('#return_spec'); if (specEl) specEl.value = '';
     const locEl = $('#return_location'); if (locEl) locEl.value = '';
+    const reasonEl = $('#return_reason'); if (reasonEl) reasonEl.value = 'use';
+    const reasonTextEl = $('#return_reason_text'); if (reasonTextEl) reasonTextEl.value = '';
     const remarkEl = $('#return_remark'); if (remarkEl) remarkEl.value = '';
     clearPickState('return');
     returnSearch();
@@ -2146,6 +2190,8 @@
     const operator = ($('#return_operator') || {}).value.trim();
     const counterparty = ($('#return_party') || {}).value.trim();
     const time = inputToMs(($('#return_time') || {}).value);
+    const returnReason = ($('#return_reason') || {}).value || 'use';
+    const returnReasonText = ($('#return_reason_text') || {}).value.trim();
     const remark = ($('#return_remark') || {}).value.trim();
     /* 回库库位：留空则沿用原库位；填写则写回夹具并留痕（原库位 → 新库位）。
        校验必须早于任何写库动作，避免出现「部分回库成功、部分被拒」的中间态。 */
@@ -2158,13 +2204,14 @@
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
-        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, time, remark, location: wantLoc || undefined });
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, time, remark, location: wantLoc || undefined, outReason: returnReason, outReasonText: returnReasonText });
         ok++;
       } catch (e) { fail++; }
     }
     await reloadAll();
     clearPickState('return');
     const remarkEl = $('#return_remark'); if (remarkEl) remarkEl.value = '';
+    const reasonTextEl = $('#return_reason_text'); if (reasonTextEl) reasonTextEl.value = '';
     const locEl = $('#return_new_location'); if (locEl) locEl.value = '';
     returnSearch();
     if (ok) toast(`回库成功 ${ok} 套${fail ? `，失败 ${fail} 套` : ''}`, fail ? 'warn' : 'ok');
@@ -2394,7 +2441,10 @@
           const tc = FIX_TX_TYPE[t.type] || { label: t.type, icon: '📋' };
           const fs = FIX_STATUS[t.fromStatus] || { label: t.fromStatus };
           const ts = FIX_STATUS[t.toStatus] || { label: t.toStatus };
-          const reasonLabel = t.outReason ? (OUT_REASON_LABEL[t.outReason] || t.outReason) : '';
+          const reasonLabel = t.outReason ? (() => {
+            if (t.outReason === 'other' && t.outReasonText) return '其它（' + esc(t.outReasonText) + '）';
+            return OUT_REASON_LABEL[t.outReason] || t.outReason;
+          })() : '';
           return `
             <div class="tx-row">
               <div class="tx-type">${tc.icon} ${tc.label}</div>
@@ -2444,7 +2494,8 @@
     const sortOpt = (f) => opt(f, q.sortBy);
     const outReasonOpts = ['<option value="">全部</option>',
       '<option value="use"' + (q.outReason === 'use' ? ' selected' : '') + '>使用</option>',
-      '<option value="repair"' + (q.outReason === 'repair' ? ' selected' : '') + '>维修</option>'].join('');
+      '<option value="repair"' + (q.outReason === 'repair' ? ' selected' : '') + '>维修</option>',
+      '<option value="other"' + (q.outReason === 'other' ? ' selected' : '') + '>其它</option>'].join('');
 
     container.innerHTML = `
       <div class="panel">
@@ -2597,6 +2648,9 @@
     }
     if (reason === 'use') {
       return list.some((t) => t.type === 'out' && (!t.outReason || t.outReason === 'use'));
+    }
+    if (reason === 'other') {
+      return list.some((t) => t.type === 'out' && t.outReason === 'other');
     }
     return true;
   }
