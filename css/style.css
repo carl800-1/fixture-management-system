@@ -220,6 +220,10 @@ tbody tr.selected { background: var(--primary-soft); }
 /* ---------- 夹具卡片 ---------- *//* ---------- 表单 ---------- */
 .form-group { margin-bottom: 14px; }
 .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px; color: var(--muted); }
+/* 横向表单组（产线工位）：标签置顶、控件区充满剩余宽度，供内部 .ls-toolbar 横向排开 */
+.form-group.form-group-row { display: flex; flex-wrap: wrap; column-gap: 14px; }
+.form-group.form-group-row label { flex: 0 0 auto; margin-bottom: 0; margin-top: 3px; }
+.form-group.form-group-row > :not(label) { flex: 1 1 340px; }
 .form-group input, .form-group select, .form-group textarea {
   width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
   font-size: 14px; background: #fff; color: var(--text);
@@ -265,7 +269,8 @@ tbody tr.selected { background: var(--primary-soft); }
 /* ---------- 夹具卡片 ---------- */
 .fixture-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* 220px 时 5 个操作按钮放不进一行，抬到 240px 保证「出库/送修/编辑/报废/二维码」同排 */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;
   padding: 16px;
 }
@@ -299,8 +304,13 @@ tbody tr.selected { background: var(--primary-soft); }
 .fixture-card-body { margin-bottom: 10px; }
 .fixture-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
 .fixture-lineModels { color: var(--muted); font-size: 12px; margin-bottom: 6px; word-break: break-all; }
+/* 机种 / 产线工位等派生行：小字灰字，单行省略（完整内容看 title 提示） */
+.fixture-spec { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.fixture-spec.fixture-ls { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fixture-meta { display: flex; gap: 12px; font-size: 11px; color: var(--muted); }
-.fixture-card-footer { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 操作按钮：收紧内距 + 不换行，5 个按钮排一行不折行 */
+.fixture-card-footer { display: flex; gap: 3px; flex-wrap: wrap; }
+.fixture-card-footer .btn.sm { padding: 3px 5px; font-size: 11.5px; white-space: nowrap; }
 
 /* ---------- 状态徽章 ---------- */
 .status-badge {
@@ -582,7 +592,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .ld-code.ld-none { fill: #9ca3af; font-weight: 400; }
 
 /* ============================================================
- * v4.0.0 新增：机种 chips、产线工位折叠扇区、派生数量合计、
+ * v4.0.0 新增：机种 chips、产线工位选择（v4.0.2 起为两级下拉 + 标签区）、派生数量合计、
  *            机种分组视图、库位卡片计数、字段提示
  * ============================================================ */
 
@@ -606,30 +616,22 @@ tbody tr.selected { background: var(--primary-soft); }
 .chip-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .chip-add select { min-width: 190px; }
 .chip-add input[type="text"] { flex: 1; min-width: 180px; }
+.chip-add .btn { flex: 0 0 auto; white-space: nowrap; }
 
-/* ---------- 产线工位折叠扇区 ---------- */
-.ls-box { border: 1px solid var(--border); border-radius: 8px; background: #fafbfd; padding: 10px; }
-.ls-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-.ls-toolbar select { min-width: 220px; }
-.ls-list { display: flex; flex-direction: column; gap: 8px; }
-.ls-sec { border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden; }
-.ls-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px; cursor: pointer; background: #f8fafc; user-select: none;
-}
-.ls-head:hover { background: var(--primary-soft); }
-.ls-caret { color: var(--muted); font-size: 12px; width: 12px; }
-.ls-count { font-size: 12px; color: var(--muted); }
-.ls-body { padding: 8px 12px 10px; display: flex; flex-wrap: wrap; gap: 8px; }
-.ls-st {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
-  background: #fff; font-size: 13px; cursor: pointer;
-}
-.ls-st.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
-.ls-st.off { opacity: .5; cursor: not-allowed; }
-.ls-st span { font-size: 11px; color: var(--muted); }
-.ls-st.on span { color: var(--primary-dark); }
+/* ---------- 产线工位：两级下拉 + 标签区 ---------- */
+.ls-box { border: 1px solid var(--border); border-radius: 8px; background: #fafbfd; padding: 10px; flex: 1 1 auto; min-width: 320px; }
+/* 工具区：产线下拉 + 工位下拉 +「+ 添加」+ 计数 一行排列（空间不足时换行，不截断） */
+.ls-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+/* 两下拉自适应宽度：容器够宽时与「+ 添加」「计数」同行；不足时自动换行，不截断 */
+.ls-toolbar #fix_line_pick { flex: 0 1 auto; width: auto; min-width: 150px; max-width: 240px; }
+.ls-toolbar #fix_st_pick { flex: 0 1 auto; width: auto; min-width: 130px; max-width: 220px; }
+.ls-toolbar .muted { font-size: 12px; white-space: nowrap; }
+.ls-toolbar .btn { flex: 0 0 auto; white-space: nowrap; }
+/* 标签区空态：与旧版「尚未选择工位」边框一致，避免空区视觉断裂 */
+.chip-box.chip-box-empty { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+.chip-box.chip-box-empty .chip-ls-empty { display: block; font-size: 12px; }
+.chip-tag.chip-ls b { font-weight: 700; }
+.chip-tag.chip-ls .chip-x { margin-left: 2px; }
 
 /* ---------- 库位卡片：在库套数 ---------- */
 .loc-card { flex-direction: column; gap: 2px; }

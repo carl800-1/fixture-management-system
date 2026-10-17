@@ -48,7 +48,7 @@ function file() { return path.join(DATA_DIR, 'fixture-data.json'); }
 /* 编号归一化：忽略大小写 / 连字符 / 下划线 / 空格，用于扫码枪录入差异容错 */
 function normalizeCode(str) {
   return String(str == null ? '' : str)
-    .replace(/^SPMS1?\s*\|\s*/i, '')   // 兜底剥离二维码前缀
+    .replace(/^SPMS1?\s*\|\s*/i, '')   // 兼容旧二维码前缀（v4.0.2 起二维码内容已是纯序号）
     .replace(/[\s\-_]/g, '')
     .toUpperCase();
 }
@@ -131,6 +131,18 @@ function migrate() {
   // 6) 废弃集合直接丢弃
   if (data.stationFixtures) { delete data.stationFixtures; changed = true; }
   if (data.products) { delete data.products; changed = true; }
+
+  // 7) 补齐缺失的主键 id（旧样本/旧版数据夹具未带 id，会导致编辑/删除/出入库
+  //    按 id 查找全部失效 → 卡片「编辑」误开「新建」）。seq 已在 load 阶段按现有
+  //    最大 id 初始化，nextId() 不会与现有 id 冲突；已带 id 的条目跳过，幂等。
+  COLLECTIONS.forEach((c) => {
+    (data[c] || []).forEach((x) => {
+      if (x && (x.id == null || typeof x.id !== 'number')) {
+        x.id = nextId();
+        changed = true;
+      }
+    });
+  });
 
   return changed;
 }

@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v4.0.1 — 工装夹具管理程序数据层
+ * db.js v4.0.2 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '4.0.1';
+  const APP_VERSION = '4.0.2';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
@@ -73,6 +73,7 @@ const DB = (function () {
   function lsSeq() { const s = lsRead(LS_SEQ, 0) + 1; lsWrite(LS_SEQ, s); return s; }
 
   function bad(msg, name) { const e = new Error(msg); e.name = name || 'ValidationError'; throw e; }
+  /* 编号归一化：忽略大小写 / 连字符 / 下划线 / 空格；并兼容旧二维码前缀（v4.0.2 起为纯序号） */
   function normalizeCode(str) {
     return String(str == null ? '' : str)
       .replace(/^SPMS1?\s*\|\s*/i, '')

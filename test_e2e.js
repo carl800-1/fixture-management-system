@@ -87,12 +87,22 @@ const NEW_FIXTURE_FN = `
       const sel = $('#fix_line_pick');
       const opt = sel ? [...sel.options].find((x) => x.textContent.includes(nm)) : null;
       if (!opt) { diag.push('no-line:' + nm); continue; }
-      sel.value = opt.value; window.fixFormAddLine(); await sleep(160);
+      sel.value = opt.value; window.fixFormLinePicked(); await sleep(160);
     }
     for (const nm of (o.stations || [])) {
-      const cb = $$('#fix_ls_box input[type=checkbox]').find((x) => x.closest('.ls-st') && x.closest('.ls-st').textContent.includes(nm));
-      if (!cb) { diag.push('no-station:' + nm); continue; }
-      cb.checked = true; cb.dispatchEvent(new Event('change')); await sleep(100);
+      /* 工位下拉只列「当前所选产线」的工位 → 逐条产线找同名工位再「+ 添加」 */
+      let done = false;
+      const lp = $('#fix_line_pick');
+      for (const lo of (lp ? [...lp.options] : [])) {
+        if (!lo.value) continue;
+        lp.value = lo.value; window.fixFormLinePicked(); await sleep(90);
+        const sp = $('#fix_st_pick');
+        const so = sp ? [...sp.options].find((x) => x.textContent.includes(nm)) : null;
+        if (!so) continue;
+        sp.value = so.value; window.fixFormAddStation(); await sleep(90);
+        done = true; break;
+      }
+      if (!done) diag.push('no-station:' + nm);
     }
     const selCount = (($('#fix_ls_count')||{}).textContent||'');
     window.submitFixForm();
@@ -255,9 +265,10 @@ async function main() {
     window.fixtureNew(); await sleep(200);
     setV('#fix_serial','SN-BAD'); setV('#fix_name','非法库位'); setV('#fix_loc','A-9');
     setV('#fix_lm_text','WJ-100'); window.fixFormModelsInput(); await sleep(60);
-    const sel0 = $('#fix_line_pick'); sel0.value=String(${cfg.l1}); window.fixFormAddLine(); await sleep(120);
-    const cb0 = $$('#fix_ls_box input[type=checkbox]')[0]; if (cb0) { cb0.checked=true; cb0.dispatchEvent(new Event('change')); }
-    await sleep(80);
+    const sel0 = $('#fix_line_pick'); sel0.value=String(${cfg.l1}); window.fixFormLinePicked(); await sleep(120);
+    const st0 = $('#fix_st_pick');
+    if (st0 && st0.options[1]) { st0.value = st0.options[1].value; window.fixFormAddStation(); }
+    await sleep(120);
     window.submitFixForm(); await sleep(350);
     out.deniedBadLoc = /4 段式/.test((($('#toast')||{}).textContent||''));
     window.closeModal(); await sleep(120);
@@ -633,7 +644,7 @@ async function main() {
     (locRes.cards.find((c) => /不在库/.test(c.title)) || locRes.cards[0] || {}).title);
   ok('「手工盘点」按钮存在', locRes.hasAuditBtn === true);
 
-  /* 二维码弹窗：内容 = SPMS1|<code>，标签卡只印实物编号 + 名称 */
+  /* 二维码弹窗：内容 = 纯序号（如 1001，无 SPMS1| 前缀），标签卡只印夹具编号 + 名称 */
   const qrRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('fixtures'); await sleep(300);
@@ -646,7 +657,9 @@ async function main() {
     const modalText=(($('#modalBody')||{}).textContent||'');
     out.hasCanvas=!!canvas;
     out.qrDrawn=!!canvas && canvas.width>0 && canvas.height>0;
-    out.tokenShown=/SPMS1\\|\\d{4}/.test(modalText);
+    out.tokenShown=/二维码内容：\\d{4}/.test(modalText);
+    out.tokenHasSpms=/SPMS/i.test(modalText);
+    out.hasNameLabel=modalText.includes('夹具编号');
     out.hasBridgeLabel=modalText.includes('序号');
     out.hasDownload=!!btnByText('下载 PNG');
     out.hasPrint=!!btnByText('打印');
@@ -656,9 +669,10 @@ async function main() {
   ok('夹具卡片含「二维码」按钮', !qrRes.err, JSON.stringify(qrRes));
   ok('「批量打印标签」按钮存在', qrRes.hasBatch === true);
   ok('二维码弹窗打开并绘制二维码', qrRes.hasCanvas === true && qrRes.qrDrawn === true, JSON.stringify(qrRes));
-  ok('弹窗展示二维码内容 SPMS1|<序号>', qrRes.tokenShown === true);
-  ok('弹窗区分「实物编号」与「序号」两个概念', qrRes.hasBridgeLabel === true);
-  ok('二维码弹窗标题显示实物编号', /XXK-D10VG-002/.test(qrRes.modalTitle), qrRes.modalTitle);
+  ok('弹窗展示二维码内容为纯序号（4 位数字）', qrRes.tokenShown === true, JSON.stringify(qrRes));
+  ok('二维码内容不含 SPMS 前缀', qrRes.tokenHasSpms === false, JSON.stringify(qrRes));
+  ok('弹窗区分「夹具编号」与「序号」两个概念', qrRes.hasNameLabel === true && qrRes.hasBridgeLabel === true);
+  ok('二维码弹窗标题显示夹具编号', /XXK-D10VG-002/.test(qrRes.modalTitle), qrRes.modalTitle);
   ok('「下载 PNG」「打印」按钮存在', qrRes.hasDownload === true && qrRes.hasPrint === true);
 
   const printRes = await wc.executeJavaScript(`(async () => {

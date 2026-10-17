@@ -326,7 +326,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     /* ---- 4. 全局函数挂载 ---- */
     const fns = ['fixtureNew','fixtureEdit','fixtureOut','fixtureReturn','fixtureRepair',
       'fixtureRepairComplete','fixtureRetire','fixtureSearch','submitFixForm',
-      'fixFormAddLine','fixFormRemoveLine','fixFormToggleSec','fixFormToggleStation',
+      'fixFormLinePicked','fixFormStationPicked','fixFormAddStation','fixFormRemoveStation',
       'fixFormModelsInput','fixFormRemoveModel','fixFormCheckSerial','fixFormGotoLineCfg',
       'lineCfgLineForm','lineCfgSaveLine','lineCfgPickLine','lineCfgStationForm','lineCfgSaveStation',
       'lineCfgDelLine','lineCfgImport','lineQueryChangeLine','lineQueryReset',
@@ -407,13 +407,15 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       /* 机种 */
       $('#fix_lm_text').value='冒烟机种X';
       window.fixFormModelsInput(); await sleep(300);
-      /* 产线 */
+      /* 产线（两级下拉：先选产线） */
       const pick=$('#fix_line_pick');
       if(!pick) return JSON.stringify({step:'no-line-pick'});
-      pick.value='${LID}';
-      window.fixFormAddLine(); await sleep(500);
-      /* 工位（直接按 id 勾选） */
-      window.fixFormToggleStation(${SID}, ${LID}, true); await sleep(300);
+      pick.value='${LID}'; window.fixFormLinePicked(); await sleep(400);
+      /* 工位（选该产线下的工位 → 点「+ 添加」） */
+      const spick=$('#fix_st_pick');
+      if(!spick) return JSON.stringify({step:'no-st-pick'});
+      spick.value='${SID}'; window.fixFormStationPicked(); await sleep(200);
+      window.fixFormAddStation(); await sleep(400);
       const cnt=$('#fix_ls_count')?$('#fix_ls_count').textContent:'';
       window.submitFixForm(); await sleep(1100);
       const t=$('#toast');
@@ -451,6 +453,28 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       console.log('  夹具 ' + (db.fixtures || []).length + ' 套 · 产线 ' + (db.lines || []).length
         + ' 条 · 工位 ' + (db.stations || []).length + ' 个');
     }
+
+    /* ---- 8.5 二维码内容 = 纯序号（无 SPMS1| 前缀） ---- */
+    const qrCheck = await evaluate(`(async () => {
+      const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+      const $=(s)=>document.querySelector(s);
+      window.showView('fixtures'); await sleep(400);
+      const card=[...document.querySelectorAll('.fixture-card')].find(c=>c.textContent.includes('冒烟测试夹具'));
+      if(!card) return JSON.stringify({step:'no-card'});
+      const qrBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('二维码'));
+      if(!qrBtn) return JSON.stringify({step:'no-qr-btn'});
+      qrBtn.click(); await sleep(500);
+      const txt=(($('#modalBody')||{}).textContent||'');
+      const m=txt.match(/二维码内容：\\s*(\\S+)/);
+      const cv=$('#qrCanvas');
+      const out={step:'ok', token:m?m[1]:'', drawn:!!cv && cv.width>0};
+      window.closeModal(); await sleep(120);
+      return JSON.stringify(out);
+    })()`);
+    const qj = JSON.parse(qrCheck);
+    ok('二维码弹窗可打开并绘制', qj.step === 'ok' && qj.drawn === true, qrCheck);
+    ok('二维码内容为纯序号（4 位数字）', /^\d{4}$/.test(qj.token || ''), qj.token);
+    ok('二维码内容不含 SPMS 前缀', !/SPMS/i.test(qj.token || ''), qj.token);
 
     /* ---- 9. 派生数量：出库 → 状态与库位 ---- */
     const derive = await evaluate(`(async () => {

@@ -324,7 +324,8 @@ ok(svg.includes('<line'), '直线形使用折线轨迹');
 const svgNoSerial = M.renderLineDiagram(lineObj, M.buildStationRows(svgStations, [
   { id: 1, code: '2001', serialNo: '', name: '焊接夹具', status: 'stocked', lineModels: [], lines: [1], stations: [20] }
 ]));
-ok(svgNoSerial.includes('#2001'), '无实物编号时徽标退回「#序号」', svgNoSerial.match(/ld-code[^>]*>([^<]*)</g));
+ok(svgNoSerial.includes('>2001<'), '无夹具编号时徽标退回「序号」纯数字', svgNoSerial.match(/ld-code[^>]*>([^<]*)</g));
+ok(!svgNoSerial.includes('#2001'), '徽标序号不带 # 前缀');
 const svgU = M.renderLineDiagram({ name: 'L2', type: 'u' }, rowsForSvg);
 ok(svgU.includes('<polyline'), 'U型使用折线轨迹');
 ok(svgU.includes('U型产线示意图'), 'U型图标题含形态名');
