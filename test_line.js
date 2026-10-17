@@ -17,7 +17,7 @@
  *   B. 线体形态
  *   C. 工位排序
  *   D. buildStationRows 工位夹具配置表（v4 新签名）
- *   E. computeLineLayout / uLayoutPoints 产线图布局
+ *   E. computeLineLayout / lineLayoutPoints 产线图布局
  *   F. renderLineDiagram 产线图渲染
  *   G. 产线导入映射与计划（v4 六列表头 / 追加去重 / 上限拦截）
  *   H. 端到端：plan → applyLineImportPlan（真实 store）→ 读回校验 + 重复导入幂等
@@ -83,7 +83,7 @@ const ctx = vm.createContext(sandbox);
 vm.runInContext(parts.join('\n') + `
 ;__export = {
   lineTypeLabel, lineTypeKey, parseLineType, sortStations, buildStationRows,
-  fixturesOfLine, fixturesOnStation, computeLineLayout, uLayoutPoints, stationsOfLine,
+  fixturesOfLine, fixturesOnStation, computeLineLayout, lineLayoutPoints, stationsOfLine,
   renderLineDiagram, mapLineImportHeader, buildLineImportPlan, applyLineImportPlan,
   buildProdQueryRows, isValidLocation, isValidSerialNo, isValidProductionName,
   LINE_IMPORT_HEADERS, MAX_LINES, MAX_STATIONS, MAX_LINE_MODELS
@@ -271,7 +271,7 @@ ok(M.stationsOfLine(dStations, 1).length === 3, 'stationsOfLine 返回该线全�
 sandbox.state.fixtures = [];
 
 /* ============ E. 产线图布局 ============ */
-section('E. computeLineLayout / uLayoutPoints 产线图布局');
+section('E. computeLineLayout / lineLayoutPoints 产线图布局');
 ok(M.computeLineLayout(0, 'linear').length === 0, '0 个工位 → 空布局');
 ok(M.computeLineLayout(-1, 'linear').length === 0, '负数 → 空布局');
 ok(M.computeLineLayout(5, 'linear').length === 5, '直线形：N 个点');
@@ -294,10 +294,10 @@ ok(Math.abs(u6[0].x - u6[1].x) < 1e-9 && u6[1].y > u6[0].y, 'U型左侧竖边：
 ok(Math.abs(u6[4].x - u6[5].x) < 1e-9 && u6[4].y > u6[5].y, 'U型右侧竖边：x 相同、y 递减');
 ok(Math.abs(u6[2].y - u6[3].y) < 1e-9 && u6[2].x < u6[3].x, 'U型底部横边：y 相同、x 递增');
 ok(Math.abs(u6[0].y - u6[5].y) < 1e-9, 'U型两端等高（左右顶点同一水平线）');
-ok(M.uLayoutPoints(6).length === 6, 'uLayoutPoints 直接调用返回 N 个点');
+ok(M.lineLayoutPoints(6).length === 6, 'lineLayoutPoints 直接调用返回 N 个点');
 ok(M.computeLineLayout(6, 'u').map((p) => p.x.toFixed(6) + '|' + p.y.toFixed(6)).join(';')
-  === M.uLayoutPoints(6).map((p) => p.x.toFixed(6) + '|' + p.y.toFixed(6)).join(';'),
-  'U 型布局与 uLayoutPoints 完全一致（共用同一套几何常量）');
+  === M.lineLayoutPoints(6).map((p) => p.x.toFixed(6) + '|' + p.y.toFixed(6)).join(';'),
+  'U 型布局与 lineLayoutPoints 完全一致（共用同一套几何常量）');
 ok(M.computeLineLayout(1, 'u').length === 1, 'U型单工位也能布点');
 ok(M.computeLineLayout(2, 'u').length === 2, 'U型 2 工位布点正常');
 ok(M.computeLineLayout(9, 'u').every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1), 'U型 9 工位坐标不越界');

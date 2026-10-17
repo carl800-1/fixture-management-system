@@ -3671,34 +3671,39 @@
     return t ? t.label : '直线形';
   }
 
-  /* 产线示意图画布与 U 型几何（归一化坐标，渲染时经 px() 映射到像素）。
+  /* 产线示意图画布（归一化坐标，渲染时经 px() 映射到像素）。
    * 布局与绘图共用同一组常量，避免两处各写一套导致节点与轨迹错位。 */
   const LINE_W = 1000;
-  const LINE_U_H = 520;               // U 型画布高度（比直线形固定得高一些，容纳两条竖边）
-  const LINE_PER_ROW = 6;             // 直线形每行工位数
-  const U_GEO = { xL: 0.26, xR: 0.74, yTop: 0.10, yBot: 0.90 };
-  /* 归一化 ↔ 像素（与 renderLineDiagram 的 px() 完全一致） */
-  const uPxX = (nx) => 60 + nx * (LINE_W - 120);
-  const uPxY = (ny) => 50 + ny * (LINE_U_H - 100);
-  const uNx = (v) => (v - 60) / (LINE_W - 120);
-  const uNy = (v) => (v - 50) / (LINE_U_H - 100);
+  const LINE_H = 520;                  // 画布高度（直线形与 U 型统一）
+  const LINE_PER_ROW = 6;              // 直线形每行工位数
 
-  /* U 型布点：左上角 → 沿左侧竖边下行 → 底部横边右移 → 沿右侧竖边上行 → 右上角。
-   * 按三段实际像素长度等分弧长，保证视觉疏密一致（底边比竖边长，自然多放工位）。 */
-  function uLayoutPoints(n) {
-    const ax = uPxX(U_GEO.xL), bx = uPxX(U_GEO.xR);
-    const yt = uPxY(U_GEO.yTop), yb = uPxY(U_GEO.yBot);
-    const legH = yb - yt;
-    const botW = bx - ax;
-    const total = legH * 2 + botW;
+  /* 产线布局布点（直线形 / U 型共用，v4.0.2 改版）：
+   *   底部 = round(n/3)（横排，y=0.88，从左到右）
+   *   左列 = ceil((n-底部)/2)（竖排，x=0.22，从上到下）
+   *   右列 = n - 左列 - 底部（竖排，x=0.78，从下到上）
+   * 三段依次拼接、严格顺序递增。19 个工位 → 底 6 / 左 7 / 右 6
+   *（左 1~7、底 8~13、右 14~19）；6 个工位 → 底 2 / 左 2 / 右 2。 */
+  function lineLayoutPoints(n) {
+    if (n <= 0) return [];
+    const bottomCount = Math.max(1, Math.round(n / 3));
+    const leftCount = Math.ceil((n - bottomCount) / 2);
+    const rightCount = n - bottomCount - leftCount;
+
     const pts = [];
-    for (let i = 0; i < n; i++) {
-      const t = n === 1 ? total / 2 : (i / (n - 1)) * total;
-      let px, py;
-      if (t <= legH) { px = ax; py = yt + t; }
-      else if (t <= legH + botW) { px = ax + (t - legH); py = yb; }
-      else { px = bx; py = yb - (t - legH - botW); }
-      pts.push({ x: uNx(px), y: uNy(py) });
+    // 左列：从上到下，x=0.22，y 从 0.08 到 0.80
+    for (let i = 0; i < leftCount; i++) {
+      const y = leftCount === 1 ? 0.08 : 0.08 + (0.72 * i) / (leftCount - 1);
+      pts.push({ x: 0.22, y });
+    }
+    // 底部横排：从左到右，y=0.88
+    for (let i = 0; i < bottomCount; i++) {
+      const x = bottomCount === 1 ? 0.5 : 0.08 + (0.84 * i) / (bottomCount - 1);
+      pts.push({ x, y: 0.88 });
+    }
+    // 右列：从下到上，x=0.78，y 从 0.80 到 0.08
+    for (let i = 0; i < rightCount; i++) {
+      const y = rightCount === 1 ? 0.08 : 0.80 - (0.72 * i) / (rightCount - 1);
+      pts.push({ x: 0.78, y });
     }
     return pts;
   }
@@ -3764,14 +3769,14 @@
 
   /* 产线图布局计算（纯函数）：返回各工位的归一化坐标（0~1），渲染时再乘容器尺寸。
    *   linear 直线形：按每行 perRow 个折行排布（蛇形不启用，保持从左到右）；
-   *   u      U型：沿左侧竖边下行 → 底部横边 → 沿右侧竖边上行。 */
+   *   u      U型：沿左侧竖边下行 → 底部横边 → 沿右侧竖边上行（lineLayoutPoints）。 */
   function computeLineLayout(count, type, perRow) {
     const n = Number(count) || 0;
     if (n <= 0) return [];
+    if (lineTypeKey(type) === 'u') return lineLayoutPoints(n);
     const per = Math.max(1, Number(perRow) || LINE_PER_ROW);
-    const pts = [];
-    if (lineTypeKey(type) === 'u') return uLayoutPoints(n);
     const rows = Math.ceil(n / per);
+    const pts = [];
     for (let i = 0; i < n; i++) {
       const r = Math.floor(i / per);
       const c = i % per;
@@ -3796,8 +3801,7 @@
     }
     const isU = lineTypeKey(line.type) === 'u';
     const W = LINE_W;
-    const H = isU ? LINE_U_H
-      : Math.max(220, Math.ceil(rows.length / LINE_PER_ROW) * 150 + 70);
+    const H = LINE_H;
     const pts = computeLineLayout(rows.length, line.type, LINE_PER_ROW);
     const px = (p) => ({ x: 60 + p.x * (W - 120), y: 50 + p.y * (H - 100) });
 
@@ -3818,12 +3822,12 @@
         </g>`;
     }).join('');
 
-    // 连线：U型画三段折线轨迹；直线形按行分段折线
+    // 连线：U 型 = 按工位顺序逐点连线（左上→左下→底部→右上，自动形成 U 形轨迹）；
+    // 直线形 = 按行分段折线 + 行间折返。
     let path = '';
     if (isU) {
-      const c = [px({ x: U_GEO.xL, y: U_GEO.yTop }), px({ x: U_GEO.xL, y: U_GEO.yBot }),
-        px({ x: U_GEO.xR, y: U_GEO.yBot }), px({ x: U_GEO.xR, y: U_GEO.yTop })];
-      path = `<polyline points="${c.map((p) => `${p.x},${p.y}`).join(' ')}" class="ld-track"/>`;
+      const c = pts.map((p) => px(p));
+      path = `<polyline points="${c.map((p) => `${p.x},${p.y}`).join(' ')}" class="ld-track" fill="none"/>`;
     } else {
       const per = LINE_PER_ROW;
       const rowsN = Math.ceil(rows.length / per);
