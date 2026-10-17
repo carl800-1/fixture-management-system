@@ -370,6 +370,8 @@ function addFixTransaction(tx) {
   if (tx.type === 'out' && !fromLocation && !isValidLocation(wantLoc)) {
     bad('该夹具尚未设置库位，请先补填库位号（如 ZP1-U-1-1）');
   }
+  // 出库原因校验：仅允许 use / repair，缺省按 use（使用）
+  const outReason = tx.outReason === 'repair' ? 'repair' : 'use';
   if (tx.type === 'return' && wantLoc && wantLoc !== fromLocation && !isValidLocation(wantLoc)) {
     bad('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符');
   }
@@ -377,6 +379,8 @@ function addFixTransaction(tx) {
   if (tx.type === 'out') {
     toStatus = 'checked_out';
     fixture.totalOutCount = (fixture.totalOutCount || 0) + 1;
+    // 出库原因为「维修」时记一次维修（与 repair 事件一致口径：每次送修出库 +1）
+    if (outReason === 'repair') fixture.repairCount = (fixture.repairCount || 0) + 1;
     // 库位为空时必须由本次出库补齐；已有库位则冻结不动
     if (!fromLocation) { fixture.location = wantLoc; toLocation = wantLoc; }
   } else if (tx.type === 'return') {
@@ -405,6 +409,7 @@ function addFixTransaction(tx) {
     type: tx.type,
     operator: tx.operator || '',
     counterparty: tx.counterparty || '',
+    outReason: tx.type === 'out' ? outReason : '',
     time: tx.time,
     remark: tx.remark || '',
     repairType: tx.repairType || '',

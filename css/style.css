@@ -326,7 +326,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .tx-list { padding: 0; }
 .tx-row {
   display: grid;
-  grid-template-columns: 60px 80px 100px 80px 100px 140px 1fr;
+  grid-template-columns: 60px 80px 100px 80px 100px 140px 1fr 80px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   align-items: center;
@@ -340,6 +340,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .tx-party { color: var(--muted); }
 .tx-time { color: var(--muted); }
 .tx-remark { color: var(--muted); font-style: italic; }
+.tx-reason { color: var(--muted); text-align: right; }
 .tx-header {
   background: var(--bg);
   font-weight: 600;

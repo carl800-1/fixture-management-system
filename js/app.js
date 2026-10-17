@@ -308,7 +308,7 @@
     outForm: { operator: '', counterparty: '', remark: '', time: '' },
     returnForm: { operator: '', remark: '', time: '' },
     // 夹具查询：筛选/排序状态（切换视图后保留，便于连续检索）
-    query: { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', statuses: [], sortBy: 'code', sortDir: 'asc' },
+    query: { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', statuses: [], sortBy: 'code', sortDir: 'asc', outReason: '' },
     serialQuery: '',          // 夹具查询页：按夹具编号聚合（数量与合计）的输入值
     // 关联配置数据（v4.0.0）
     lines: [],
@@ -349,6 +349,7 @@
     repair_done: { label: '维修完成', icon: '✅' },
     retire: { label: '报废', icon: '🗑️' }
   };
+  const OUT_REASON_LABEL = { use: '使用', repair: '维修' };
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
@@ -588,6 +589,7 @@
     const retired = state.fixtures.filter((f) => f.status === 'retired').length;
     const totalOut = state.fixtures.reduce((s, f) => s + (f.totalOutCount || 0), 0);
     const totalReturn = state.fixtures.reduce((s, f) => s + (f.totalReturnCount || 0), 0);
+    const totalRepair = state.fixtures.reduce((s, f) => s + (f.repairCount || 0), 0);
 
     $('#content').innerHTML = `
       <div class="panel">
@@ -605,6 +607,7 @@
         <div class="stats-bar">
           <div class="stat-item"><span class="stat-label">累计出库</span><span class="stat-value">${totalOut}</span></div>
           <div class="stat-item"><span class="stat-label">累计回库</span><span class="stat-value">${totalReturn}</span></div>
+          <div class="stat-item"><span class="stat-label">累计维修</span><span class="stat-value">${totalRepair}</span></div>
           <div class="stat-item"><span class="stat-label">流水记录</span><span class="stat-value">${state.fixTransactions.length}</span></div>
           <div class="stat-item"><span class="stat-label">机种</span><span class="stat-value">${(state.productions || []).length}</span></div>
           <div class="stat-item"><span class="stat-label">产线</span><span class="stat-value">${(state.lines || []).length}</span></div>
@@ -660,6 +663,13 @@
       </div>
       <div class="form-group"><label>经办人</label><input type="text" id="fix_out_op" placeholder="经办人（拼音联想）"></div>
       <div class="form-group"><label>领用人</label><input type="text" id="fix_out_party" placeholder="领用人/使用部门"></div>
+      <div class="form-group"><label>出库原因 <span class="req">*</span></label>
+        <select id="fix_out_reason" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
+          <option value="use">使用</option>
+          <option value="repair">维修</option>
+        </select>
+        <small class="hint">选「维修」时该套夹具的维修次数 +1（与「送修」流水同口径）</small>
+      </div>
       <div class="form-group"><label>出库时间</label><input type="datetime-local" id="fix_out_time" value="${nowInput()}"></div>
       <div class="form-group"><label>备注</label><input type="text" id="fix_out_remark" placeholder="可选备注"></div>
       <div class="form-actions">
@@ -677,10 +687,12 @@
     const remark = ($('#fix_out_remark') || {}).value.trim();
     const locEl = $('#fix_out_loc');
     const location = locEl ? locEl.value.trim() : '';
+    const reasonEl = $('#fix_out_reason');
+    const outReason = reasonEl && reasonEl.value === 'repair' ? 'repair' : 'use';
     if (!operator) { toast('请填写经办人', 'err'); return; }
     if (locEl && !isValidLocation(location)) { toast('库位号需为 4 段式（如 ZP1-U-1-1）', 'err'); return; }
     try {
-      await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark, location: location || undefined });
+      await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark, location: location || undefined, outReason });
       closeModal();
       await reloadAll();
       renderFixtures();
@@ -1589,12 +1601,13 @@
     const html = `
       <div class="tx-list">
         <div class="tx-row tx-header">
-          <div>类型</div><div>夹具</div><div>状态</div><div>经办人</div><div>领用人</div><div>时间</div><div>备注</div>
+          <div>类型</div><div>夹具</div><div>状态</div><div>经办人</div><div>领用人</div><div>时间</div><div>备注</div><div>出库原因</div>
         </div>
         ${filtered.map((t) => {
           const tc = FIX_TX_TYPE[t.type] || { label: t.type, icon: '📋' };
           const fs = FIX_STATUS[t.fromStatus] || { label: t.fromStatus };
           const ts = FIX_STATUS[t.toStatus] || { label: t.toStatus };
+          const reasonLabel = t.outReason ? (OUT_REASON_LABEL[t.outReason] || t.outReason) : '';
           return `
             <div class="tx-row">
               <div class="tx-type">${tc.icon} ${tc.label}</div>
@@ -1604,6 +1617,7 @@
               <div class="tx-party">${esc(t.counterparty || '-')}</div>
               <div class="tx-time">${fmtTime(t.time)}</div>
               <div class="tx-remark">${esc(t.remark || '-')}</div>
+              <div class="tx-reason">${reasonLabel || '-'}</div>
             </div>
           `;
         }).join('')}
@@ -2326,11 +2340,11 @@
     if (filter) list = list.filter((f) => (f.location || LOC_UNASSIGNED) === filter);
     list.sort((a, b) => natCompare(a.serialNo || '', b.serialNo || '') || natCompare(a.code, b.code));
 
-    const headers = ['夹具编号', '序号', '名称', '机种名称', '产线', '工位', '分类', '库位', '状态', '累计出库', '累计回库', '最近动态', '盘点人', '实盘数量'];
+    const headers = ['夹具编号', '序号', '名称', '机种名称', '产线', '工位', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '最近动态', '盘点人', '实盘数量'];
     const rows = list.map((f) => [
       f.serialNo || '', f.code, f.name, formatLineModels(f, ''), lineNamesLabel(f, ''), stationNamesLabel(f, ''), f.category || '', f.location || '',
       (FIX_STATUS[f.status] || { label: f.status }).label,
-      f.totalOutCount || 0, f.totalReturnCount || 0, lastMove(f.id), op, ''
+      f.totalOutCount || 0, f.totalReturnCount || 0, f.repairCount || 0, lastMove(f.id), op, ''
     ]);
     const csv = '\uFEFF' + [headers.join(','), ...rows.map((r) =>
       r.map((v) => (/[",\n\r]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v))).join(',')
@@ -2374,12 +2388,13 @@
     const html = `
       <div class="tx-list">
         <div class="tx-row tx-header">
-          <div>类型</div><div>夹具</div><div>状态</div><div>经办人</div><div>领用人</div><div>时间</div><div>备注</div>
+          <div>类型</div><div>夹具</div><div>状态</div><div>经办人</div><div>领用人</div><div>时间</div><div>备注</div><div>出库原因</div>
         </div>
         ${txs.map((t) => {
           const tc = FIX_TX_TYPE[t.type] || { label: t.type, icon: '📋' };
           const fs = FIX_STATUS[t.fromStatus] || { label: t.fromStatus };
           const ts = FIX_STATUS[t.toStatus] || { label: t.toStatus };
+          const reasonLabel = t.outReason ? (OUT_REASON_LABEL[t.outReason] || t.outReason) : '';
           return `
             <div class="tx-row">
               <div class="tx-type">${tc.icon} ${tc.label}</div>
@@ -2389,6 +2404,7 @@
               <div class="tx-party">${esc(t.counterparty || '-')}</div>
               <div class="tx-time">${fmtTime(t.time)}</div>
               <div class="tx-remark">${esc(t.remark || '-')}</div>
+              <div class="tx-reason">${reasonLabel || '-'}</div>
             </div>
           `;
         }).join('')}
@@ -2426,6 +2442,9 @@
       return `<button type="button" class="chip ${active ? 'active' : ''}" data-status="${st}" onclick="queryToggleStatus('${st}')">${label}</button>`;
     };
     const sortOpt = (f) => opt(f, q.sortBy);
+    const outReasonOpts = ['<option value="">全部</option>',
+      '<option value="use"' + (q.outReason === 'use' ? ' selected' : '') + '>使用</option>',
+      '<option value="repair"' + (q.outReason === 'repair' ? ' selected' : '') + '>维修</option>'].join('');
 
     container.innerHTML = `
       <div class="panel">
@@ -2454,6 +2473,7 @@
           <div class="query-field"><label>存放位置</label><select id="q_location" class="query-select" onchange="queryApply()">${locOpts}</select></div>
           <div class="query-field"><label>关联机种</label><select id="q_lm" class="query-select" onchange="queryApply()">${lmOpts}</select></div>
           <div class="query-field"><label>借用人</label><select id="q_borrower" class="query-select" onchange="queryApply()">${brOpts}</select></div>
+          <div class="query-field"><label>出库原因</label><select id="q_out_reason" class="query-select" onchange="queryApply()">${outReasonOpts}</select></div>
         </div>
         <div class="query-bar">
           <div class="query-field"><label>使用状态</label>
@@ -2465,7 +2485,7 @@
           <div class="query-field"><label>排序</label>
             <div class="query-control-row">
               <select id="q_sort" class="query-select" onchange="querySortSel()">
-                ${sortOpt('serial')}${sortOpt('code')}${sortOpt('name')}${sortOpt('status')}${sortOpt('time')}
+                ${sortOpt('serial')}${sortOpt('code')}${sortOpt('name')}${sortOpt('status')}${sortOpt('repair')}${sortOpt('time')}
               </select>
               <button type="button" class="btn sm ghost" onclick="querySortDir()" id="q_sortdir" title="切换升/降序">${q.sortDir === 'asc' ? '↑' : '↓'}</button>
             </div>
@@ -2569,6 +2589,18 @@
       </p>`;
   }
 
+  /* 某夹具是否存在指定出库原因的流水（outReason === repair 时含「送修」流水，与 repairCount 同口径） */
+  function fixtureHasOutReason(f, reason) {
+    const list = (state.fixTransactions || []).filter((t) => t.fixtureId === f.id);
+    if (reason === 'repair') {
+      return list.some((t) => (t.type === 'out' && t.outReason === 'repair') || t.type === 'repair');
+    }
+    if (reason === 'use') {
+      return list.some((t) => t.type === 'out' && (!t.outReason || t.outReason === 'use'));
+    }
+    return true;
+  }
+
   /* 应用筛选条件，返回结果数组（不触及 DOM） */
   function applyQueryFilters(q) {
     const kw = (q.keyword || '').trim();
@@ -2578,6 +2610,7 @@
     const lineModel = (q.lineModel || '').trim().toLowerCase();
     const borrower = q.borrower || '';
     const statuses = q.statuses || [];
+    const outReason = q.outReason || '';
     const list = state.fixtures.filter((f) => {
       if (kw && !matchFixture(f, kw)) return false;
       // 桥梁编号不参与模糊搜索：必须归一化后完全相等
@@ -2592,6 +2625,7 @@
         if (fixtureCurrentBorrower(f).indexOf(borrower) < 0) return false;
       }
       if (lineModel && !lineModelsMatch(f, lineModel)) return false;
+      if (outReason && !fixtureHasOutReason(f, outReason)) return false;
       return true;
     });
     const dir = q.sortDir === 'desc' ? -1 : 1;
@@ -2602,6 +2636,7 @@
       else if (sb === 'code') cmp = natCompare(a.code, b.code);
       else if (sb === 'name') cmp = natCompare(a.name, b.name);
       else if (sb === 'status') cmp = natCompare(a.status, b.status);
+      else if (sb === 'repair') cmp = (a.repairCount || 0) - (b.repairCount || 0);
       else if (sb === 'time') cmp = fixtureLastTime(a) - fixtureLastTime(b);
       return cmp * dir;
     });
@@ -2625,7 +2660,7 @@
         <thead><tr>
           <th style="width:64px">序号</th>${thSort('serial', '夹具编号')}${thSort('name', '名称')}<th>关联机种</th>
           <th>产线 / 工位</th><th>分类</th><th>库位</th><th>责任人/借用人</th>
-          ${thSort('status', '状态')}${thSort('time', '最近操作时间')}<th style="width:130px">操作</th>
+          ${thSort('status', '状态')}${thSort('repair', '维修次数')}${thSort('time', '最近操作时间')}<th style="width:130px">操作</th>
         </tr></thead>
         <tbody>
           ${list.map((f) => {
@@ -2641,6 +2676,7 @@
               <td>${esc(f.location || '—')}</td>
               <td>${esc(fixtureResponsible(f))}</td>
               <td><span class="badge ${st.cls}">${st.label}</span></td>
+              <td class="num">${f.repairCount || 0}</td>
               <td>${esc(lastMove(f.id))}</td>
               <td><span class="row-actions">
                 <button class="btn sm ghost" onclick="fixtureEdit(${f.id})">编辑</button>
@@ -2661,6 +2697,7 @@
     q.location = ($('#q_location') || {}).value || '';
     q.lineModel = ($('#q_lm') || {}).value || '';
     q.borrower = ($('#q_borrower') || {}).value || '';
+    q.outReason = ($('#q_out_reason') || {}).value || '';
     renderQueryResults(applyQueryFilters(q));
   };
 
@@ -2700,7 +2737,7 @@
   };
 
   window.queryReset = function () {
-    state.query = { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', statuses: [], sortBy: 'code', sortDir: 'asc' };
+    state.query = { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', statuses: [], sortBy: 'code', sortDir: 'asc', outReason: '' };
     renderQuery();
   };
 
@@ -2722,7 +2759,7 @@
       <div class="form-group"><label>当前所在位置</label><input type="text" value="${esc(loc)}" disabled></div>
       <div class="form-group"><label>责任人/借用人</label><input type="text" value="${esc(holder)}" disabled></div>
       <div class="form-group"><label>状态</label><input type="text" value="${esc(st.label)}" disabled></div>
-      <div class="form-group"><label>累计出库 / 回库</label><input type="text" value="${esc((f.totalOutCount || 0) + ' / ' + (f.totalReturnCount || 0))}" disabled></div>
+      <div class="form-group"><label>累计出库 / 回库 / 维修</label><input type="text" value="${esc((f.totalOutCount || 0) + ' / ' + (f.totalReturnCount || 0) + ' / ' + (f.repairCount || 0))}" disabled></div>
       ${f.serialNo ? `<div class="tip">同编号持有量：${esc(serialNoSummary(f.serialNo) || '—')}</div>` : ''}
       ${f.remark ? `<div class="form-group"><label>备注</label><input type="text" value="${esc(f.remark)}" disabled></div>` : ''}
       <div class="form-actions">

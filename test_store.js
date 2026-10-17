@@ -148,6 +148,28 @@ ok('5 轮后回库次数=5', f2.totalReturnCount === 5, String(f2.totalReturnCou
 ok('最终状态 stocked', f2.status === 'stocked', f2.status);
 ok('流水条数=10', store.getAll('fixTransactions').filter((x) => x.fixtureId === id2).length === 10);
 
+section('4b. 出库原因（outReason）与维修次数联动');
+const idR1 = store.addFixture(fix({ serialNo: 'OUT-USE-001', name: '出库使用夹具', location: 'ZP1-U-6-1' }));
+const idR2 = store.addFixture(fix({ serialNo: 'OUT-REP-001', name: '出库维修夹具', location: 'ZP1-U-6-2' }));
+const tReason = Date.now();
+const txUse1 = store.addFixTransaction({ fixtureId: idR1, type: 'out', operator: '李四', time: tReason, outReason: 'use' });
+store.addFixTransaction({ fixtureId: idR1, type: 'return', operator: '王五', time: tReason + 1000 });
+const txRep1 = store.addFixTransaction({ fixtureId: idR2, type: 'out', operator: '李四', time: tReason + 2000, outReason: 'repair' });
+store.addFixTransaction({ fixtureId: idR2, type: 'return', operator: '王五', time: tReason + 3000 });
+const fR1 = store.getAll('fixtures').find((f) => f.id === idR1);
+const fR2 = store.getAll('fixtures').find((f) => f.id === idR2);
+ok('使用出库不增加维修次数', fR1.repairCount === 0, String(fR1.repairCount));
+ok('维修出库 +1 维修次数', fR2.repairCount === 1, String(fR2.repairCount));
+ok('使用出库流水 outReason=use', store.getAll('fixTransactions').find((x) => x.id === txUse1).outReason === 'use');
+ok('维修出库流水 outReason=repair', store.getAll('fixTransactions').find((x) => x.id === txRep1).outReason === 'repair');
+ok('缺省出库原因按 use 处理', (() => {
+  const idDef = store.addFixture(fix({ serialNo: 'OUT-DEF-001', name: '缺省原因夹具', location: 'ZP1-U-6-3' }));
+  const txDef = store.addFixTransaction({ fixtureId: idDef, type: 'out', operator: '李四', time: tReason + 5000 });
+  const dF = store.getAll('fixtures').find((f) => f.id === idDef);
+  const dTx = store.getAll('fixTransactions').find((x) => x.id === txDef);
+  return dF.repairCount === 0 && (dTx.outReason === 'use' || dTx.outReason === '');
+})());
+
 /* ---------- 5. 维修流程 ---------- */
 section('5. 送修与维修完成');
 const txRep = store.addFixTransaction({ fixtureId: id2, type: 'repair', operator: '赵六', time: t + 60000, remark: '定位销磨损' });

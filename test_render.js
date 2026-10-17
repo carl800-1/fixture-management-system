@@ -694,6 +694,69 @@ ok('app.js 产线工位 form-group 带 form-group-row 类', appJs.includes('form
 ok('.form-group-row 为横向 flex（标签不独占一行）', /\.form-group\.form-group-row\s*\{[^}]*display:\s*flex/.test(css));
 ok('.form-group-row > :not(label) 占满剩余宽度', /\.form-group\.form-group-row > :not\(label\)\s*\{[^}]*flex:\s*1 1 340px/.test(css));
 
+/* ---------- 14. 出库原因 / 维修次数：查询区与结果表、详情、列表、CSV ---------- */
+section('14. 出库原因与维修次数（查询选项 + 展示）');
+ok('查询筛选区含「出库原因」下拉（#q_out_reason）',
+  appJs.includes('id="q_out_reason"') && appJs.includes('onchange="queryApply()"') && appJs.includes('q.outReason'));
+ok('出库原因选项含「全部 / 使用 / 维修」',
+  /<option value="">全部<\/option>/.test(appJs) && appJs.includes('value="use"') && appJs.includes('value="repair"'));
+ok('sortOpt 含 repair（维修次数排序）',
+  appJs.includes("sortOpt('repair')") && appJs.includes("sb === 'repair'"));
+ok('查询结果表含「维修次数」列',
+  appJs.includes("thSort('repair', '维修次数')") && appJs.includes("f.repairCount || 0"));
+ok('详情弹窗「累计出库 / 回库 / 维修」显示 repairCount',
+  appJs.includes("' / ' + (f.repairCount || 0))") || appJs.includes("+ ' / ' + (f.repairCount || 0)"));
+ok('手工盘点 CSV 表头含「维修次数」',
+  appJs.includes("'累计出库', '累计回库', '维修次数'"));
+ok('state.query 初始化含 outReason 字段',
+  appJs.includes("outReason: ''") && appJs.includes("statuses: [], sortBy: 'code', sortDir: 'asc', outReason: ''"));
+ok('queryReset 保留 outReason 字段',
+  appJs.includes("queryReset = function () {") && /state\.query = \{[^}]*outReason: ''/.test(appJs));
+ok('queryApply 读取 #q_out_reason',
+  appJs.includes("q.outReason = ($('#q_out_reason') || {}).value || ''"));
+ok('fixtureOut 弹窗含出库原因下拉（#fix_out_reason）',
+  appJs.includes('id="fix_out_reason"') && appJs.includes("reasonEl && reasonEl.value === 'repair' ? 'repair' : 'use'"));
+ok('submitFixtureOut 传递 outReason 给 DB.fixtureAddTransaction',
+  appJs.includes("location: location || undefined, outReason"));
+
+/* 动态：抽取 fixtureHasOutReason 独立跑（真实函数 + DOM 桩 state） */
+{
+  const fnBody = appJs.match(/function fixtureHasOutReason\(f, reason\)\s*\{[\s\S]*?\n {2}\}\n/);
+  ok('可抽取 fixtureHasOutReason 实现', !!fnBody);
+  if (fnBody) {
+      const src = `
+      const state = {
+        fixTransactions: [
+          { fixtureId: 1, type: 'out', outReason: 'use' },
+          { fixtureId: 1, type: 'out', outReason: 'repair' },
+          { fixtureId: 2, type: 'out', outReason: 'repair' },
+          { fixtureId: 3, type: 'out', outReason: '' },
+          { fixtureId: 4, type: 'repair' },
+          { fixtureId: 5, type: 'out' },
+          { fixtureId: 6, type: 'out', outReason: 'use' }
+        ]
+      };
+      ${fnBody[0]}
+      return fixtureHasOutReason;
+    `;
+    let fn = null;
+    try { fn = new Function(src)(); ok('fixtureHasOutReason 可独立执行', typeof fn === 'function'); }
+    catch (e) { ok('fixtureHasOutReason 可独立执行', false, e.message); }
+    if (fn) {
+      ok('夹具 1：维修原因命中（out repair + outReason repair）', fn({ id: 1 }, 'repair') === true);
+      ok('夹具 1：使用原因命中（outReason use）', fn({ id: 1 }, 'use') === true);
+      ok('夹具 2：维修原因命中（仅 out repair）', fn({ id: 2 }, 'repair') === true);
+      ok('夹具 2：使用原因不命中', fn({ id: 2 }, 'use') === false);
+      ok('夹具 3：缺省 outReason 视为使用', fn({ id: 3 }, 'use') === true);
+      ok('夹具 4：「送修」流水计入维修', fn({ id: 4 }, 'repair') === true);
+      ok('夹具 4：「送修」不计入使用', fn({ id: 4 }, 'use') === false);
+      ok('夹具 5：无 outReason 旧流水按使用处理（outReason 缺失 = undefined，归为使用）', fn({ id: 5 }, 'use') === true, '实际 ' + fn({ id: 5 }, 'use'));
+      ok('夹具 5：无 outReason 旧流水不命中维修', fn({ id: 5 }, 'repair') === false);
+      ok('未知原因不过滤', fn({ id: 1 }, 'unknown') === true);
+    }
+  }
+}
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);
