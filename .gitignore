@@ -35,6 +35,10 @@ desktop.ini
 /4.0.2/
 /FMS-*-win-x64/
 
+# 历史版本归档目录（2026-10-18 目录重组的遗留：旧源码快照 source/ + 编译产物 releases/，均不入库）
+/source/
+/releases/
+
 # 构建输出目录（package.json build.directories.output = release_v21）
 /release_v21/
 
