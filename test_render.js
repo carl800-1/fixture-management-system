@@ -196,7 +196,8 @@ ok('package.json 版本为语义化三段式 x.y.z', /^\d+\.\d+\.\d+$/.test(ver)
 ok('package.json 版本 = ' + ver, !!ver);
 ok('db.js APP_VERSION = ' + ver, dbJs.indexOf("APP_VERSION = '" + ver + "'") >= 0,
   (dbJs.match(/APP_VERSION = '([^']+)'/) || [])[1]);
-ok('index.html 标题含 v' + ver, html.indexOf('v' + ver) >= 0);
+ok('侧边栏 footer 显示版本号', html.indexOf('v' + ver) >= 0, '侧边栏含 ' + ver),
+ok('侧边栏 footer 含品牌名', html.indexOf('工装夹具管理程序') >= 0, 'brand-name 干净');
 ok('main.js 窗口标题含 v' + ver, mainJs.indexOf('v' + ver) >= 0);
 ok('preload.js 版本标记 = ' + ver, preloadJs.indexOf("version: '" + ver + "'") >= 0,
   (preloadJs.match(/version: '([^']+)'/) || [])[1]);

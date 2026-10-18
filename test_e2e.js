@@ -17,7 +17,7 @@
  *   8  报废
  *   9  搜索 / 二维码标签 / 视图切换 / 流水 / 仪表盘
  *   10 库位管理（卡片数字 = 在库套数）
- *   11 产线夹具查询（只读、无产品级联、示意图）
+ *   11 产线使用（只读、无产品级联、示意图）
  *   12 机种管理 / 按机种查询
  *   13 清空数据落盘 + 重启恢复
  *   14 运行期错误捕获
@@ -34,7 +34,10 @@ const os = require('os');
 const TMP = path.join(os.tmpdir(), 'fixture-e2e-' + Date.now());
 fs.mkdirSync(TMP, { recursive: true });
 
-const { app, BrowserWindow } = require('electron');
+/* 测试环境必须用全局 app / BrowserWindow（非 require）：
+   Electron CLI binary 模式已注入全局对象，而 script 模式下
+   require('electron') 返回路径字符串而非 API 对象。 */
+const { app, BrowserWindow, ipcMain } = require('electron');
 
 /* 测试环境（沙箱/CI）常无可用 GPU，禁用硬件加速避免 GPU 进程崩溃 */
 app.disableHardwareAcceleration();
@@ -90,16 +93,19 @@ const NEW_FIXTURE_FN = `
       sel.value = opt.value; window.fixFormLinePicked(); await sleep(160);
     }
     for (const nm of (o.stations || [])) {
-      /* 工位下拉只列「当前所选产线」的工位 → 逐条产线找同名工位再「+ 添加」 */
+      /* 工位下拉只列「当前所选产线」的工位 → 逐条产线找同名工位再「+ 添加」
+         ⚠️ fixFormLinePicked() 会整体重绘 #fix_ls_box，旧 select 节点立即游离，
+            因此每轮必须先重新查询 #fix_line_pick，不能缓存元素引用。 */
       let done = false;
-      const lp = $('#fix_line_pick');
-      for (const lo of (lp ? [...lp.options] : [])) {
-        if (!lo.value) continue;
-        lp.value = lo.value; window.fixFormLinePicked(); await sleep(90);
+      const lineOpts = [...(($('#fix_line_pick') || {}).options || [])].map((x) => ({ v: x.value }));
+      for (const lo of lineOpts) {
+        if (!lo.v) continue;
+        const lp = $('#fix_line_pick'); if (!lp) continue;
+        lp.value = lo.v; window.fixFormLinePicked(); await sleep(140);
         const sp = $('#fix_st_pick');
         const so = sp ? [...sp.options].find((x) => x.textContent.includes(nm)) : null;
-        if (!so) continue;
-        sp.value = so.value; window.fixFormAddStation(); await sleep(90);
+        if (!so || !so.value) continue;
+        sp.value = so.value; window.fixFormAddStation(); await sleep(140);
         done = true; break;
       }
       if (!done) diag.push('no-station:' + nm);
@@ -145,9 +151,11 @@ async function main() {
 
   /* ---------- 0. 应用启动 ---------- */
   section('0. 应用启动');
-  const boot = await wc.executeJavaScript('({title: document.title, hasContent: !!document.querySelector("#content"), navCount: document.querySelectorAll(".nav-item").length, brand: (document.querySelector(".brand-name")||{}).textContent||"", views: [...document.querySelectorAll(".nav-item")].map(b=>b.dataset.view)})');
-  ok('页面标题含当前版本 v' + PKG_VER, boot.title.includes('v' + PKG_VER), boot.title);
-  ok('侧边栏品牌名含当前版本 v' + PKG_VER, boot.brand.includes('v' + PKG_VER), boot.brand);
+  const boot = await wc.executeJavaScript('({title: document.title, hasContent: !!document.querySelector("#content"), navCount: document.querySelectorAll(".nav-item").length, brand: (document.querySelector(".brand-name")||{}).textContent||"", foot: (document.querySelector(".foot-version")||{}).textContent||"", views: [...document.querySelectorAll(".nav-item")].map(b=>b.dataset.view)})');
+  /* v4.0.4 起 title / 品牌名统一为程序名，界面版本号只在页脚显示 */
+  ok('页面标题为程序名（v4.0.4 起不再带版本号）', boot.title === '工装夹具管理程序', boot.title);
+  ok('侧边栏品牌名为程序名（v4.0.4 起不再带版本号）', boot.brand.trim() === '工装夹具管理程序', boot.brand);
+  ok('页脚版本号 = v' + PKG_VER, boot.foot.includes('v' + PKG_VER), boot.foot);
   ok('主内容容器存在', boot.hasContent);
   ok('导航项 >= 9 个（含机种管理 / 按机种查询）', boot.navCount >= 9, String(boot.navCount));
   ok('导航含 prod（机种管理）与 prodquery（按机种查询）',
@@ -399,7 +407,7 @@ async function main() {
   ok('流水冗余实物编号字段', txOut && txOut.fixtureSerialNo === 'DH40MC-921-001-001', txOut && txOut.fixtureSerialNo);
 
   /* ---------- 5. 回库（可改库位） ---------- */
-  section('5. 回库流程（四栏互查 → 勾选 → 改库位 → 提交）');
+  section('5. 回库流程（四栏互查 → 卡片弹窗改库位 → 提交）');
   const retRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('return'); await sleep(300);
@@ -409,22 +417,28 @@ async function main() {
     codeBox.dispatchEvent(new Event('input'));
     await sleep(450);
     const picks=[...document.querySelectorAll('.return-pick')];
-    if (picks.length) {
-      picks.forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
-      await sleep(200);
-    }
-    const hasLocField = !!$('#return_new_location');
-    if (hasLocField) setV('#return_new_location','ZP1-U-2-2');
-    const op=$('#return_operator'); if (op) setV('#return_operator','王五');
-    const rm=$('#return_remark'); if (rm) setV('#return_remark','归还完好');
-    const btn=btnByText('提交回库');
+    /* v4.0.4 设计：批量回库表单不含库位字段；改库位在卡片「回库」弹窗完成 */
+    const pageHasLoc = !!$('#return_new_location');
+
+    window.showView('fixtures'); await sleep(300);
+    const card=$$('.fixture-card').find(c=>c.textContent.includes('DH40MC-921-001-001'));
+    if (!card) return { n:picks.length, pageHasLoc, err:'无 A 卡片' };
+    const rb=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='回库');
+    if (!rb) return { n:picks.length, pageHasLoc, err:'卡片无回库按钮',
+                      btns:[...card.querySelectorAll('button')].map(b=>b.textContent.trim()) };
+    rb.click(); await sleep(320);
+    const hasLocField = !!$('#fix_return_loc');
+    if (hasLocField) setV('#fix_return_loc','ZP1-U-2-2');
+    setV('#fix_return_op','王五');
+    const btn=btnByText('确认回库');
     if (btn) btn.click();
-    await sleep(750);
-    return { n:picks.length, hasLocField, clicked:!!btn };
+    await sleep(800);
+    return { n:picks.length, pageHasLoc, hasLocField, clicked:!!btn };
   })()`);
   ok('回库候选列表命中 1 台待回库夹具', retRes.n === 1, JSON.stringify(retRes));
-  ok('回库页提供「回库库位」输入框（v4 新增）', retRes.hasLocField === true);
-  ok('「提交回库」按钮存在且已点击', retRes.clicked === true);
+  ok('批量回库表单不含库位字段（v4.0.4 设计）', retRes.pageHasLoc === false, JSON.stringify(retRes));
+  ok('卡片「回库」弹窗提供库位字段（可改库位）', retRes.hasLocField === true, JSON.stringify(retRes));
+  ok('「确认回库」按钮存在且已点击', retRes.clicked === true, JSON.stringify(retRes));
 
   const db5 = readDb();
   const retFix = db5.fixtures.find((f) => f.serialNo === 'DH40MC-921-001-001' && f.code === codeOf['ZP1-U-1-1']);
@@ -439,21 +453,23 @@ async function main() {
     ${HELPERS}
     /* 先把 B 出库 */
     window.showView('fixtures'); await sleep(250);
-    const card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
+    let card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
     const ob=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
     if (!ob) return false;
-    ob.click(); await sleep(280);
-    setV('#fix_out_op','李四'); btnByText('确认出库').click(); await sleep(550);
-    /* 再以非法库位回库 */
-    window.showView('return'); await sleep(320);
-    const box=$('#return_code'); box.value='XXK-D10VG-002'; box.dispatchEvent(new Event('input')); await sleep(420);
-    $$('.return-pick').forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
-    await sleep(180);
-    const loc=$('#return_new_location');
+    ob.click(); await sleep(300);
+    setV('#fix_out_op','李四'); btnByText('确认出库').click(); await sleep(600);
+    /* 再以非法库位回库（卡片弹窗路径，v4.0.4 改库位入口） */
+    card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
+    const rb=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='回库');
+    if (!rb) return false;
+    rb.click(); await sleep(320);
+    const loc=$('#fix_return_loc');
     const hadField = !!loc;
-    if (loc) setV('#return_new_location','BAD');
-    setV('#return_operator','王五');
-    btnByText('提交回库').click(); await sleep(650);
+    if (loc) setV('#fix_return_loc','BAD');
+    setV('#fix_return_op','王五');
+    btnByText('确认回库').click(); await sleep(650);
+    /* 校验失败时弹窗保持打开，关闭后继续后续流程 */
+    if (window.closeModal) { window.closeModal(); await sleep(150); }
     return hadField;
   })()`) === true);
   const db5b = readDb();
@@ -764,13 +780,13 @@ async function main() {
   ok('仪表盘可渲染', dashRes.text.length > 10, dashRes.text.slice(0, 80));
   ok('仪表盘含 v4 数据模型说明（数量为派生值）', dashRes.hasModel === true, dashRes.text.slice(0, 120));
 
-  /* ---------- 10. 产线夹具查询 ---------- */
-  section('10. 产线夹具查询（只读 / 无产品级联 / 示意图）');
+  /* ---------- 10. 产线使用 ---------- */
+  section('10. 产线使用（只读 / 无产品级联 / 示意图）');
   const lqRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('linequery'); await sleep(700);
     const out={};
-    out.navOk=(($('#viewTitle')||{}).textContent||'').includes('产线夹具查询');
+    out.navOk=(($('#viewTitle')||{}).textContent||'').includes('产线使用');
     out.lineOptCount=$$('#lq_line option').length;
     out.hasProductSelect=!!$('#lq_product');
     out.hasTable=!!$('#lq_body table');

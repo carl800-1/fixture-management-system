@@ -35,5 +35,11 @@ desktop.ini
 /4.0.2/
 /FMS-*-win-x64/
 
+# 构建输出目录（package.json build.directories.output = release_v21）
+/release_v21/
+
+# 本地工具/工作区杂项目录
+/.workbuddy2/
+
 # 工作区数据
 /.workbuddy/

@@ -53,7 +53,7 @@ const parts = [
   slice('function formatLineModels(f, emptyMark', 'function fullLineModels'),
   slice('/* ---------------- 业务上限与格式约束', '/* 机种名称：展示 / 搜索 helpers */'),
   slice('function normalizeHeader(h)', '// 把二维数组的首行解析成'),
-  slice('const LINE_TYPES = [', '/* ---------------- 产线夹具查询页'),
+  slice('const LINE_TYPES = [', '/* ---------------- 产线使用页'),
   slice('const LINE_IMPORT_HEADERS = [', '/* 落库：'),
   slice('async function applyLineImportPlan(plan) {', 'window.showLineImportPreview'),
   slice('function buildProdQueryRows(fixtures, lines, names) {', 'async function renderProdQuery()')
@@ -340,6 +340,13 @@ const svgEsc = M.renderLineDiagram({ name: '<script>x</script>', type: 'linear' 
 ok(!svgEsc.includes('<script>') && svgEsc.includes('&lt;script&gt;'), '线体名做 HTML 转义');
 ok(svgEsc.includes('A&amp;B'), '工位名做 HTML 转义');
 ok(svg.includes('ld-seq') && svg.includes('ld-name'), '节点含顺序号与工位名文本');
+/* 2026-10-18 用户要求：工位名与夹具编号之间拉开垂直距离（徽标由 y+40 下移至 y+56）。
+ * 守护：从 SVG 文本解析 ld-name 与 ld-code 的基线 y，要求间距 ≥24px。 */
+const mNameY = svg.match(/<text x="[\d.]+" y="([\d.]+)" text-anchor="middle" class="ld-name">/);
+const mCodeY = svg.match(/<text x="[\d.]+" y="([\d.]+)" text-anchor="middle" class="ld-code/);
+ok(mNameY && mCodeY && Number(mCodeY[1]) - Number(mNameY[1]) >= 24,
+  '工位名与夹具编号垂直间距 ≥24px（用户要求拉开距离）',
+  mNameY && mCodeY ? `name y=${mNameY[1]}, code y=${mCodeY[1]}` : '');
 
 /* ============ G. 产线导入映射与计划（v4） ============ */
 section('G. 产线导入映射（v4 六列表头）');

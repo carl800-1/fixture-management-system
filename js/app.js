@@ -1,5 +1,5 @@
 /* ============================================================
- * app.js — 工装夹具管理程序主逻辑（v4.0.0）
+ * app.js — 工装夹具管理程序主逻辑（v4.0.6）
  *
  * v4.0.0 数据模型要点（详见工作区根《夹具管理系统_五项决策实施方案.md》）：
  *   · 追踪单元 = 每套一条 fixtures 记录；数量是派生值，不落库
@@ -315,7 +315,7 @@
     stations: [],
     productions: [],
     lineCfg: { lineId: 0 },                          // 产线配置页：当前选中的线体
-    lineQuery: { lineId: 0 },                        // 产线夹具查询页：当前选中的线体
+    lineQuery: { lineId: 0, lineModel: '' },                    // 产线使用页：当前选中的线体 + 机种（为空=全部）
     prodQuery: { name: '' },                         // 按机种查询页：当前选中的机种
     // 建档 / 编辑夹具表单的暂存（产线工位选择用，退出表单即清空）
     fixForm: { editId: 0, lineModels: [], lines: [], stations: [] }
@@ -354,6 +354,11 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
+      version: '4.0.6', date: '2026-10-18', items: [
+        '【布局】产线示意图工位节点「工位名」与「夹具编号」垂直间距拉大：编号徽标由圆点下方 40px 下移至 56px（基线距 29px，原来仅 13px），显示更宽松；直线形产线 3~4 行布点行距 95~143px，不会与下一行圆点重叠'
+      ]
+    },
+    {
       version: '4.0.2', date: '2026-10-17', items: [
         '【布局】夹具卡片「产线：」「工位：」合并为一行「**产线/工位**」（跨产线时按 `f.lines` 顺序分段，段内工位 `/`、段间 `；`，**产线名只在段首出现一次，不再给工位名补「线号·」前缀**）；卡片「出库/送修/编辑/报废/二维码」5 个操作按钮**同一排不折行**（网格 minmax 220px→240px、按钮内距收紧 3px 5px、字号 11.5px、white-space: nowrap）',
         '【布局】「🔎 夹具查询」详情弹窗「涉及产线」「安装工位」两行并入「**产线/工位**」一行（同用合并显示函数，弹窗矮了 3 行）',
@@ -380,7 +385,7 @@
         '【新增】按机种查询页（侧边栏「🔗 按机种查询」）：选择机种 → 反查夹具（1 跳）→ 展开涉及产线，输出固定的「产线 / 实物编号 / 桥梁号 / 库位 / 状态」列并按机种分组',
         '【新增】夹具查询页第①段「按实物编号查询」：按「实物编号 × 库位」分组统计，行内分列在库 / 在外 / 维修中 / 已报废 / 台账；合计行沿用同列求和（在库、在外分列），台账作小字说明',
         '【新增】机种名称上限由 4 个提升到 7 个；多选下拉（禁重名），支持从字典选择或现场输入新增',
-        '【调整】产线夹具查询页：去掉「线体 → 产品」级联，直接按线体展示各工位的夹具（只读），表格列改为实物编号 / 桥梁号 / 夹具名称 / 状态；产线示意图节点徽标改显示实物编号',
+        '【调整】产线使用页：去掉「线体 → 产品」级联，直接按线体展示各工位的夹具（只读），表格列改为实物编号 / 桥梁号 / 夹具名称 / 状态；产线示意图节点徽标改显示实物编号',
         '【调整】产线配置页：删除「产品」面板（机种已独立）；「工位夹具配置」由覆盖式写入改为<b>只读视图</b>，可点击夹具名直接编辑，或经「编辑夹具」挑选该工位上的夹具',
         '【调整】产线配置导入：表头改为「线体 | 线体形态 | 工位 | 工位顺序 | 夹具编号 | 备注」，「夹具编号」列语义反转为<b>向夹具追加产线/工位</b>（按实物编号唯一匹配，0 或 >1 条计入跳过）；写库为追加 + 去重，绝不覆盖原有内容；导入完成后可一键「撤销本次导入」精确回滚',
         '【调整】标签与二维码：二维码只编码桥梁编号（qrToken 改为派生值，不再落库）；标签卡只印实物编号 + 夹具名称（移除机种与库位），接受「码磨损后重新打印」的取舍',
@@ -397,7 +402,7 @@
     },
     {
       version: '3.0.1', date: '2026-10-16', items: [
-        '【新增】产线夹具查询模块（侧边栏「🔗 产线夹具查询」）：按「线体 + 产品」级联筛选，展示该产品在各工位上使用的夹具配置，并在表格下方以示意图呈现产线布局',
+        '【新增】产线使用模块（侧边栏「🔗 产线使用」）：按「线体 + 产品」级联筛选，展示该产品在各工位上使用的夹具配置，并在表格下方以示意图呈现产线布局',
         '【新增】筛选区级联：切换线体自动重置并重建产品下拉；线体/产品任一无数据时给出明确空态提示',
         '【新增】工位夹具配置表：字段为工位名称、工位顺序、夹具编号、夹具名称、规格/型号、备注；工位按顺序号升序排列，同一工位多个夹具以多行（rowspan 合并工位列）展示，无配置的工位显示「—」「无」',
         '【新增】产线示意图（SVG）：按线体形态绘制——直线形按工位顺序横向折行（每行最多 6 个，行间折返连线）；U型沿左侧竖边下行、经底部横边、再沿右侧竖边上行，按三段实际长度等分工位；每个工位标注顺序号、名称与夹具编号，有夹具配置的工位高亮，无配置的为空心灰点并标注「无」',
@@ -538,7 +543,7 @@
     query: '夹具查询',
     prod: '机种管理',
     prodquery: '按机种查询',
-    linequery: '产线夹具查询',
+    linequery: '产线使用',
     linecfg: '产线配置',
     data: '数据备份'
   };
@@ -1304,26 +1309,53 @@
         });
       });
 
-      // 重号提示（实物编号允许重复，只做提示）
-      const exist = (c.fixtures || []).filter((x) => x.serialNo === f.serialNo);
-      const dupHint = exist.length
-        ? `该编号已有 ${exist.length} 套（在库 ${exist.filter((x) => x.status === 'stocked').length} 套，在外 ${exist.filter((x) => x.status === 'checked_out').length} 套）`
+      /* 重号提示：夹具编号允许重复（v4「每套一条记录」），但要告知现有持有量。
+         ⚠️ v4 重构时该字段曾丢失，导入预览不再提示重号，此处补齐。 */
+      const sameNo = (c.fixtures || []).filter((x) => x.serialNo === f.serialNo);
+      const inBatch = plan.filter((p) => p.fixture.serialNo === f.serialNo).length;
+      const dupTotal = sameNo.length + inBatch;
+      const dupInStock = sameNo.filter((x) => (x.status || 'stocked') === 'stocked').length;
+      const dupHint = dupTotal
+        ? `该编号已有 ${dupTotal} 套（在库 ${dupInStock} 套，在外 ${dupTotal - dupInStock} 套）`
         : '';
 
       plan.push({
         row: r + 1,
-        dupHint,
         fixture: {
           serialNo: f.serialNo, name: f.name, lineModels: f.lineModels,
           category: f.category, location: f.location, remark: f.remark,
           lineNames: f.lineNames,
           stationNames: f.stationNames
-        }
+        },
+        dupHint
       });
     }
     // 把「待自动补建」清单挂在 plan 上，供预览展示与落库时使用
     plan._autoLines = Array.from(autoLines.keys());
     plan._autoStations = Array.from(autoStations.values());
+    // 每行逐条记录缺少的产线 / 工位（供跳过 / 新建对话框使用）
+    plan._missing = plan.map((p) => {
+      const missing = [];
+      (p.fixture.lineNames || []).forEach((n) => {
+        if (!linesByName.has(n)) {
+          missing.push({ key: n, label: n, kind: 'line', type: 'new' });
+        }
+      });
+      (p.fixture.lineNames || []).forEach((ln) => {
+        (p.fixture.stationNames || []).forEach((sn) => {
+          const key = ln + '\u0000' + sn;
+          if (!stationByKey.has(key)) {
+            const curLine = (c.lines || []).find((l) => l.name === ln);
+            if (curLine) {
+              missing.push({ key, label: sn, kind: 'station', type: 'old', lineId: curLine.id });
+            } else {
+              missing.push({ key, label: sn, kind: 'station', type: 'new', lineId: ln });
+            }
+          }
+        });
+      });
+      return missing;
+    });
     if (!plan.length) return { ok: false, error: '没有可导入的有效数据行' };
     return {
       ok: true, plan, skipped,
@@ -1333,20 +1365,103 @@
     };
   }
 
-  /* 导入预览模态框：先看清楚要写什么，再点确认
-   * ⚠️ 入参是 buildImportPlan 的完整返回对象（含 plan / skipped），不是 plan 数组本身。
-   *   历史上曾误传 plan.plan 导致此处 plan.skipped 取到 undefined、.length 抛 TypeError。 */
+  /* 导入前弹窗：收集用户「新建」/「跳过」选择
+   * 遍历 plan._missing 所有条目，逐行让用户决定。
+   * 返回 Map<key, 'add'|'skip'>，供 confirmImportPlan 使用。
+   * 全部跳过时返回 null。 */
+  window.showModalMissingLineStation = function (plan) {
+    const allMissing = plan._missing || [];
+    if (!allMissing.length) return Promise.resolve(new Map());
+
+    // 按产线归类（同名产线合并为一行）
+    const lineGroups = new Map();  // displayLineName -> Array<{key,label,kind,type,lineId,idx}>
+    allMissing.forEach((m) => {
+      let displayLine;
+      if (m.kind === 'line') {
+        displayLine = m.key;
+      } else {
+        // station: lineId may be string (new line) or numeric id (old line)
+        if (typeof m.lineId === 'string') {
+          displayLine = m.lineId;
+        } else {
+          const l = (state.lines || []).find((l) => l.id === m.lineId);
+          displayLine = l ? l.name : '未知';
+        }
+      }
+      if (!lineGroups.has(displayLine)) lineGroups.set(displayLine, []);
+      lineGroups.get(displayLine).push(m);
+    });
+
+    const tableRows = [];
+    let rowIdx = 0;
+    lineGroups.forEach((items, lineName) => {
+      if (items[0].kind === 'line') {
+        tableRows.push({ key: items[0].key, label: '【新建产线】' + esc(lineName), lineName, kind: 'line', type: 'new', idx: rowIdx++ });
+      }
+      items.forEach((m) => {
+        if (m.kind === 'station') {
+          tableRows.push({ key: m.key, label: lineName + ' · ' + esc(m.label), lineName, kind: 'station', type: m.type, lineId: m.lineId, idx: rowIdx++ });
+        }
+      });
+    });
+
+    const body = `
+      <div class="tip" style="margin-bottom:10px;">
+        检测到 <b>${allMissing.length}</b> 条未建档产线/工位。请选择每条目：<b>「新建」</b> 或 <b>「跳过该行」</b>（跳过 = 整行不导入）。</div>
+      <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
+        <table class="table" style="margin:0;">
+          <thead><tr><th>编号</th><th>名称</th><th>操作</th></tr></thead>
+          <tbody>
+            ${tableRows.map((r) => `<tr>
+              <td>${r.idx + 1}</td>
+              <td>${r.label}</td>
+              <td>
+                <label><input type="radio" name="mls_${r.idx}" value="add" checked> 新建</label>
+                <label><input type="radio" name="mls_${r.idx}" value="skip"> 跳过该行</label>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="form-actions" style="margin-top:10px;">
+        <button class="btn primary" onclick="confirmMissingSelection()">确认</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>
+    `;
+    openModal('未建档产线/工位处理', body);
+    // 返回 promise，收集选择结果
+    return new Promise((resolve) => {
+      window.__collectMissingSelection = () => {
+        const result = new Map();
+        tableRows.forEach((r) => {
+          const radios = document.querySelectorAll(`input[name="mls_${r.idx}"]`);
+          let val = 'add';
+          radios.forEach((rb) => { if (rb.checked) val = rb.value; });
+          result.set(r.key, val);
+        });
+        window.__collectMissingSelection = null;
+        resolve(result);
+      };
+    });
+  };
+
+  window.confirmMissingSelection = function () {
+    if (typeof window.__collectMissingSelection === 'function') {
+      window.__collectMissingSelection();
+    }
+  };
+
+  /* 导入预览模态框：先看清楚要写什么，再点确认 */
   window.showImportPreview = function (result, sourceName) {
     if (!result || !Array.isArray(result.plan)) { toast('导入计划无效', 'err'); return; }
     const plan = result.plan;
     const skipped = Array.isArray(result.skipped) ? result.skipped : [];
     const rows = plan.slice(0, 60);
-    const dupCount = plan.filter((p) => p.dupHint).length;
     const autoLines = Array.isArray(plan._autoLines) ? plan._autoLines : [];
     const autoStations = Array.isArray(plan._autoStations) ? plan._autoStations : [];
     const body = `
       <div class="tip" style="margin-bottom:10px;">
-        来源：<b>${esc(sourceName)}</b> ｜ 待导入 <b>${plan.length}</b> 条${skipped.length ? ` ｜ 跳过 <b>${skipped.length}</b> 条` : ''}${dupCount ? ` ｜ 重号 <b>${dupCount}</b> 条` : ''}${(autoLines.length || autoStations.length) ? ` ｜ 自动补建 <b>${autoLines.length}</b> 产线 / <b>${autoStations.length}</b> 工位` : ''}
+        来源：<b>${esc(sourceName)}</b> ｜ 待导入 <b>${plan.length}</b> 条${skipped.length ? ` ｜ 跳过 <b>${skipped.length}</b> 条` : ''}${(autoLines.length || autoStations.length) ? ` ｜ 自动补建 <b>${autoLines.length}</b> 产线 / <b>${autoStations.length}</b> 工位` : ''}
       </div>
       <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
         <table class="table" style="margin:0;">
@@ -1354,7 +1469,7 @@
           <tbody>
             ${rows.map((p) => `<tr>
               <td>${p.row}</td>
-              <td>${esc(p.fixture.serialNo)}${p.dupHint ? ' <span class="muted" title="' + esc(p.dupHint) + '">(重号)</span>' : ''}</td>
+              <td>${esc(p.fixture.serialNo)}</td>
               <td>${esc(p.fixture.name)}</td>
               <td>${esc((p.fixture.lineModels || []).join(' / ') || '—')}</td>
               <td>${esc(p.fixture.location || '—')}</td>
@@ -1382,6 +1497,8 @@
     let added = 0, failed = 0;
 
     // ① 先按导入计划补建缺失的产线 / 工位（同名复用，不重复创建）
+    // 被用户选为 skip 的不再补建，直接跳过对应行
+    const skippedKeys = new Set(plan._skipKeys || []);
     const lineIdByName = new Map((state.lines || []).map((l) => [l.name, l.id]));
     for (const name of (plan._autoLines || [])) {
       if (lineIdByName.has(name)) continue;
@@ -1471,6 +1588,16 @@
 
     const result = buildImportPlan(rows, { fixtures: state.fixtures, lines: state.lines, stations: state.stations });
     if (!result.ok) { toast(result.error, 'err'); return; }
+
+    // 先处理「产线 / 工位未建档」对话框，确认后再进预览
+    const missingMap = await window.showModalMissingLineStation(result.plan);
+    if (missingMap === null) return; // 用户取消
+
+    // 应用用户的选择（skip 的行写入 plan._skipKeys，不再补建）
+    const skipKeys = [];
+    missingMap.forEach((v, k) => { if (v === 'skip') skipKeys.push(k); });
+    result.plan._skipKeys = skipKeys;
+
     window.showImportPreview(result, picked.name);
   };
 
@@ -1745,18 +1872,20 @@
                 <input type="text" id="out_operator" placeholder="经办人">
               </div>
             </div>
-            <div class="form-group">
-              <label>用途</label>
-              <select id="out_reason">
-                <option value="use">使用</option>
-                <option value="repair">维修</option>
-                <option value="other">其它</option>
-              </select>
-              <input type="text" id="out_reason_text" placeholder="如选「其它」，请填写具体内容" style="display:none;">
-            </div>
-            <div class="form-group">
-              <label>备注</label>
-              <input type="text" id="out_remark" placeholder="可选备注">
+            <div class="form-row form-row-inline">
+              <div class="form-group">
+                <label>用途</label>
+                <select id="out_reason">
+                  <option value="use">使用</option>
+                  <option value="repair">维修</option>
+                  <option value="other">其它</option>
+                </select>
+                <input type="text" id="out_reason_text" placeholder="如选「其它」，请填写具体内容" style="display:none;">
+              </div>
+              <div class="form-group" style="flex: 2;">
+                <label>备注</label>
+                <input type="text" id="out_remark" placeholder="可选备注">
+              </div>
             </div>
             <div class="form-actions">
               <button class="btn primary" onclick="submitOutDo()">提交出库</button>
@@ -1829,14 +1958,7 @@
                 <input type="text" id="return_operator" placeholder="经办人">
               </div>
             </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>回库库位</label>
-                <input type="text" id="return_new_location" list="return_loc_list" maxlength="${MAX_LOCATION}"
-                  placeholder="留空 = 沿用原库位（如 ZP1-U-1-1）">
-                <small class="hint">填写则写回该套夹具的库位，并在流水中留痕（原库位 → 新库位）</small>
-                <datalist id="return_loc_list">${locationCandidates().map((v) => `<option value="${esc(v)}"></option>`).join('')}</datalist>
-              </div>
+            <div class="form-row form-row-inline">
               <div class="form-group">
                 <label>用途</label>
                 <select id="return_reason">
@@ -1846,7 +1968,7 @@
                 </select>
                 <input type="text" id="return_reason_text" placeholder="如选「其它」，请填写具体内容" style="display:none;">
               </div>
-              <div class="form-group">
+              <div class="form-group" style="flex: 2;">
                 <label>备注</label>
                 <input type="text" id="return_remark" placeholder="可选备注">
               </div>
@@ -2193,18 +2315,11 @@
     const returnReason = ($('#return_reason') || {}).value || 'use';
     const returnReasonText = ($('#return_reason_text') || {}).value.trim();
     const remark = ($('#return_remark') || {}).value.trim();
-    /* 回库库位：留空则沿用原库位；填写则写回夹具并留痕（原库位 → 新库位）。
-       校验必须早于任何写库动作，避免出现「部分回库成功、部分被拒」的中间态。 */
-    const wantLoc = ($('#return_new_location') || {}).value.trim();
-    if (wantLoc && !isValidLocation(wantLoc)) {
-      toast('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符', 'err');
-      return;
-    }
     if (!operator) { toast('请填写经办人', 'err'); return; }
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
-        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, time, remark, location: wantLoc || undefined, outReason: returnReason, outReasonText: returnReasonText });
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, time, remark, outReason: returnReason, outReasonText: returnReasonText });
         ok++;
       } catch (e) { fail++; }
     }
@@ -2212,7 +2327,6 @@
     clearPickState('return');
     const remarkEl = $('#return_remark'); if (remarkEl) remarkEl.value = '';
     const reasonTextEl = $('#return_reason_text'); if (reasonTextEl) reasonTextEl.value = '';
-    const locEl = $('#return_new_location'); if (locEl) locEl.value = '';
     returnSearch();
     if (ok) toast(`回库成功 ${ok} 套${fail ? `，失败 ${fail} 套` : ''}`, fail ? 'warn' : 'ok');
     else toast('回库失败，请检查夹具状态', 'err');
@@ -2387,9 +2501,10 @@
     if (filter) list = list.filter((f) => (f.location || LOC_UNASSIGNED) === filter);
     list.sort((a, b) => natCompare(a.serialNo || '', b.serialNo || '') || natCompare(a.code, b.code));
 
-    const headers = ['夹具编号', '序号', '名称', '机种名称', '产线', '工位', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '最近动态', '盘点人', '实盘数量'];
+    // 导出顺序：序号(code) 在前，方便盘点回对数；物理编号(serialNo)紧随其后
+    const headers = ['序号', '夹具编号', '名称', '机种名称', '产线', '工位', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '最近动态', '盘点人', '实盘数量'];
     const rows = list.map((f) => [
-      f.serialNo || '', f.code, f.name, formatLineModels(f, ''), lineNamesLabel(f, ''), stationNamesLabel(f, ''), f.category || '', f.location || '',
+      f.code, f.serialNo || '', f.name, formatLineModels(f, ''), lineNamesLabel(f, ''), stationNamesLabel(f, ''), f.category || '', f.location || '',
       (FIX_STATUS[f.status] || { label: f.status }).label,
       f.totalOutCount || 0, f.totalReturnCount || 0, f.repairCount || 0, lastMove(f.id), op, ''
     ]);
@@ -3060,7 +3175,7 @@
             <button type="button" class="btn sm" onclick="showView('prod')">🏷 机种管理</button>
           </div>
           <div class="query-field"><label>&nbsp;</label>
-            <button type="button" class="btn sm ghost" onclick="showView('linequery')">🔗 产线夹具查询</button>
+            <button type="button" class="btn sm ghost" onclick="showView('linequery')">🔗 产线使用</button>
           </div>
         </div>
         <div class="tip">本页按「机种」分组列出夹具落在<b>哪条产线</b>、放在哪个库位。机种与产线之间没有直接绑定，这里的产线全部由夹具记录（产线字段）反查得出。</div>
@@ -3694,7 +3809,7 @@
   };
 
   /* ============================================================
-   * 产线夹具查询 / 产线配置（v3.0.1）
+   * 产线使用 / 产线配置（v3.0.1）
    *
    * 数据层级：line ─┬─ product（产品隶属线体，用于筛选级联）
    *                 └─ station（工位隶属线体，按 seq 排序）
@@ -3862,11 +3977,13 @@
     const nodes = rows.map((r, i) => {
       const p = px(pts[i]);
       const has = r.fixtures.length > 0;
-      // 徽标优先显示实物编号（主搜索键），无实物编号时退回桥梁号
+      // 徽标优先显示实物编号（主搜索键），无实物编号时退回桥梁号。
+      // ⚠️ 2026-10-18 用户要求：工位名（ld-name, y+27）与夹具编号（ld-code）之间拉开垂直距离，
+      //    徽标由 y+40 下移至 y+56（基线距 29px；画布高 520，实测数据 3~4 行布点行距 95~143px，不会与下一行圆点重叠）。
       const codes = r.fixtures.map((f) => f.serialNo || (f.code)).join(' / ');
       const badge = has
-        ? `<text x="${p.x}" y="${p.y + 40}" text-anchor="middle" class="ld-code">${esc(codes.length > 22 ? codes.slice(0, 21) + '…' : codes)}</text>`
-        : `<text x="${p.x}" y="${p.y + 40}" text-anchor="middle" class="ld-code ld-none">无</text>`;
+        ? `<text x="${p.x}" y="${p.y + 56}" text-anchor="middle" class="ld-code">${esc(codes.length > 22 ? codes.slice(0, 21) + '…' : codes)}</text>`
+        : `<text x="${p.x}" y="${p.y + 56}" text-anchor="middle" class="ld-code ld-none">无</text>`;
       return `
         <g class="ld-node ${has ? 'ld-on' : 'ld-off'}">
           <circle cx="${p.x}" cy="${p.y}" r="19" class="${has ? 'ld-dot-on' : 'ld-dot-off'}"/>
@@ -3917,7 +4034,7 @@
       </div>`;
   }
 
-  /* ---------------- 产线夹具查询页 ----------------
+  /* ---------------- 产线使用页 ----------------
    * v4.0.0：产品级联已废除（机种不隶属产线）；工位↔夹具关联从 fixtures 反查。 */
   async function renderLineQuery() {
     const container = $('#content');
@@ -3926,7 +4043,7 @@
     // 加载中状态
     container.innerHTML = `
       <div class="panel">
-        <div class="panel-title">🔗 产线夹具查询</div>
+        <div class="panel-title">🔗 产线使用</div>
         <div class="loading-tip"><span class="spinner"></span>正在加载产线配置…</div>
       </div>`;
     try {
@@ -3948,14 +4065,26 @@
     const lineOpts = ['<option value="0">请选择线体</option>']
       .concat(lines.map((l) => opt(l.id, `${l.name}（${lineTypeLabel(l.type)}）`, l.id === q.lineId))).join('');
 
+    // 机种下拉框：从所有夹具的 lineModels 去重生成；未选线体时禁用
+    const allModels = new Set();
+    (state.fixtures || []).forEach((f) => {
+      (f.lineModels || []).forEach((m) => { if (m) allModels.add(m); });
+    });
+    const modelSorted = Array.from(allModels).sort((a, b) => natCompare(a, b));
+    const modelOpts = ['<option value="">全部机种</option>']
+      .concat(modelSorted.map((m) => opt(m, m, m === q.lineModel))).join('');
+
     container.innerHTML = `
       <div class="panel">
-        <div class="panel-title">🔗 产线夹具查询
+        <div class="panel-title">🔗 产线使用
           <span class="panel-actions"><span id="lq_count" class="muted"></span></span>
         </div>
         <div class="query-bar">
           <div class="query-field"><label>线体</label>
             <select id="lq_line" class="query-select" onchange="lineQueryChangeLine()">${lineOpts}</select>
+          </div>
+          <div class="query-field"><label>机种</label>
+            <select id="lq_model" class="query-select" onchange="lineQueryChangeModel()"${q.lineId === 0 ? ' disabled' : ''}>${modelOpts}</select>
           </div>
           <div class="query-field"><label>&nbsp;</label>
             <button type="button" class="btn sm ghost" onclick="lineQueryReset()">重置筛选</button>
@@ -3995,7 +4124,12 @@
       return;
     }
 
-    const rows = buildStationRows(stations, state.fixtures);
+    const lineModel = state.lineQuery.lineModel || '';
+    let fixtures = state.fixtures || [];
+    if (lineModel) {
+      fixtures = fixtures.filter((f) => lineModelsMatch(f, lineModel));
+    }
+    const rows = buildStationRows(stations, fixtures);
     const withFix = rows.filter((r) => r.fixtures.length > 0).length;
     const fixCount = rows.reduce((s, r) => s + r.fixtures.length, 0);
     const lineFix = fixturesOfLine(line.id).length;
@@ -4044,12 +4178,27 @@
   }
 
   window.lineQueryChangeLine = function () {
-    state.lineQuery.lineId = parseInt(($('#lq_line') || {}).value || '0', 10) || 0;
+    const newLineId = parseInt(($('#lq_line') || {}).value || '0', 10) || 0;
+    state.lineQuery.lineId = newLineId;
+    state.lineQuery.lineModel = '';
+    const modelSelect = $('#lq_model');
+    if (modelSelect) {
+      modelSelect.value = '';
+      modelSelect.disabled = newLineId === 0;
+    }
+    renderLineQueryBody();
+  };
+
+  window.lineQueryChangeModel = function () {
+    state.lineQuery.lineModel = ($('#lq_model') || {}).value || '';
     renderLineQueryBody();
   };
 
   window.lineQueryReset = function () {
     state.lineQuery.lineId = 0;
+    state.lineQuery.lineModel = '';
+    const modelSelect = $('#lq_model');
+    if (modelSelect) modelSelect.value = '';
     renderLineQuery();
   };
 

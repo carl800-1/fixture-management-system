@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 工装夹具管理程序主进程（v4.0.3）
+ * main.js — 工装夹具管理程序主进程（v4.0.6）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -32,7 +32,7 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 700,
-    title: '工装夹具管理程序 v4.0.3',
+    title: '工装夹具管理程序',
     backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -143,5 +143,7 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 app.on('window-all-closed', () => {
+  // 测试模式：多窗口时不自动退出，允许测试完成
+  if (BrowserWindow.getAllWindows().length > 0) return;
   if (process.platform !== 'darwin') app.quit();
 });

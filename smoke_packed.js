@@ -296,6 +296,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     const info = JSON.parse(await evaluate(`JSON.stringify({
       title: document.title,
       brand: (document.querySelector('.brand-name')||{}).textContent || '',
+      foot: (document.querySelector('.foot-version')||{}).textContent || '',
       navCount: document.querySelectorAll('.nav-item').length,
       views: [...document.querySelectorAll('.nav-item')].map(b=>b.dataset.view),
       bg: getComputedStyle(document.body).backgroundColor
@@ -304,8 +305,10 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     console.log('  标题：' + info.title);
     console.log('  导航：' + info.views.join(' / '));
 
-    ok('窗口标题含版本号 v' + VERSION, info.title.indexOf('v' + VERSION) >= 0, info.title);
-    ok('品牌栏含版本号 v' + VERSION, info.brand.indexOf('v' + VERSION) >= 0, info.brand);
+    /* v4.0.4 起 title / 品牌名统一为程序名，界面版本号只在页脚显示 */
+    ok('窗口标题为程序名（v4.0.4 起不再带版本号）', info.title.trim() === '工装夹具管理程序', info.title);
+    ok('品牌栏为程序名（v4.0.4 起不再带版本号）', info.brand.trim() === '工装夹具管理程序', info.brand);
+    ok('页脚版本号 = v' + VERSION, info.foot.indexOf('v' + VERSION) >= 0, info.foot);
     const EX_VIEWS = ['dashboard', 'fixtures', 'outbound', 'return', 'location', 'records',
       'query', 'prod', 'prodquery', 'linequery', 'linecfg', 'data'];
     const missView = EX_VIEWS.filter((v) => !info.views.includes(v));
@@ -329,7 +332,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       'fixFormLinePicked','fixFormStationPicked','fixFormAddStation','fixFormRemoveStation',
       'fixFormModelsInput','fixFormRemoveModel','fixFormCheckSerial','fixFormGotoLineCfg',
       'lineCfgLineForm','lineCfgSaveLine','lineCfgPickLine','lineCfgStationForm','lineCfgSaveStation',
-      'lineCfgDelLine','lineCfgImport','lineQueryChangeLine','lineQueryReset',
+      'lineCfgDelLine','lineCfgImport','lineQueryChangeLine','lineQueryChangeModel','lineQueryReset',
       'openFixtureQR','printSingleLabel','batchPrintLabels','clearAllData','exportData'];
     const missing = JSON.parse(await evaluate('JSON.stringify(' + JSON.stringify(fns) + '.filter(f => typeof window[f] !== "function"))'));
     ok('v4 关键全局函数全部挂载（' + fns.length + ' 个）', missing.length === 0, missing.join(', '));

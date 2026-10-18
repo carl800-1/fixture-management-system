@@ -473,6 +473,8 @@ tbody tr.selected { background: var(--primary-soft); }
 
 .fix-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .form-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.form-row-inline { display: flex; gap: 12px; align-items: flex-start; }
+.form-row-inline .form-group { flex: 1; min-width: 0; }
 .form-group .hint { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
 
 .pp-fit { position: relative; }
@@ -535,7 +537,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .th-sort:hover { color: var(--primary); }
 .tip { padding: 6px 16px 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
 
-/* ===================== 产线夹具查询 / 产线配置（v3.0.1） ===================== */
+/* ===================== 产线使用 / 产线配置（v3.0.1） ===================== */
 
 /* 加载中状态 */
 .loading-tip {
