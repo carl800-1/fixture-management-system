@@ -583,6 +583,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .ld-lg-on { background: var(--primary); }
 .ld-lg-off { background: #fff; border: 2px solid #cbd5e1; box-sizing: border-box; }
 
+.ld-canvas { overflow-x: auto; overflow-y: hidden; }
 .ld-svg { display: block; width: 100%; height: auto; }
 .ld-track { fill: none; stroke: var(--border); stroke-width: 3; stroke-dasharray: 8 6; }
 .ld-link { stroke-dasharray: 4 6; opacity: .55; }
@@ -590,9 +591,12 @@ tbody tr.selected { background: var(--primary-soft); }
 .ld-dot-on { fill: var(--primary); stroke: var(--primary-dark); stroke-width: 2; }
 .ld-seq { font-size: 12px; font-weight: 700; fill: var(--muted); }
 .ld-dot-on + .ld-seq { fill: #fff; }
-.ld-name { font-size: 12px; fill: var(--text); }
+.ld-name { font-size: 12px; font-weight: 600; fill: var(--text); }
 .ld-code { font-size: 11px; font-weight: 700; fill: var(--primary-dark); }
 .ld-code.ld-none { fill: #9ca3af; font-weight: 400; }
+.ld-node { cursor: default; }
+/* v4.1.0：U 型转角节点标签的白色垫底，让竖直连线从标签后面穿过 */
+.ld-plate { fill: #fff; }
 
 /* ============================================================
  * v4.0.0 新增：机种 chips、产线工位选择（v4.0.2 起为两级下拉 + 标签区）、派生数量合计、

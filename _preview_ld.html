@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>产线示意图 · v4.1.0 夹具号错行预览</title>
+<style>
+/* ============================================================
+ * style.css — 工装夹具出入库管理系统样式
+ * ============================================================ */
+:root {
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-soft: #eff4ff;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --warn: #d97706;
+  --warn-soft: #fef3c7;
+  --ok: #16a34a;
+  --ok-soft: #dcfce7;
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+#app { display: flex; height: 100vh; }
+.muted { color: var(--muted); }
+
+/* ---------- 侧边栏 ---------- */
+.sidebar {
+  width: 220px;
+  background: #0f172a;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 18px; font-size: 17px; font-weight: 700; color: #fff;
+  border-bottom: 1px solid #1e293b;
+}
+.brand-logo { font-size: 22px; }
+.nav { padding: 10px 10px; flex: 1; overflow-y: auto; }
+.nav-item {
+  display: block; width: 100%; padding: 10px 14px; margin-bottom: 4px;
+  background: none; border: none; color: #94a3b8; font-size: 14px;
+  text-align: left; border-radius: 8px; cursor: pointer; transition: all .15s;
+}
+.nav-item:hover { background: #1e293b; color: #e2e8f0; }
+.nav-item.active { background: var(--primary); color: #fff; }
+.sidebar-foot { padding: 12px 18px; border-top: 1px solid #1e293b; color: #64748b; font-size: 12px; }
+.sidebar-foot .foot-sign { display: block; margin-top: 4px; opacity: .85; }
+
+/* ---------- 主区域 ---------- */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px; background: #fff; border-bottom: 1px solid var(--border);
+}
+.topbar h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.top-stats { font-size: 13px; color: var(--muted); }
+
+.content { flex: 1; padding: 20px 24px; overflow-y: auto; }
+
+/* ---------- 通用工具类（与备件仓库管理系统保持一致） ---------- */
+.spacer { flex: 1; }
+.ml { margin-left: 4px; }
+.mt { margin-top: 12px; }
+.tip { background: var(--primary-soft); color: var(--primary-dark); padding: 10px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.danger { background: var(--danger-soft); color: var(--danger); }
+.badge.muted { background: #eef2f7; color: var(--muted); }
+
+/* ---------- 表格（库位明细 / 夹具列表视图） ---------- */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { background: #f8fafc; color: var(--muted); font-weight: 600; position: sticky; top: 0; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #f9fafb; }
+tbody tr.selected { background: var(--primary-soft); }
+.row-actions { display: inline-flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+
+
+/* ---------- 库位管理（10 列网格 + 三行可视，与备件系统一致） ---------- */
+.loc-split { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
+.loc-top { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; }
+.loc-top-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.loc-bottom { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.loc-bottom .table-wrap { flex: 1 1 auto; overflow: auto; }
+.loc-grid10 {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 8px;
+  max-height: calc(3 * 42px + 2 * 8px + 12px);
+  overflow-y: auto;
+  padding: 4px 2px 8px;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+.loc-card {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 42px; padding: 6px 4px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); cursor: pointer; text-align: center;
+  font: inherit; color: var(--text); line-height: 1.2;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  overflow: hidden;
+}
+.loc-card:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+.loc-card.active { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 2px var(--primary); }
+.loc-card.unassigned { border-style: dashed; }
+.loc-card-no {
+  font-size: 13px; font-weight: 700; color: var(--primary-dark); letter-spacing: .3px;
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- 关于 / About ---------- */
+.about-btn {
+  position: fixed; right: 18px; bottom: 18px; z-index: 40;
+  background: var(--primary); color: #fff; border: none;
+  padding: 9px 16px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600;
+  box-shadow: 0 4px 14px rgba(37,99,235,.35); transition: .15s;
+}
+.about-btn:hover { background: var(--primary-dark); transform: translateY(-1px); }
+.about-panel { line-height: 1.7; display: flex; flex-direction: column; max-height: 76vh; }
+.about-scroll {
+  flex: 1 1 auto; overflow-y: auto; max-height: 56vh; padding-right: 8px;
+  border: 1px solid #e6ecf5; border-radius: 8px; background: #fafcff; padding: 12px 14px;
+}
+.about-h { margin: 14px 0 8px; font-size: 15px; color: var(--text); }
+.about-h:first-child { margin-top: 0; }
+.about-ver { margin: 14px 0 4px; font-size: 14px; color: var(--primary-dark); font-weight: 700; }
+.about-ver:first-of-type { margin-top: 0; }
+.about-list { margin: 0; padding-left: 20px; }
+.about-list li { margin: 6px 0; }
+.about-note { margin: 10px 0 0; font-style: italic; }
+.about-version { margin-top: 12px; }
+
+/* ---------- 面板 ---------- */
+.panel {
+  background: #fff; border-radius: var(--radius); box-shadow: var(--shadow);
+  margin-bottom: 16px; overflow: hidden;
+}
+.panel-title {
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 10px;
+}
+.panel-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: #fff; color: var(--text); font-size: 13px; cursor: pointer;
+  transition: all .15s;
+}
+.btn:hover { background: var(--bg); }
+.btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn.primary:hover { background: var(--primary-dark); }
+.btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn.danger:hover { background: #b91c1c; }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+.btn.ghost { background: transparent; border-color: transparent; }
+.btn.ghost:hover { background: var(--bg); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- 扫码区域 ---------- */
+.scan-area {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+.scan-area video {
+  width: 100%;
+  display: block;
+}
+.scan-area .scan-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.scan-area .scan-line {
+  width: 80%;
+  height: 2px;
+  background: var(--primary);
+  animation: scanMove 2s ease-in-out infinite;
+  box-shadow: 0 0 10px var(--primary);
+}
+@keyframes scanMove {
+  0%, 100% { transform: translateY(-50px); }
+  50% { transform: translateY(50px); }
+}
+.scan-instruction {
+  text-align: center;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  background: #fff;
+  border-radius: 0 0 8px 8px;
+}
+
+/* ---------- 夹具卡片 ---------- *//* ---------- 表单 ---------- */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px; color: var(--muted); }
+/* 横向表单组（产线工位）：标签置顶、控件区充满剩余宽度，供内部 .ls-toolbar 横向排开 */
+.form-group.form-group-row { display: flex; flex-wrap: wrap; column-gap: 14px; }
+.form-group.form-group-row label { flex: 0 0 auto; margin-bottom: 0; margin-top: 3px; }
+.form-group.form-group-row > :not(label) { flex: 1 1 340px; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 14px; background: #fff; color: var(--text);
+}
+.form-group input:focus, .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+.form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- 统计栏 ---------- */
+.stats-bar {
+  display: flex; gap: 20px; padding: 16px; border-bottom: 1px solid var(--border);
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; }
+.stat-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.stat-value { font-size: 22px; font-weight: 700; }
+.stat-ok { color: var(--ok); }
+.stat-warn { color: var(--warn); }
+.stat-danger { color: var(--danger); }
+.stat-muted { color: var(--muted); }
+
+/* ---------- 搜索栏 ---------- */
+.search-bar { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.search-bar input {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 14px;
+}
+.search-bar input:focus { outline: none; border-color: var(--primary); }
+
+.multi-search input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+}
+.multi-search input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+
+.candidate-list { background: var(--bg); border-radius: 8px; padding: 8px; }
+.candidate-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 4px;
+  background: #fff; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);
+  font-size: 13px;
+}
+.candidate-item:hover { border-color: var(--primary); background: var(--primary-soft); }
+.candidate-item b { color: var(--primary); min-width: 44px; }
+
+/* ---------- 夹具卡片 ---------- */
+.fixture-grid {
+  display: grid;
+  /* 220px 时 5 个操作按钮放不进一行，抬到 240px 保证「出库/送修/编辑/报废/二维码」同排 */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+.fixture-card {
+  background: #fff;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.fixture-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+}
+.fixture-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.fixture-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.fixture-code {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.fixture-card-body { margin-bottom: 10px; }
+.fixture-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.fixture-lineModels { color: var(--muted); font-size: 12px; margin-bottom: 6px; word-break: break-all; }
+/* 机种 / 产线工位等派生行：小字灰字，单行省略（完整内容看 title 提示） */
+.fixture-spec { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.fixture-spec.fixture-ls { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fixture-meta { display: flex; gap: 12px; font-size: 11px; color: var(--muted); }
+/* 操作按钮：收紧内距 + 不换行，5 个按钮排一行不折行 */
+.fixture-card-footer { display: flex; gap: 3px; flex-wrap: wrap; }
+.fixture-card-footer .btn.sm { padding: 3px 5px; font-size: 11.5px; white-space: nowrap; }
+
+/* ---------- 状态徽章 ---------- */
+.status-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 600;
+}
+.status-ok { background: var(--ok-soft); color: var(--ok); }
+.status-warn { background: var(--warn-soft); color: var(--warn); }
+.status-danger { background: var(--danger-soft); color: var(--danger); }
+.status-muted { background: #f3f4f6; color: var(--muted); }
+
+/* ---------- 流水记录 ---------- */
+.tx-list { padding: 0; }
+.tx-row {
+  display: grid;
+  grid-template-columns: 60px 80px 100px 80px 100px 140px 1fr 80px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 13px;
+}
+.tx-row:last-child { border-bottom: none; }
+.tx-type { font-weight: 600; }
+.tx-fixture { font-weight: 500; }
+.tx-status { color: var(--muted); }
+.tx-operator { color: var(--muted); }
+.tx-party { color: var(--muted); }
+.tx-time { color: var(--muted); }
+.tx-remark { color: var(--muted); font-style: italic; }
+.tx-reason { color: var(--muted); text-align: right; }
+.tx-header {
+  background: var(--bg);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 模态框 ---------- */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.modal {
+  background: #fff; border-radius: 12px; width: 90%; max-width: 500px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.2);
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.modal-head h3 { margin: 0; font-size: 16px; }
+.modal-close {
+  background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted);
+}
+.modal-body { padding: 20px; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  padding: 10px 20px; border-radius: 8px; font-size: 14px; z-index: 2000;
+  animation: toast-in .2s ease;
+}
+.toast.ok { background: var(--ok); color: #fff; }
+.toast.err { background: var(--danger); color: #fff; }
+.toast.warn { background: var(--warn); color: #fff; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 20px); } }
+
+/* ---------- 空提示 ---------- */
+.empty-tip { padding: 40px; text-align: center; color: var(--muted); }
+
+/* ---------- 二维码预览 ---------- */
+.qr-preview { text-align: center; padding: 20px; }
+.qr-preview canvas { border: 1px solid var(--border); border-radius: 8px; }
+
+/* ============================================================
+ * 二维码 / 标签 / 打印（v1.7 新增）
+ * ============================================================ */
+.qr-block { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+.qr-canvas { width: 200px; height: 200px; border: 1px solid var(--border); border-radius: 8px; background: #fff; image-rendering: pixelated; }
+.qr-info { font-size: 14px; line-height: 1.9; }
+.qr-info .muted { margin-top: 6px; }
+
+/* 标签（屏幕预览 + 打印） */
+.print-area { display: none; }
+.label-card { display: inline-block; border: 1px solid #bbb; border-radius: 6px; padding: 8px; margin: 6px; width: 190px; text-align: center; vertical-align: top; background: #fff; }
+.label-qr { width: 150px; height: 150px; image-rendering: pixelated; }
+.label-text { font-size: 12px; margin-top: 6px; line-height: 1.45; }
+.lc-code { font-weight: 700; font-size: 13px; }
+.lc-name { font-weight: 700; }
+.lc-lineModels, .lc-loc { color: #444; word-break: break-all; }
+
+/* ===== 打印设置面板 + 实时预览（屏幕） ===== */
+.print-cfg { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; background: #f8fafc; margin-bottom: 10px; }
+.pc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.pc-row:last-child { margin-bottom: 0; }
+.pc-row > label { font-size: 13px; color: #334155; min-width: 64px; }
+.pc-row select, .pc-row input { padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; }
+.pp-custom { align-items: center; gap: 4px; }
+.pp-margins input { margin: 0 8px 0 2px; }
+.print-preview-title { font-size: 13px; color: #475569; margin: 4px 0 8px; }
+.print-preview-title #ppPaperLabel { font-weight: 700; color: #0f172a; }
+.pp-stage { background: #e2e8f0; border-radius: 8px; padding: 14px; display: flex; justify-content: center; align-items: flex-start; overflow: auto; max-height: 360px; }
+/* ============================================================
+ * 出库 / 回库页：流程导航 + 四栏检索 + 按种类勾选 + 数量 + 登记表
+ * ============================================================ */
+.fix-nav-out-wrap { display: flex; gap: 16px; align-items: flex-start; }
+.fix-nav {
+  flex: 0 0 248px; width: 248px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow);
+}
+.fix-nav h3 { margin: 0 0 10px; font-size: 14px; }
+.fix-nav ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.9; }
+.fix-out-col {
+  flex: 1 1 auto; min-width: 0; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow);
+}
+
+.info-tip {
+  background: var(--primary-soft); border: 1px solid #c7dbff; color: #1e40af;
+  padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.7; margin: 10px 0 12px;
+}
+.search-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.input-scan { position: relative; }
+.input-scan input { width: 100%; padding-right: 38px; }
+.btn-scan {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; cursor: pointer; font-size: 15px;
+  padding: 4px 6px; border-radius: 6px; line-height: 1;
+}
+.btn-scan:hover { background: var(--primary-soft); }
+
+.stock-bar {
+  display: flex; align-items: center; gap: 8px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  font-size: 13px; margin: 12px 0;
+}
+.stock-bar b { color: var(--primary); font-size: 15px; }
+
+.pick-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.pick-groups { padding: 8px; }
+.pick-group { border-bottom: 1px dashed var(--border); padding: 6px 4px; }
+.pick-group:last-child { border-bottom: none; }
+.pick-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pick-all { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.pick-group-count { font-size: 12px; color: var(--muted); }
+.pick-codes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px 24px; }
+.pick-code {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px; font-size: 12px; background: #fff; cursor: pointer;
+}
+.pick-code:hover { border-color: var(--primary); background: var(--primary-soft); }
+.pick-code-no { font-weight: 600; color: var(--primary); }
+
+.picked-summary {
+  margin-top: 10px; padding: 10px 12px; background: var(--primary-soft);
+  border: 1px solid #c7dbff; border-radius: 8px; font-size: 13px;
+}
+.summary-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.summary-codes { font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+.fix-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.form-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.form-row-inline { display: flex; gap: 12px; align-items: flex-start; }
+.form-row-inline .form-group { flex: 1; min-width: 0; }
+.form-group .hint { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+.pp-fit { position: relative; }
+.pp-page { position: absolute; top: 0; left: 0; transform-origin: top left; display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; box-sizing: border-box; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, .2); }
+
+@media print {
+  @page { margin: 0; }
+  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  /* 仅保留打印区域，其余（侧边栏/顶栏/模态/提示）全部隐藏 */
+  body > *:not(.print-area) { display: none !important; }
+  #app, .sidebar, .topbar, .modal-overlay, #toast, #aboutBtn { display: none !important; }
+  .print-area {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: var(--ph, center);     /* 水平对齐 */
+    align-items: var(--pv, center);          /* 交叉轴（垂直）单排对齐 */
+    align-content: var(--pv, center);        /* 多排时整体垂直对齐 */
+    gap: 6px;
+    box-sizing: border-box;
+    padding: var(--pm, 0mm);                 /* 页边距（mm） */
+    width: 100% !important;
+    min-height: 100vh;                        /* 撑满整页，使少量标签可垂直居中 */
+    position: static;
+    background: #fff;
+  }
+}
+
+/* ===================== 夹具查询 ===================== */
+.query-bar {
+  display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: flex-end;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+.query-bar + .query-bar { border-top: none; padding-top: 0; }
+.query-field { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+.query-field > label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.query-field input,
+.query-select {
+  height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: #fff; font-size: 13px; color: var(--text); min-width: 150px;
+}
+.query-field input:focus,
+.query-select:focus { outline: none; border-color: var(--primary); }
+.query-control-row { display: flex; gap: 8px; align-items: center; }
+.query-control-row .btn { height: 34px; }
+.chip-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; height: 34px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 999px; background: #fff;
+  font-size: 13px; color: var(--text); cursor: pointer; transition: all .15s;
+}
+.chip:hover { border-color: var(--primary); }
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.chip-clear {
+  height: 28px; padding: 0 10px; border: 1px dashed var(--border); border-radius: 999px;
+  background: transparent; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.chip-clear:hover { color: var(--danger); border-color: var(--danger); }
+.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.th-sort:hover { color: var(--primary); }
+.tip { padding: 6px 16px 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+/* ===================== 产线使用 / 产线配置（v3.0.1） ===================== */
+
+/* 加载中状态 */
+.loading-tip {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 44px 16px; color: var(--muted); font-size: 13px;
+}
+.spinner {
+  width: 16px; height: 16px; border-radius: 50%; display: inline-block;
+  border: 2px solid var(--border); border-top-color: var(--primary);
+  animation: ld-spin .8s linear infinite;
+}
+@keyframes ld-spin { to { transform: rotate(360deg); } }
+
+/* 表格中的选中行 / 空配置行 */
+.row-selected { background: var(--primary-soft) !important; }
+.row-empty td { color: var(--muted); }
+
+/* 夹具编号标签（产线配置页） */
+.fx-cell { white-space: normal !important; }
+.fx-tag {
+  display: inline-block; margin: 0 4px 3px 0; padding: 1px 8px;
+  border-radius: 6px; background: var(--primary-soft); color: var(--primary-dark);
+  font-size: 12px; font-weight: 600;
+}
+.fx-tag-miss { background: var(--danger-soft); color: var(--danger); }
+
+/* 产线示意图 */
+.line-diagram {
+  margin: 14px 16px 18px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: #fff;
+}
+.line-diagram-head {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px; margin-bottom: 6px;
+}
+.ld-title { font-size: 13px; font-weight: 600; }
+.ld-legend { font-size: 12px; color: var(--muted); }
+.ld-lg {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin: 0 5px 0 12px; vertical-align: middle;
+}
+.ld-lg:first-child { margin-left: 0; }
+.ld-lg-on { background: var(--primary); }
+.ld-lg-off { background: #fff; border: 2px solid #cbd5e1; box-sizing: border-box; }
+
+.ld-canvas { overflow-x: auto; overflow-y: hidden; }
+.ld-svg { display: block; width: 100%; height: auto; }
+.ld-track { fill: none; stroke: var(--border); stroke-width: 3; stroke-dasharray: 8 6; }
+.ld-link { stroke-dasharray: 4 6; opacity: .55; }
+.ld-dot-off { fill: #fff; stroke: #cbd5e1; stroke-width: 2; }
+.ld-dot-on { fill: var(--primary); stroke: var(--primary-dark); stroke-width: 2; }
+.ld-seq { font-size: 12px; font-weight: 700; fill: var(--muted); }
+.ld-dot-on + .ld-seq { fill: #fff; }
+.ld-name { font-size: 12px; font-weight: 600; fill: var(--text); }
+.ld-code { font-size: 11px; font-weight: 700; fill: var(--primary-dark); }
+.ld-code.ld-none { fill: #9ca3af; font-weight: 400; }
+.ld-node { cursor: default; }
+/* v4.0.9：U 型转角节点标签的白色垫底，让竖直连线从标签后面穿过 */
+.ld-plate { fill: #fff; }
+
+/* ============================================================
+ * v4.0.0 新增：机种 chips、产线工位选择（v4.0.2 起为两级下拉 + 标签区）、派生数量合计、
+ *            机种分组视图、库位卡片计数、字段提示
+ * ============================================================ */
+
+/* ---------- 机种名称 chips ---------- */
+.chip-box {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  min-height: 34px; padding: 6px 8px; border: 1px dashed var(--border);
+  border-radius: 8px; background: #fafbfd; margin-bottom: 6px;
+}
+.chip-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px 2px 10px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary-dark);
+  font-size: 12px; font-weight: 600; line-height: 1.6;
+}
+.chip-x {
+  border: none; background: none; cursor: pointer; padding: 0 2px;
+  color: var(--primary-dark); font-size: 14px; line-height: 1; opacity: .7;
+}
+.chip-x:hover { opacity: 1; color: var(--danger); }
+.chip-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip-add select { min-width: 190px; }
+.chip-add input[type="text"] { flex: 1; min-width: 180px; }
+.chip-add .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ---------- 产线工位：两级下拉 + 标签区 ---------- */
+.ls-box { border: 1px solid var(--border); border-radius: 8px; background: #fafbfd; padding: 10px; flex: 1 1 auto; min-width: 320px; }
+/* 工具区：产线下拉 + 工位下拉 +「+ 添加」+ 计数 一行排列（空间不足时换行，不截断） */
+.ls-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+/* 两下拉自适应宽度：容器够宽时与「+ 添加」「计数」同行；不足时自动换行，不截断 */
+.ls-toolbar #fix_line_pick { flex: 0 1 auto; width: auto; min-width: 150px; max-width: 240px; }
+.ls-toolbar #fix_st_pick { flex: 0 1 auto; width: auto; min-width: 130px; max-width: 220px; }
+.ls-toolbar .muted { font-size: 12px; white-space: nowrap; }
+.ls-toolbar .btn { flex: 0 0 auto; white-space: nowrap; }
+/* 标签区空态：与旧版「尚未选择工位」边框一致，避免空区视觉断裂 */
+.chip-box.chip-box-empty { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+.chip-box.chip-box-empty .chip-ls-empty { display: block; font-size: 12px; }
+.chip-tag.chip-ls b { font-weight: 700; }
+.chip-tag.chip-ls .chip-x { margin-left: 2px; }
+
+/* ---------- 库位卡片：在库套数 ---------- */
+.loc-card { flex-direction: column; gap: 2px; }
+.loc-card-num {
+  font-size: 16px; font-weight: 700; color: var(--primary);
+  line-height: 1.1; letter-spacing: .3px;
+}
+.loc-card.unassigned .loc-card-num { color: var(--muted); }
+
+/* ---------- 夹具卡片 / 列表：实物编号优先 ---------- */
+.fixture-serial { font-size: 14px; font-weight: 700; color: var(--primary-dark); word-break: break-all; }
+.bridge-code { font-size: 11px; font-weight: 600; color: var(--muted); }
+
+/* ---------- 派生数量合计（夹具查询页第 ① 段） ---------- */
+.agg-head {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 8px 16px 0; font-size: 13px; color: var(--muted);
+}
+.agg-tag {
+  padding: 2px 10px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary-dark); font-size: 12px;
+}
+.agg-total td { background: #f8fafc; font-weight: 700; color: var(--text); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- 按机种分组视图 ---------- */
+.pq-group { margin: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pq-head {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+  padding: 9px 14px; background: #f8fafc; border-bottom: 1px solid var(--border);
+}
+.pq-head b { font-size: 14px; color: var(--primary-dark); }
+
+/* ---------- 字段必备标记与提示 ---------- */
+.req { color: var(--danger); font-weight: 700; margin-left: 2px; }
+.hint { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.hint-warn { color: var(--warn); font-weight: 600; }
+.tip.hint-warn { color: var(--warn); }
+
+body { padding: 20px 24px; background: #f4f6fa; }
+h2 { font-size: 15px; margin: 26px 0 4px; }
+.meta { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.ld-canvas { overflow: visible; }
+</style></head>
+<body>
+<h1 style="font-size:18px;margin:0 0 4px">产线示意图改版预览 · v4.1.0</h1>
+<p class="meta">U 型底横排的夹具号<b>相邻上下错开</b>（偶数位贴圆 / 奇数位下沉 20px），同一基线上的相邻编号隔 2 个节点间距，长编号不再粘连。</p>
+<h2>U型 30 工位（底 10 / 左 10 / 右 10）+ 21 字编号 —— 截图场景，编号已错行</h2><p class="meta">线体：1号线　画布：1289 × 1113</p>
+      <div class="line-diagram">
+        <div class="line-diagram-head">
+          <span class="ld-title">1号线 · U型产线示意图</span>
+          <span class="ld-legend">
+            <i class="ld-lg ld-lg-on"></i>已配置夹具
+            <i class="ld-lg ld-lg-off"></i>无配置
+          </span>
+        </div>
+        <div class="ld-canvas">
+          <svg class="ld-svg" viewBox="0 0 1289 1113" preserveAspectRatio="xMidYMid meet" role="img"
+               style="min-width:1289px" aria-label="1号线产线布局示意图">
+            <polyline points="317.18,131.04000000000002 317.18,203.07555555555555 317.18,275.1111111111111 317.18,347.14666666666665 317.18,419.18222222222226 317.18,491.2177777777778 317.18,563.2533333333332 317.18,635.2888888888889 317.18,707.3244444444445 317.18,779.36 317.18,961.7 389.91777777777776,961.7 462.65555555555557,961.7 535.3933333333333,961.7 608.1311111111112,961.7 680.8688888888888,961.7 753.6066666666667,961.7 826.3444444444444,961.7 899.0822222222223,961.7 971.82,961.7 971.82,779.36 971.82,707.3244444444445 971.82,635.2888888888888 971.82,563.2533333333332 971.82,491.21777777777777 971.82,419.1822222222222 971.82,347.14666666666665 971.82,275.11111111111103 971.82,203.07555555555552 971.82,131.03999999999996" class="ld-track" fill="none"/>
+            
+        <g class="ld-node ld-on">
+          <title>1号工位 · 夹具1</title>
+          
+          <text x="344.2" y="135.0" text-anchor="start" class="ld-name">1号工位</text>
+          <circle cx="317.2" cy="131.0" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="135.0" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>2号工位 · 夹具2</title>
+          
+          <text x="344.2" y="207.1" text-anchor="start" class="ld-name">2号工位</text>
+          <circle cx="317.2" cy="203.1" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="207.1" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>3号工位 · 夹具3</title>
+          
+          <text x="344.2" y="279.1" text-anchor="start" class="ld-name">3号工位</text>
+          <circle cx="317.2" cy="275.1" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="279.1" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>4号工位 · 无夹具</title>
+          
+          <text x="344.2" y="351.1" text-anchor="start" class="ld-name">4号工位</text>
+          <circle cx="317.2" cy="347.1" r="19" class="ld-dot-off"/>
+          <text x="290.2" y="351.1" text-anchor="end" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>5号工位 · 夹具5</title>
+          
+          <text x="344.2" y="423.2" text-anchor="start" class="ld-name">5号工位</text>
+          <circle cx="317.2" cy="419.2" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="423.2" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>6号工位 · 夹具6</title>
+          
+          <text x="344.2" y="495.2" text-anchor="start" class="ld-name">6号工位</text>
+          <circle cx="317.2" cy="491.2" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="495.2" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>7号工位 · 夹具7</title>
+          
+          <text x="344.2" y="567.3" text-anchor="start" class="ld-name">7号工位</text>
+          <circle cx="317.2" cy="563.3" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="567.3" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>8号工位 · 夹具8</title>
+          
+          <text x="344.2" y="639.3" text-anchor="start" class="ld-name">8号工位</text>
+          <circle cx="317.2" cy="635.3" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="639.3" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>9号工位 · 无夹具</title>
+          
+          <text x="344.2" y="711.3" text-anchor="start" class="ld-name">9号工位</text>
+          <circle cx="317.2" cy="707.3" r="19" class="ld-dot-off"/>
+          <text x="290.2" y="711.3" text-anchor="end" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>10号工位 · 夹具10</title>
+          
+          <text x="344.2" y="783.4" text-anchor="start" class="ld-name">10号工位</text>
+          <circle cx="317.2" cy="779.4" r="19" class="ld-dot-on"/>
+          <text x="290.2" y="783.4" text-anchor="end" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>11号工位 · 夹具11</title>
+          <rect x="290.5" y="922.7" width="53.4" height="15" rx="3" class="ld-plate"/>
+          <text x="317.2" y="933.7" text-anchor="middle" class="ld-name">11号工位</text>
+          <circle cx="317.2" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="317.2" y="1007.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>12号工位 · 夹具12</title>
+          
+          <text x="389.9" y="933.7" text-anchor="middle" class="ld-name">12号工位</text>
+          <circle cx="389.9" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="389.9" y="1027.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>13号工位 · 夹具13</title>
+          
+          <text x="462.7" y="933.7" text-anchor="middle" class="ld-name">13号工位</text>
+          <circle cx="462.7" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="462.7" y="1007.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>14号工位 · 无夹具</title>
+          
+          <text x="535.4" y="933.7" text-anchor="middle" class="ld-name">14号工位</text>
+          <circle cx="535.4" cy="961.7" r="19" class="ld-dot-off"/>
+          <text x="535.4" y="1027.7" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>15号工位 · 夹具15</title>
+          
+          <text x="608.1" y="933.7" text-anchor="middle" class="ld-name">15号工位</text>
+          <circle cx="608.1" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="608.1" y="1007.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>16号工位 · 夹具16</title>
+          
+          <text x="680.9" y="933.7" text-anchor="middle" class="ld-name">16号工位</text>
+          <circle cx="680.9" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="680.9" y="1027.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>17号工位 · 夹具17</title>
+          
+          <text x="753.6" y="933.7" text-anchor="middle" class="ld-name">17号工位</text>
+          <circle cx="753.6" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="753.6" y="1007.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>18号工位 · 夹具18</title>
+          
+          <text x="826.3" y="933.7" text-anchor="middle" class="ld-name">18号工位</text>
+          <circle cx="826.3" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="826.3" y="1027.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>19号工位 · 无夹具</title>
+          
+          <text x="899.1" y="933.7" text-anchor="middle" class="ld-name">19号工位</text>
+          <circle cx="899.1" cy="961.7" r="19" class="ld-dot-off"/>
+          <text x="899.1" y="1007.7" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>20号工位 · 夹具20</title>
+          <rect x="945.1" y="922.7" width="53.4" height="15" rx="3" class="ld-plate"/>
+          <text x="971.8" y="933.7" text-anchor="middle" class="ld-name">20号工位</text>
+          <circle cx="971.8" cy="961.7" r="19" class="ld-dot-on"/>
+          <text x="971.8" y="1027.7" text-anchor="middle" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>21号工位 · 夹具21</title>
+          
+          <text x="944.8" y="783.4" text-anchor="end" class="ld-name">21号工位</text>
+          <circle cx="971.8" cy="779.4" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="783.4" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>22号工位 · 夹具22</title>
+          
+          <text x="944.8" y="711.3" text-anchor="end" class="ld-name">22号工位</text>
+          <circle cx="971.8" cy="707.3" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="711.3" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>23号工位 · 夹具23</title>
+          
+          <text x="944.8" y="639.3" text-anchor="end" class="ld-name">23号工位</text>
+          <circle cx="971.8" cy="635.3" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="639.3" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>24号工位 · 无夹具</title>
+          
+          <text x="944.8" y="567.3" text-anchor="end" class="ld-name">24号工位</text>
+          <circle cx="971.8" cy="563.3" r="19" class="ld-dot-off"/>
+          <text x="998.8" y="567.3" text-anchor="start" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>25号工位 · 夹具25</title>
+          
+          <text x="944.8" y="495.2" text-anchor="end" class="ld-name">25号工位</text>
+          <circle cx="971.8" cy="491.2" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="495.2" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>26号工位 · 夹具26</title>
+          
+          <text x="944.8" y="423.2" text-anchor="end" class="ld-name">26号工位</text>
+          <circle cx="971.8" cy="419.2" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="423.2" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>27号工位 · 夹具27</title>
+          
+          <text x="944.8" y="351.1" text-anchor="end" class="ld-name">27号工位</text>
+          <circle cx="971.8" cy="347.1" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="351.1" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>28号工位 · 夹具28</title>
+          
+          <text x="944.8" y="279.1" text-anchor="end" class="ld-name">28号工位</text>
+          <circle cx="971.8" cy="275.1" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="279.1" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>29号工位 · 无夹具</title>
+          
+          <text x="944.8" y="207.1" text-anchor="end" class="ld-name">29号工位</text>
+          <circle cx="971.8" cy="203.1" r="19" class="ld-dot-off"/>
+          <text x="998.8" y="207.1" text-anchor="start" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>30号工位 · 夹具30</title>
+          
+          <text x="944.8" y="135.0" text-anchor="end" class="ld-name">30号工位</text>
+          <circle cx="971.8" cy="131.0" r="19" class="ld-dot-on"/>
+          <text x="998.8" y="135.0" text-anchor="start" class="ld-code">SN-2024-0001-ABCDEFGH</text>
+        </g>
+          </svg>
+        </div>
+      </div><h2>U型 15 工位（底 5 / 左 5 / 右 5）+ 常规编号</h2><p class="meta">线体：2号线　画布：1000 × 550</p>
+      <div class="line-diagram">
+        <div class="line-diagram-head">
+          <span class="ld-title">2号线 · U型产线示意图</span>
+          <span class="ld-legend">
+            <i class="ld-lg ld-lg-on"></i>已配置夹具
+            <i class="ld-lg ld-lg-off"></i>无配置
+          </span>
+        </div>
+        <div class="ld-canvas">
+          <svg class="ld-svg" viewBox="0 0 1000 550" preserveAspectRatio="xMidYMid meet" role="img"
+               style="min-width:1000px" aria-label="2号线产线布局示意图">
+            <polyline points="253.6,86 253.6,158 253.6,230 253.6,302 253.6,374 253.6,455 376.8,455 500,455 623.2,455 746.4,455 746.4,374 746.4,302 746.4,229.99999999999997 746.4,158 746.4,85.99999999999997" class="ld-track" fill="none"/>
+            
+        <g class="ld-node ld-on">
+          <title>1号工位 · 夹具1</title>
+          
+          <text x="280.6" y="90.0" text-anchor="start" class="ld-name">1号工位</text>
+          <circle cx="253.6" cy="86.0" r="19" class="ld-dot-on"/>
+          <text x="226.6" y="90.0" text-anchor="end" class="ld-code">SN-1000</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>2号工位 · 夹具2</title>
+          
+          <text x="280.6" y="162.0" text-anchor="start" class="ld-name">2号工位</text>
+          <circle cx="253.6" cy="158.0" r="19" class="ld-dot-on"/>
+          <text x="226.6" y="162.0" text-anchor="end" class="ld-code">SN-1001</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>3号工位 · 夹具3</title>
+          
+          <text x="280.6" y="234.0" text-anchor="start" class="ld-name">3号工位</text>
+          <circle cx="253.6" cy="230.0" r="19" class="ld-dot-on"/>
+          <text x="226.6" y="234.0" text-anchor="end" class="ld-code">SN-1002</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>4号工位 · 无夹具</title>
+          
+          <text x="280.6" y="306.0" text-anchor="start" class="ld-name">4号工位</text>
+          <circle cx="253.6" cy="302.0" r="19" class="ld-dot-off"/>
+          <text x="226.6" y="306.0" text-anchor="end" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>5号工位 · 夹具5</title>
+          
+          <text x="280.6" y="378.0" text-anchor="start" class="ld-name">5号工位</text>
+          <circle cx="253.6" cy="374.0" r="19" class="ld-dot-on"/>
+          <text x="226.6" y="378.0" text-anchor="end" class="ld-code">SN-1004</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>6号工位 · 夹具6</title>
+          <rect x="230.2" y="416.0" width="46.7" height="15" rx="3" class="ld-plate"/>
+          <text x="253.6" y="427.0" text-anchor="middle" class="ld-name">6号工位</text>
+          <circle cx="253.6" cy="455.0" r="19" class="ld-dot-on"/>
+          <text x="253.6" y="501.0" text-anchor="middle" class="ld-code">SN-1005</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>7号工位 · 夹具7</title>
+          
+          <text x="376.8" y="427.0" text-anchor="middle" class="ld-name">7号工位</text>
+          <circle cx="376.8" cy="455.0" r="19" class="ld-dot-on"/>
+          <text x="376.8" y="521.0" text-anchor="middle" class="ld-code">SN-1006</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>8号工位 · 夹具8</title>
+          
+          <text x="500.0" y="427.0" text-anchor="middle" class="ld-name">8号工位</text>
+          <circle cx="500.0" cy="455.0" r="19" class="ld-dot-on"/>
+          <text x="500.0" y="501.0" text-anchor="middle" class="ld-code">SN-1007</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>9号工位 · 无夹具</title>
+          
+          <text x="623.2" y="427.0" text-anchor="middle" class="ld-name">9号工位</text>
+          <circle cx="623.2" cy="455.0" r="19" class="ld-dot-off"/>
+          <text x="623.2" y="521.0" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>10号工位 · 夹具10</title>
+          <rect x="719.7" y="416.0" width="53.4" height="15" rx="3" class="ld-plate"/>
+          <text x="746.4" y="427.0" text-anchor="middle" class="ld-name">10号工位</text>
+          <circle cx="746.4" cy="455.0" r="19" class="ld-dot-on"/>
+          <text x="746.4" y="501.0" text-anchor="middle" class="ld-code">SN-1009</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>11号工位 · 夹具11</title>
+          
+          <text x="719.4" y="378.0" text-anchor="end" class="ld-name">11号工位</text>
+          <circle cx="746.4" cy="374.0" r="19" class="ld-dot-on"/>
+          <text x="773.4" y="378.0" text-anchor="start" class="ld-code">SN-1010</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>12号工位 · 夹具12</title>
+          
+          <text x="719.4" y="306.0" text-anchor="end" class="ld-name">12号工位</text>
+          <circle cx="746.4" cy="302.0" r="19" class="ld-dot-on"/>
+          <text x="773.4" y="306.0" text-anchor="start" class="ld-code">SN-1011</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>13号工位 · 夹具13</title>
+          
+          <text x="719.4" y="234.0" text-anchor="end" class="ld-name">13号工位</text>
+          <circle cx="746.4" cy="230.0" r="19" class="ld-dot-on"/>
+          <text x="773.4" y="234.0" text-anchor="start" class="ld-code">SN-1012</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>14号工位 · 无夹具</title>
+          
+          <text x="719.4" y="162.0" text-anchor="end" class="ld-name">14号工位</text>
+          <circle cx="746.4" cy="158.0" r="19" class="ld-dot-off"/>
+          <text x="773.4" y="162.0" text-anchor="start" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>15号工位 · 夹具15</title>
+          
+          <text x="719.4" y="90.0" text-anchor="end" class="ld-name">15号工位</text>
+          <circle cx="746.4" cy="86.0" r="19" class="ld-dot-on"/>
+          <text x="773.4" y="90.0" text-anchor="start" class="ld-code">SN-1014</text>
+        </g>
+          </svg>
+        </div>
+      </div><h2>U型 6 工位（底 2 / 左 2 / 右 2）</h2><p class="meta">线体：3号线　画布：1000 × 520</p>
+      <div class="line-diagram">
+        <div class="line-diagram-head">
+          <span class="ld-title">3号线 · U型产线示意图</span>
+          <span class="ld-legend">
+            <i class="ld-lg ld-lg-on"></i>已配置夹具
+            <i class="ld-lg ld-lg-off"></i>无配置
+          </span>
+        </div>
+        <div class="ld-canvas">
+          <svg class="ld-svg" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet" role="img"
+               style="min-width:1000px" aria-label="3号线产线布局示意图">
+            <polyline points="253.6,83.6 253.6,352.4 253.6,428 746.4,428 746.4,352.4 746.4,83.59999999999998" class="ld-track" fill="none"/>
+            
+        <g class="ld-node ld-on">
+          <title>1号工位 · 夹具1</title>
+          
+          <text x="280.6" y="87.6" text-anchor="start" class="ld-name">1号工位</text>
+          <circle cx="253.6" cy="83.6" r="19" class="ld-dot-on"/>
+          <text x="226.6" y="87.6" text-anchor="end" class="ld-code">SN-1000</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>2号工位 · 夹具2</title>
+          
+          <text x="280.6" y="356.4" text-anchor="start" class="ld-name">2号工位</text>
+          <circle cx="253.6" cy="352.4" r="19" class="ld-dot-on"/>
+          <text x="226.6" y="356.4" text-anchor="end" class="ld-code">SN-1001</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>3号工位 · 夹具3</title>
+          <rect x="230.2" y="389.0" width="46.7" height="15" rx="3" class="ld-plate"/>
+          <text x="253.6" y="400.0" text-anchor="middle" class="ld-name">3号工位</text>
+          <circle cx="253.6" cy="428.0" r="19" class="ld-dot-on"/>
+          <text x="253.6" y="474.0" text-anchor="middle" class="ld-code">SN-1002</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>4号工位 · 无夹具</title>
+          <rect x="723.0" y="389.0" width="46.7" height="15" rx="3" class="ld-plate"/>
+          <text x="746.4" y="400.0" text-anchor="middle" class="ld-name">4号工位</text>
+          <circle cx="746.4" cy="428.0" r="19" class="ld-dot-off"/>
+          <text x="746.4" y="494.0" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>5号工位 · 夹具5</title>
+          
+          <text x="719.4" y="356.4" text-anchor="end" class="ld-name">5号工位</text>
+          <circle cx="746.4" cy="352.4" r="19" class="ld-dot-on"/>
+          <text x="773.4" y="356.4" text-anchor="start" class="ld-code">SN-1004</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>6号工位 · 夹具6</title>
+          
+          <text x="719.4" y="87.6" text-anchor="end" class="ld-name">6号工位</text>
+          <circle cx="746.4" cy="83.6" r="19" class="ld-dot-on"/>
+          <text x="773.4" y="87.6" text-anchor="start" class="ld-code">SN-1005</text>
+        </g>
+          </svg>
+        </div>
+      </div><h2>直线形 19 工位（对照，编号间距够，不错行）</h2><p class="meta">线体：4号线　画布：1000 × 542</p>
+      <div class="line-diagram">
+        <div class="line-diagram-head">
+          <span class="ld-title">4号线 · 直线形产线示意图</span>
+          <span class="ld-legend">
+            <i class="ld-lg ld-lg-on"></i>已配置夹具
+            <i class="ld-lg ld-lg-off"></i>无配置
+          </span>
+        </div>
+        <div class="ld-canvas">
+          <svg class="ld-svg" viewBox="0 0 1000 542" preserveAspectRatio="xMidYMid meet" role="img"
+               style="min-width:1000px" aria-label="4号线产线布局示意图">
+            <line x1="130.4" y1="120.72" x2="869.6" y2="120.72" class="ld-track"/><line x1="130.4" y1="220.9066666666667" x2="869.6" y2="220.9066666666667" class="ld-track"/><line x1="130.4" y1="321.09333333333336" x2="869.6" y2="321.09333333333336" class="ld-track"/><line x1="869.6" y1="120.72" x2="130.4" y2="220.9066666666667" class="ld-track ld-link"/><line x1="869.6" y1="220.9066666666667" x2="130.4" y2="321.09333333333336" class="ld-track ld-link"/><line x1="869.6" y1="321.09333333333336" x2="500" y2="421.28000000000003" class="ld-track ld-link"/>
+            
+        <g class="ld-node ld-on">
+          <title>1号工位 · 夹具1</title>
+          
+          <text x="130.4" y="92.7" text-anchor="middle" class="ld-name">1号工位</text>
+          <circle cx="130.4" cy="120.7" r="19" class="ld-dot-on"/>
+          <text x="130.4" y="166.7" text-anchor="middle" class="ld-code">SN-1000</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>2号工位 · 夹具2</title>
+          
+          <text x="278.2" y="92.7" text-anchor="middle" class="ld-name">2号工位</text>
+          <circle cx="278.2" cy="120.7" r="19" class="ld-dot-on"/>
+          <text x="278.2" y="166.7" text-anchor="middle" class="ld-code">SN-1001</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>3号工位 · 夹具3</title>
+          
+          <text x="426.1" y="92.7" text-anchor="middle" class="ld-name">3号工位</text>
+          <circle cx="426.1" cy="120.7" r="19" class="ld-dot-on"/>
+          <text x="426.1" y="166.7" text-anchor="middle" class="ld-code">SN-1002</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>4号工位 · 无夹具</title>
+          
+          <text x="573.9" y="92.7" text-anchor="middle" class="ld-name">4号工位</text>
+          <circle cx="573.9" cy="120.7" r="19" class="ld-dot-off"/>
+          <text x="573.9" y="166.7" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>5号工位 · 夹具5</title>
+          
+          <text x="721.8" y="92.7" text-anchor="middle" class="ld-name">5号工位</text>
+          <circle cx="721.8" cy="120.7" r="19" class="ld-dot-on"/>
+          <text x="721.8" y="166.7" text-anchor="middle" class="ld-code">SN-1004</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>6号工位 · 夹具6</title>
+          
+          <text x="869.6" y="92.7" text-anchor="middle" class="ld-name">6号工位</text>
+          <circle cx="869.6" cy="120.7" r="19" class="ld-dot-on"/>
+          <text x="869.6" y="166.7" text-anchor="middle" class="ld-code">SN-1005</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>7号工位 · 夹具7</title>
+          
+          <text x="130.4" y="192.9" text-anchor="middle" class="ld-name">7号工位</text>
+          <circle cx="130.4" cy="220.9" r="19" class="ld-dot-on"/>
+          <text x="130.4" y="266.9" text-anchor="middle" class="ld-code">SN-1006</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>8号工位 · 夹具8</title>
+          
+          <text x="278.2" y="192.9" text-anchor="middle" class="ld-name">8号工位</text>
+          <circle cx="278.2" cy="220.9" r="19" class="ld-dot-on"/>
+          <text x="278.2" y="266.9" text-anchor="middle" class="ld-code">SN-1007</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>9号工位 · 无夹具</title>
+          
+          <text x="426.1" y="192.9" text-anchor="middle" class="ld-name">9号工位</text>
+          <circle cx="426.1" cy="220.9" r="19" class="ld-dot-off"/>
+          <text x="426.1" y="266.9" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>10号工位 · 夹具10</title>
+          
+          <text x="573.9" y="192.9" text-anchor="middle" class="ld-name">10号工位</text>
+          <circle cx="573.9" cy="220.9" r="19" class="ld-dot-on"/>
+          <text x="573.9" y="266.9" text-anchor="middle" class="ld-code">SN-1009</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>11号工位 · 夹具11</title>
+          
+          <text x="721.8" y="192.9" text-anchor="middle" class="ld-name">11号工位</text>
+          <circle cx="721.8" cy="220.9" r="19" class="ld-dot-on"/>
+          <text x="721.8" y="266.9" text-anchor="middle" class="ld-code">SN-1010</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>12号工位 · 夹具12</title>
+          
+          <text x="869.6" y="192.9" text-anchor="middle" class="ld-name">12号工位</text>
+          <circle cx="869.6" cy="220.9" r="19" class="ld-dot-on"/>
+          <text x="869.6" y="266.9" text-anchor="middle" class="ld-code">SN-1011</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>13号工位 · 夹具13</title>
+          
+          <text x="130.4" y="293.1" text-anchor="middle" class="ld-name">13号工位</text>
+          <circle cx="130.4" cy="321.1" r="19" class="ld-dot-on"/>
+          <text x="130.4" y="367.1" text-anchor="middle" class="ld-code">SN-1012</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>14号工位 · 无夹具</title>
+          
+          <text x="278.2" y="293.1" text-anchor="middle" class="ld-name">14号工位</text>
+          <circle cx="278.2" cy="321.1" r="19" class="ld-dot-off"/>
+          <text x="278.2" y="367.1" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>15号工位 · 夹具15</title>
+          
+          <text x="426.1" y="293.1" text-anchor="middle" class="ld-name">15号工位</text>
+          <circle cx="426.1" cy="321.1" r="19" class="ld-dot-on"/>
+          <text x="426.1" y="367.1" text-anchor="middle" class="ld-code">SN-1014</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>16号工位 · 夹具16</title>
+          
+          <text x="573.9" y="293.1" text-anchor="middle" class="ld-name">16号工位</text>
+          <circle cx="573.9" cy="321.1" r="19" class="ld-dot-on"/>
+          <text x="573.9" y="367.1" text-anchor="middle" class="ld-code">SN-1015</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>17号工位 · 夹具17</title>
+          
+          <text x="721.8" y="293.1" text-anchor="middle" class="ld-name">17号工位</text>
+          <circle cx="721.8" cy="321.1" r="19" class="ld-dot-on"/>
+          <text x="721.8" y="367.1" text-anchor="middle" class="ld-code">SN-1016</text>
+        </g>
+        <g class="ld-node ld-on">
+          <title>18号工位 · 夹具18</title>
+          
+          <text x="869.6" y="293.1" text-anchor="middle" class="ld-name">18号工位</text>
+          <circle cx="869.6" cy="321.1" r="19" class="ld-dot-on"/>
+          <text x="869.6" y="367.1" text-anchor="middle" class="ld-code">SN-1017</text>
+        </g>
+        <g class="ld-node ld-off">
+          <title>19号工位 · 无夹具</title>
+          
+          <text x="500.0" y="393.3" text-anchor="middle" class="ld-name">19号工位</text>
+          <circle cx="500.0" cy="421.3" r="19" class="ld-dot-off"/>
+          <text x="500.0" y="467.3" text-anchor="middle" class="ld-code ld-none">无</text>
+        </g>
+          </svg>
+        </div>
+      </div>
+</body></html>

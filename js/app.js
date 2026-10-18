@@ -354,6 +354,23 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
+      version: '4.1.0', date: '2026-10-18', items: [
+        '【布局】产线示意图 <b>U 型重新排布</b>：<b>圆圈内侧</b>写工位名、<b>圆圈外侧</b>写夹具号（左列名称在圆右／编号在圆左，右列相反），底横边仍是圆上名称、圆下编号；直线形不变（没有内外之分）',
+        '【布局】U 型底横排<b>收在左右两列之间</b>（x 0.22~0.78，与竖列同 x）：转角处「5号→6号」「10号→11号」由<b>斜线改为竖直</b>下落/上升，成为规则的直角 U；竖列末端 0.80→0.72、底排 0.88→0.90 留出转角空间',
+        '【布局】U 型底横排夹具号<b>相邻错行</b>：偶数位贴圆（+46）、奇数位下沉（+66），同基线相邻编号隔 2 个节点间距，长编号不再首尾粘连',
+        '【布局】画布<b>尺寸自适应</b>：宽度按文字宽度反推，位置不够就把图<b>拉长</b>（基准 1000、上限 2600，配 min-width 横向滚动，不把整图缩到看不清）；高度按行/列最小间距反推；底排按错行折算宽度（30 工位 + 21 字编号 → 1289×1113）',
+        '【视觉】转角两个节点的工位名加<b>白色垫底</b>（.ld-plate），竖直连线从标签后面穿过，不再把字割断'
+      ]
+    },
+    {
+      version: '4.0.7', date: '2026-10-18', items: [
+        '【布局】产线示意图节点改为<b>上下结构</b>：圆圈<b>上方</b>写工位名、圆圈<b>下方</b>写夹具号（实物编号），圆圈本身只表示夹具状态（实心＝已配置夹具／空心＝无配置），与右上图例一一对应；原「圆圈内顺序号 + 名称 + 编号」三层堆叠取消，编号与工位名基线相距 74px',
+        '【布局】示意图画布高度改为<b>自适应</b>：按「上下相邻行/列文字间隙 ≥26px」反推画布高度（原来固定 520，U 型 5 工位/列只有 75.6px 竖列间距，装不下「圆上名称 + 圆下编号」）；直线形 ≥4 行、U 型单列 ≥5 工位时自动加高，工位少时仍用 520',
+        '【调整】示意图内工位名统一为「N号工位」：去掉「1号线3号工位」里的线号前缀（线体名已在示意图标题处显示），消除同一张图里「1号线3号工位」与「4工位」并存的不一致；工位号优先从工位名解析，名称无数字时退回工位顺序号，两者皆无则按列表位置兜底',
+        '【新增】示意图节点悬浮提示：显示「N号工位 · 夹具名称」，多套夹具以「 / 」分隔，无配置显示「无夹具」'
+      ]
+    },
+    {
       version: '4.0.6', date: '2026-10-18', items: [
         '【布局】产线示意图工位节点「工位名」与「夹具编号」垂直间距拉大：编号徽标由圆点下方 40px 下移至 56px（基线距 29px，原来仅 13px），显示更宽松；直线形产线 3~4 行布点行距 95~143px，不会与下一行圆点重叠'
       ]
@@ -3846,33 +3863,41 @@
   const LINE_H = 520;                  // 画布高度（直线形与 U 型统一）
   const LINE_PER_ROW = 6;              // 直线形每行工位数
 
-  /* 产线布局布点（直线形 / U 型共用，v4.0.2 改版）：
-   *   底部 = round(n/3)（横排，y=0.88，从左到右）
-   *   左列 = ceil((n-底部)/2)（竖排，x=0.22，从上到下）
-   *   右列 = n - 左列 - 底部（竖排，x=0.78，从下到上）
+  /* 产线布局布点（直线形 / U 型共用，v4.0.2 改版；v4.1.0 重排 U 型纵坐标与底横排横坐标）：
+   *   左列 = ceil((n-底部)/2)（竖排，x=0.22，从上到下，y 0.08→0.72）
+   *   底部 = round(n/3)（横排，y=0.90，x 从 0.22 到 0.78 —— 与左右竖列**同 x**）
+   *   右列 = n - 左列 - 底部（竖排，x=0.78，从下到上，y 0.72→0.08）
    * 三段依次拼接、严格顺序递增。19 个工位 → 底 6 / 左 7 / 右 6
-   *（左 1~7、底 8~13、右 14~19）；6 个工位 → 底 2 / 左 2 / 右 2。 */
+   *（左 1~7、底 8~13、右 14~19）；6 个工位 → 底 2 / 左 2 / 右 2。
+   *
+   * ⚠️ v4.1.0：竖列末端由 0.80 收到 0.72、底横排由 0.88 下移到 0.90，给转角留白
+   *   （文字分列圆两侧后，竖列外侧编号会横向伸出去，否则与底排工位名相撞）。
+   * ⚠️ v4.1.0：底横排的 x 跨度由 0.08→0.92 收窄到 0.22→0.78，与左右竖列对齐——
+   *   原来底排比竖列还宽，5 号工位到 6 号工位只能斜着连；收窄后转角是**竖直**下落（→ 直角 U）。
+   *   代价是底排横向更挤，靠 lineDiagramWidth() 拉长画布 + 允许底排间距更密来消化。 */
   function lineLayoutPoints(n) {
     if (n <= 0) return [];
     const bottomCount = Math.max(1, Math.round(n / 3));
     const leftCount = Math.ceil((n - bottomCount) / 2);
     const rightCount = n - bottomCount - leftCount;
 
+    // seg 标记该点落在 U 型的哪一段（left 左竖边 / bottom 底横边 / right 右竖边）。
+    // v4.1.0 渲染时据此决定文字排在哪一侧：U 的内侧永远是画布中心方向，外侧相反。
     const pts = [];
-    // 左列：从上到下，x=0.22，y 从 0.08 到 0.80
+    // 左列：从上到下，x=0.22，y 从 0.08 到 0.72
     for (let i = 0; i < leftCount; i++) {
-      const y = leftCount === 1 ? 0.08 : 0.08 + (0.72 * i) / (leftCount - 1);
-      pts.push({ x: 0.22, y });
+      const y = leftCount === 1 ? 0.08 : 0.08 + (0.64 * i) / (leftCount - 1);
+      pts.push({ x: 0.22, y, seg: 'left' });
     }
-    // 底部横排：从左到右，y=0.88
+    // 底部横排：从左到右，y=0.90，x 从 0.22 到 0.78（与左右竖列同 x，转角才能竖直下落）
     for (let i = 0; i < bottomCount; i++) {
-      const x = bottomCount === 1 ? 0.5 : 0.08 + (0.84 * i) / (bottomCount - 1);
-      pts.push({ x, y: 0.88 });
+      const x = bottomCount === 1 ? 0.5 : 0.22 + (0.56 * i) / (bottomCount - 1);
+      pts.push({ x, y: 0.90, seg: 'bottom' });
     }
-    // 右列：从下到上，x=0.78，y 从 0.80 到 0.08
+    // 右列：从下到上，x=0.78，y 从 0.72 到 0.08
     for (let i = 0; i < rightCount; i++) {
-      const y = rightCount === 1 ? 0.08 : 0.80 - (0.72 * i) / (rightCount - 1);
-      pts.push({ x: 0.78, y });
+      const y = rightCount === 1 ? 0.08 : 0.72 - (0.64 * i) / (rightCount - 1);
+      pts.push({ x: 0.78, y, seg: 'right' });
     }
     return pts;
   }
@@ -3962,34 +3987,184 @@
     return sortStations((stations || []).filter((s) => s && s.lineId === lineId));
   }
 
+  /* 工位显示名统一为「N号工位」：去掉「X号线」等线体前缀（线体名已在示意图标题处显示）。
+   * 工位号的取法：优先从名称中解析（"1号线3号工位"→3、"4号工位"→4、"4工位"→4），
+   * 名称里解析不到数字时退回工位顺序号 seq，seq 也没有则用列表位置兜底。 */
+  function stationLabel(station, fallbackNo) {
+    const raw = String((station && station.name) || '').trim();
+    const m = raw.match(/(\d+)\s*号?\s*工位/);
+    if (m) return m[1] + '号工位';
+    const seq = station ? station.seq : null;
+    if (seq !== null && seq !== undefined && seq !== '' && Number.isFinite(Number(seq))) {
+      return Number(seq) + '号工位';
+    }
+    return String(fallbackNo) + '号工位';
+  }
+
+  /* 产线图高度自适应。
+   * 纵向跨度：直线形「圆上名称 + 圆下编号」74px；U 型竖列文字改到圆两侧后只剩单行高度（约 16px）。
+   *   固定 LINE_H=520 时，U 型 5 工位/列竖列间距只有 75.6px、直线形 4 行只有 95.2px，
+   *   上下两行的文字会挤在一起，因此按「最小节点间距」反推高度：
+   *   直线形：纵向可用比例 0.68 → H = 100 + 100×(行数-1)/0.68（节点跨度 74px，需 ≥100px 行距）
+   *   U 型：竖列可用比例 0.64 → H = 100 + 72×(单列最多工位数-1)/0.64（圆 38px + 34px 间隙）
+   * 算出来比 LINE_H 小的（工位很少时）仍取 LINE_H，避免画布过矮。 */
+  function lineDiagramHeight(n, type) {
+    const count = Number(n) || 0;
+    if (count <= 1) return LINE_H;
+    if (lineTypeKey(type) === 'u') {
+      const bottomCount = Math.max(1, Math.round(count / 3));
+      const leftCount = Math.ceil((count - bottomCount) / 2);
+      const rightCount = count - bottomCount - leftCount;
+      const maxCol = Math.max(leftCount, rightCount);
+      if (maxCol <= 1) return LINE_H;
+      return Math.max(LINE_H, Math.ceil(100 + (72 * (maxCol - 1)) / 0.64));
+    }
+    const rowsN = Math.ceil(count / LINE_PER_ROW);
+    if (rowsN <= 1) return LINE_H;
+    return Math.max(LINE_H, Math.ceil(100 + (100 * (rowsN - 1)) / 0.68));
+  }
+
+  /* ---------------- 示意图节点文字排布（v4.1.0） ----------------
+   * U 型：工位名放**内侧**、夹具号放**外侧**。U 的轨迹是「左竖边下行 → 底横边 → 右竖边上行」，
+   *   围出来的内侧恒为画布中心方向：
+   *     左列（seg=left） ：内侧＝右 → 名称在圆右（anchor=start），编号在圆左（anchor=end）
+   *     右列（seg=right）：内侧＝左 → 名称在圆左（anchor=end），编号在圆右（anchor=start）
+   *     底横边（seg=bottom）：内侧＝上 → 名称在圆上、编号在圆下（居中）
+   * 直线形没有内外之分，沿用 v4.0.7 的「圆上工位名 / 圆下夹具号」上下结构。
+   * 侧排时文字压圆心基线（y+4），与圆心的水平间隙 LD_GAP。
+   *
+   * v4.1.0（用户截图反馈：底部夹具号粘连）：底横排节点密、编号长时，同一条基线上的编号会首尾相接。
+   *   底排改为**相邻标签上下错开**——偶数位贴圆（y+CODE_NEAR）、奇数位下沉（y+CODE_FAR），
+   *   两条基线相差 20px；于是同一条基线上的相邻编号相隔 2 个节点间距，横向空间翻倍。 */
+  const LD_R = 19;          // 节点圆半径
+  const LD_GAP = 8;         // 文字与圆之间的间隙
+  const LD_MIN_TEXT_GAP = 16;   // 相邻节点文字的横向呼吸
+  const LINE_MAX_W = 2600;      // 画布自动拉长的上限（超过就靠截断，避免无限变宽）
+  const LD_CODE_NEAR = 46;      // 底排编号：贴圆基线（与圆心差 46）
+  const LD_CODE_FAR = 66;       // 底排编号：错行后的基线（与圆心差 66，与 NEAR 相距 20）
+
+  function nodeTextPos(seg, p, stagger) {
+    if (seg === 'left') {
+      return {
+        name: { x: p.x + LD_R + LD_GAP, y: p.y + 4, anchor: 'start' },
+        code: { x: p.x - LD_R - LD_GAP, y: p.y + 4, anchor: 'end' }
+      };
+    }
+    if (seg === 'right') {
+      return {
+        name: { x: p.x - LD_R - LD_GAP, y: p.y + 4, anchor: 'end' },
+        code: { x: p.x + LD_R + LD_GAP, y: p.y + 4, anchor: 'start' }
+      };
+    }
+    return {
+      name: { x: p.x, y: p.y - 28, anchor: 'middle' },
+      code: { x: p.x, y: p.y + (stagger ? LD_CODE_FAR : LD_CODE_NEAR), anchor: 'middle' }
+    };
+  }
+
+  /* SVG 文本宽度估算（中文≈字号宽，ASCII≈0.56×字号），只用于反推画布要拉多长。 */
+  function svgTextWidth(str, fontSize) {
+    let w = 0;
+    for (const ch of String(str == null ? '' : str)) {
+      w += ch.codePointAt(0) > 0x2e80 ? fontSize : fontSize * 0.56;
+    }
+    return w;
+  }
+
+  /* 节点下方/外侧显示的夹具号：优先实物编号（主搜索键），无实物编号退回桥梁号，超 22 字截断。 */
+  function fixtureBadgeText(row) {
+    const list = (row && row.fixtures) || [];
+    if (!list.length) return '无';
+    const codes = list.map((f) => f.serialNo || f.code).join(' / ');
+    return codes.length > 22 ? codes.slice(0, 21) + '…' : codes;
+  }
+
+  /* 画布宽度自适应（v4.1.0 底排按错行折算）：位置不够就把示意图**拉长**，不让文字互相压。
+   * 归一化横坐标 0~1 映射到 [60, W-60]，相邻节点像素间距 = 跨度 × (W-120)：
+   *   直线形：跨度 0.84/(每行数量-1)，需容下 max(工位名宽, 夹具号宽) + 16
+   *   U 型底横边：跨度 0.56/(底排数量-1)；编号**两行错开**，同一条基线上的相邻编号隔了 2 个节点间距，
+   *     所以只需 codeW+16 的一半；工位名仍是一行一个，按 nameW+16 卡
+   *   U 型左右列（左右结构）：0.22 的比例位置要容下「间隙 + 编号宽」，两侧各留 8px 边距
+   * 画布只加宽、不缩小（不足 LINE_W 仍按 LINE_W）。 */
+  function lineDiagramWidth(rows, type) {
+    const list = rows || [];
+    if (!list.length) return LINE_W;
+    let nameW = 0;
+    let codeW = 0;
+    list.forEach((r) => {
+      nameW = Math.max(nameW, svgTextWidth(stationLabel(r.station, 1), 12));
+      codeW = Math.max(codeW, svgTextWidth(fixtureBadgeText(r), 11));
+    });
+    const need = Math.max(nameW, codeW) + LD_MIN_TEXT_GAP;
+    let W = LINE_W;
+    if (lineTypeKey(type) === 'u') {
+      const bottomCount = Math.max(1, Math.round(list.length / 3));
+      if (bottomCount > 1) {
+        // 底排编号错行 → 同基线相邻编号相隔 2 个间距
+        const pitchNeed = Math.max(nameW + LD_MIN_TEXT_GAP, (codeW + LD_MIN_TEXT_GAP) / 2);
+        W = Math.max(W, 120 + Math.ceil((pitchNeed * (bottomCount - 1)) / 0.56));
+      }
+      // 外侧编号左缘 = 60 + 0.22×(W-120) - (LD_R+LD_GAP) - codeW ≥ 8
+      W = Math.max(W, 120 + Math.ceil(Math.max(0, codeW - 25) / 0.22));
+    } else {
+      const per = Math.min(LINE_PER_ROW, list.length);
+      if (per > 1) W = Math.max(W, 120 + Math.ceil((need * (per - 1)) / 0.84));
+    }
+    return Math.min(W, LINE_MAX_W);
+  }
+
   /* 产线图渲染：SVG。U型画「左竖边 → 底横边 → 右竖边」的折线轨迹；直线形画折行连线。
-   * 有夹具配置的工位高亮（实心主色 + 夹具编号徽标），无配置的为空心灰。 */
+   * v4.1.0 节点排布：U 型——工位名在圆**内侧**、夹具号在圆**外侧**（见 nodeTextPos）；
+   *   直线形——圆上工位名（统一「N号工位」）、圆下夹具号，基线相距 74px。
+   *   圆圈本身只表示夹具状态——实心主色＝已配置夹具，空心灰＝无配置（与右上图例一一对应）。
+   * 画布高见 lineDiagramHeight()、宽见 lineDiagramWidth()（文字放不下就自动拉长）。 */
   function renderLineDiagram(line, rows) {
     if (!line || !rows.length) {
       return '<div class="empty-tip">该线体尚未配置工位</div>';
     }
     const isU = lineTypeKey(line.type) === 'u';
-    const W = LINE_W;
-    const H = LINE_H;
+    const W = lineDiagramWidth(rows, line.type);
+    const H = lineDiagramHeight(rows.length, line.type);
     const pts = computeLineLayout(rows.length, line.type, LINE_PER_ROW);
     const px = (p) => ({ x: 60 + p.x * (W - 120), y: 50 + p.y * (H - 100) });
+    // 画布已是「按文字宽度算出的自然尺寸」：给 svg 不低于自然宽度的 min-width，
+    // 窄窗口下靠容器横向滚动查看，而不是把整张图等比缩到字号看不清（宽窗口仍撑满）。
+    const minW = W;
+
+    /* v4.1.0：U 型底横排的首/末节点与左右竖列同 x，转角处连线**竖直**穿过该节点的居中标签。
+     * 给这两个标签垫一块与文字等宽的白底（.ld-plate），连线看起来从标签后面穿过，不会割字。
+     * v4.1.0：底排相邻标签上下错开，避免长编号首尾粘连（见 nodeTextPos）。 */
+    const bottomIdx = [];
+    pts.forEach((q, k) => { if (q.seg === 'bottom') bottomIdx.push(k); });
+    const cornerSet = new Set();
+    const bottomPos = new Map();
+    bottomIdx.forEach((k, pos) => bottomPos.set(k, pos));
+    if (isU && bottomIdx.length) {
+      cornerSet.add(bottomIdx[0]);
+      if (bottomIdx.length > 1) cornerSet.add(bottomIdx[bottomIdx.length - 1]);
+    }
 
     const nodes = rows.map((r, i) => {
       const p = px(pts[i]);
       const has = r.fixtures.length > 0;
-      // 徽标优先显示实物编号（主搜索键），无实物编号时退回桥梁号。
-      // ⚠️ 2026-10-18 用户要求：工位名（ld-name, y+27）与夹具编号（ld-code）之间拉开垂直距离，
-      //    徽标由 y+40 下移至 y+56（基线距 29px；画布高 520，实测数据 3~4 行布点行距 95~143px，不会与下一行圆点重叠）。
-      const codes = r.fixtures.map((f) => f.serialNo || (f.code)).join(' / ');
-      const badge = has
-        ? `<text x="${p.x}" y="${p.y + 56}" text-anchor="middle" class="ld-code">${esc(codes.length > 22 ? codes.slice(0, 21) + '…' : codes)}</text>`
-        : `<text x="${p.x}" y="${p.y + 56}" text-anchor="middle" class="ld-code ld-none">无</text>`;
+      // 工位名统一「N号工位」，去掉「X号线」前缀（线体名已在示意图标题处显示）
+      const label = stationLabel(r.station, i + 1);
+      const codeTxt = fixtureBadgeText(r);
+      // 底横排：奇数位编号下沉一行（两条基线相差 20px），同基线相邻编号隔 2 个节点间距
+      const stagger = isU && bottomPos.has(i) ? bottomPos.get(i) % 2 === 1 : false;
+      const pos = nodeTextPos(pts[i].seg, p, stagger);
+      const tipName = has ? r.fixtures.map((f) => f.name || f.code).join(' / ') : '无夹具';
+      const wName = svgTextWidth(label, 12);
+      const plate = cornerSet.has(i)
+        ? `<rect x="${(pos.name.x - wName / 2 - 2).toFixed(1)}" y="${(pos.name.y - 11).toFixed(1)}" width="${(wName + 4).toFixed(1)}" height="15" rx="3" class="ld-plate"/>`
+        : '';
       return `
         <g class="ld-node ${has ? 'ld-on' : 'ld-off'}">
-          <circle cx="${p.x}" cy="${p.y}" r="19" class="${has ? 'ld-dot-on' : 'ld-dot-off'}"/>
-          <text x="${p.x}" y="${p.y + 4}" text-anchor="middle" class="ld-seq">${esc(String(r.seq == null ? i + 1 : r.seq))}</text>
-          <text x="${p.x}" y="${p.y + 27}" text-anchor="middle" class="ld-name">${esc(r.station.name || '')}</text>
-          ${badge}
+          <title>${esc(label + ' · ' + tipName)}</title>
+          ${plate}
+          <text x="${pos.name.x.toFixed(1)}" y="${pos.name.y.toFixed(1)}" text-anchor="${pos.name.anchor}" class="ld-name">${esc(label)}</text>
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="19" class="${has ? 'ld-dot-on' : 'ld-dot-off'}"/>
+          <text x="${pos.code.x.toFixed(1)}" y="${pos.code.y.toFixed(1)}" text-anchor="${pos.code.anchor}" class="ld-code${has ? '' : ' ld-none'}">${esc(codeTxt)}</text>
         </g>`;
     }).join('');
 
@@ -4026,11 +4201,13 @@
             <i class="ld-lg ld-lg-off"></i>无配置
           </span>
         </div>
-        <svg class="ld-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img"
-             aria-label="${esc(line.name)}产线布局示意图">
-          ${path}
-          ${nodes}
-        </svg>
+        <div class="ld-canvas">
+          <svg class="ld-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img"
+               style="min-width:${minW}px" aria-label="${esc(line.name)}产线布局示意图">
+            ${path}
+            ${nodes}
+          </svg>
+        </div>
       </div>`;
   }
 

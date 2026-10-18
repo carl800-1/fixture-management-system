@@ -84,7 +84,8 @@ vm.runInContext(parts.join('\n') + `
 ;__export = {
   lineTypeLabel, lineTypeKey, parseLineType, sortStations, buildStationRows,
   fixturesOfLine, fixturesOnStation, computeLineLayout, lineLayoutPoints, stationsOfLine,
-  renderLineDiagram, mapLineImportHeader, buildLineImportPlan, applyLineImportPlan,
+  renderLineDiagram, stationLabel, lineDiagramHeight, lineDiagramWidth, svgTextWidth,
+  fixtureBadgeText, sideGap: LD_GAP, near: LD_CODE_NEAR, far: LD_CODE_FAR, mapLineImportHeader, buildLineImportPlan, applyLineImportPlan,
   buildProdQueryRows, isValidLocation, isValidSerialNo, isValidProductionName,
   LINE_IMPORT_HEADERS, MAX_LINES, MAX_STATIONS, MAX_LINE_MODELS
 };`, ctx);
@@ -336,17 +337,218 @@ ok(svgLegacy.includes('<polyline') && svgLegacy.includes('U型产线示意图'),
   '历史 loop 数据仍按 U型绘制且标题显示 U型');
 ok(M.renderLineDiagram(lineObj, []) === '<div class="empty-tip">该线体尚未配置工位</div>', '无工位 → 空态提示');
 ok(M.renderLineDiagram(null, rowsForSvg) === '<div class="empty-tip">该线体尚未配置工位</div>', '无线体 → 空态提示');
-const svgEsc = M.renderLineDiagram({ name: '<script>x</script>', type: 'linear' }, [{ station: { name: 'A&B' }, seq: 1, fixtures: [] }]);
+const svgEsc = M.renderLineDiagram({ name: '<script>x</script>', type: 'linear' }, [
+  { station: { name: '3号工位' }, seq: 1, fixtures: [{ id: 9, code: '99', serialNo: 'A&B<X>', name: '<b>夹具</b>', status: 'stocked' }] }
+]);
 ok(!svgEsc.includes('<script>') && svgEsc.includes('&lt;script&gt;'), '线体名做 HTML 转义');
-ok(svgEsc.includes('A&amp;B'), '工位名做 HTML 转义');
-ok(svg.includes('ld-seq') && svg.includes('ld-name'), '节点含顺序号与工位名文本');
-/* 2026-10-18 用户要求：工位名与夹具编号之间拉开垂直距离（徽标由 y+40 下移至 y+56）。
- * 守护：从 SVG 文本解析 ld-name 与 ld-code 的基线 y，要求间距 ≥24px。 */
+ok(svgEsc.includes('A&amp;B&lt;X&gt;'), '夹具编号做 HTML 转义');
+ok(!svgEsc.includes('<b>夹具</b>'), '悬浮提示中的夹具名做 HTML 转义');
+ok(svg.includes('ld-name') && !svg.includes('ld-seq'), '圆圈上方显示工位名，圆圈内不再写顺序号');
+
+/* v4.0.7：圆圈上方＝工位名、下方＝夹具号，两者基线间距 ≥24px（沿用 v4.0.6 拉开距离的要求）。 */
 const mNameY = svg.match(/<text x="[\d.]+" y="([\d.]+)" text-anchor="middle" class="ld-name">/);
 const mCodeY = svg.match(/<text x="[\d.]+" y="([\d.]+)" text-anchor="middle" class="ld-code/);
 ok(mNameY && mCodeY && Number(mCodeY[1]) - Number(mNameY[1]) >= 24,
-  '工位名与夹具编号垂直间距 ≥24px（用户要求拉开距离）',
+  '工位名（圆上）与夹具编号（圆下）垂直间距 ≥24px',
   mNameY && mCodeY ? `name y=${mNameY[1]}, code y=${mCodeY[1]}` : '');
+const circY = svg.match(/<circle cx="[\d.]+" cy="([\d.]+)" r="19"/);
+ok(circY && mNameY && Number(mNameY[1]) < Number(circY[1]), '工位名基线在圆圈上方');
+ok(circY && mCodeY && Number(mCodeY[1]) > Number(circY[1]), '夹具编号基线在圆圈下方');
+
+/* 工位名简化：一律「N号工位」，去掉「X号线」前缀（线体名已在标题显示） */
+ok(M.stationLabel({ name: '1号线3号工位' }, 1) === '3号工位', '「1号线3号工位」→「3号工位」');
+ok(M.stationLabel({ name: '4号工位' }, 2) === '4号工位', '「4号工位」保持不变');
+ok(M.stationLabel({ name: '4工位' }, 3) === '4号工位', '「4工位」补全为「4号工位」');
+ok(M.stationLabel({ name: '1号线20号工位' }, 4) === '20号工位', '两位数工位号正确解析');
+ok(M.stationLabel({ name: 'OP-10 装配' }, 5) === '5号工位', '名称无数字时退回顺序号');
+ok(M.stationLabel({ name: 'OP-10 装配', seq: 8 }, 5) === '8号工位', '有 seq 时优先用 seq');
+ok(M.stationLabel(null, 7) === '7号工位', '空工位用列表位置兜底');
+const svgLabel = M.renderLineDiagram({ name: '1号线', type: 'linear' }, [
+  { station: { name: '1号线3号工位' }, seq: 1, fixtures: [] },
+  { station: { name: '4工位' }, seq: 2, fixtures: [] }
+]);
+ok(svgLabel.includes('>3号工位<') && svgLabel.includes('>4号工位<'), '图内工位名统一为「N号工位」');
+ok(!/>1号线3号工位</.test(svgLabel), '图内工位名不再带「X号线」前缀');
+
+/* v4.0.7 画布高度自适应：节点纵向跨度 74px，按「最小间距 ≥100px」反推高度，
+ * 保证行/列间距不会小于 74px（否则圆上工位名会贴到上一行的夹具号）。 */
+const mkRows = (n) => Array.from({ length: n }, (_, i) => ({
+  station: { id: i + 1, name: (i + 1) + '号工位' }, seq: i + 1,
+  fixtures: i % 3 === 0 ? [] : [{ id: 300 + i, code: String(3001 + i), serialNo: 'SN-' + i, name: '夹具' + i, status: 'stocked' }]
+}));
+/* 从 SVG 解析「圆上 label → 圆」与「圆 → 圆下 code」的纵向跨度，以及相邻行/列的最小间隙 */
+function diagramMetrics(type, n) {
+  const svgN = M.renderLineDiagram({ name: 'LX', type }, mkRows(n));
+  const H = +svgN.match(/viewBox="0 0 \d+ (\d+)"/)[1];
+  const lb = [...svgN.matchAll(/<text x="([\d.]+)" y="(-?[\d.]+)"[^>]*class="ld-name"/g)].map((a) => ({ x: +a[1], y: +a[2] }));
+  const cd = [...svgN.matchAll(/<text x="([\d.]+)" y="(-?[\d.]+)"[^>]*class="ld-code/g)].map((a) => ({ x: +a[1], y: +a[2] }));
+  const cy = [...svgN.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)"/g)].map((a) => +a[1]);
+  let gap = Infinity;
+  for (let i = 0; i < cd.length; i++) {
+    for (let j = 0; j < lb.length; j++) {
+      if (i === j || Math.abs(lb[j].x - cd[i].x) > 1) continue;   // 同列才比较（底部横排节点 x 不同）
+      const d = lb[j].y - cd[i].y;
+      if (d > 0 && d < gap) gap = d;
+    }
+  }
+  const ys = lb.map((l) => l.y).concat(cd.map((c) => c.y));
+  return { H, gap, minY: Math.min(...ys), maxY: Math.max(...ys), aboveOk: lb.every((l, i) => l.y < cy[i] && cd[i].y > cy[i]) };
+}
+[[3, 'linear'], [4, 'linear'], [7, 'linear'], [19, 'linear']].forEach(([n, t]) => {
+  const mm = diagramMetrics(t, n);
+  const tag = `${t} ${n}工位`;
+  ok(mm.aboveOk, tag + '：工位名在圆上、夹具号在圆下');
+  ok(mm.gap >= 25.9, tag + '：上下相邻行/列文字间隙 ≥26px', mm.gap === Infinity ? 'n/a' : mm.gap.toFixed(1));
+  ok(mm.minY >= 0 && mm.maxY <= mm.H, tag + `：文字不越出画布（${mm.minY.toFixed(0)}~${mm.maxY.toFixed(0)} / H=${mm.H}）`);
+});
+
+/* ===== v4.1.0：U 型「工位名在内侧、夹具号在外侧」 =====
+ * 逐个 <g class="ld-node"> 取出圆/名称/编号的位置与 text-anchor，
+ * 「内侧」＝画布中心方向：左列内侧为右、右列内侧为左、底横边内侧为上。 */
+function nodeBoxes(type, n) {
+  const s = M.renderLineDiagram({ name: 'LX', type }, mkRows(n));
+  const W = +s.match(/viewBox="0 0 (\d+)/)[1];
+  const nodes = [...s.matchAll(/<g class="ld-node[\s\S]*?<\/g>/g)].map((m) => {
+    const g = m[0];
+    const c = g.match(/<circle cx="([\d.]+)" cy="([\d.]+)"/);
+    const nm = g.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" class="ld-name">([^<]*)</);
+    const cd = g.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" class="ld-code[^>]*>([^<]*)</);
+    return {
+      cx: +c[1], cy: +c[2],
+      nx: +nm[1], ny: +nm[2], na: nm[3], ntxt: nm[4],
+      fx: +cd[1], fy: +cd[2], fa: cd[3], ftxt: cd[4]
+    };
+  });
+  return { W, nodes };
+}
+const ub = nodeBoxes('u', 15);
+const mid = ub.W / 2;
+const sideN = ub.nodes.filter((b) => Math.abs(b.ny - b.cy) <= 6);      // 左右竖列：名称与编号同基线
+const bottomN = ub.nodes.filter((b) => Math.abs(b.ny - b.cy) > 6);     // 底横边：上下结构
+ok(sideN.length + bottomN.length === ub.nodes.length && sideN.length > 0 && bottomN.length > 0,
+  'U型节点分「竖列侧排」与「底横边上下排」两类', `side=${sideN.length}, bottom=${bottomN.length}`);
+ok(sideN.every((b) => (b.nx - b.cx) * (mid - b.cx) > 0), 'U型竖列：工位名在圆的内侧（朝画布中心）');
+ok(sideN.every((b) => (b.fx - b.cx) * (mid - b.cx) < 0), 'U型竖列：夹具号在圆的外侧（背离画布中心）');
+ok(sideN.every((b) => (b.na === 'start') === (b.nx > b.cx)), 'U型竖列：工位名锚点朝远离圆的方向展开');
+ok(sideN.every((b) => (b.fa === 'start') === (b.fx > b.cx)), 'U型竖列：夹具号锚点朝远离圆的方向展开');
+ok(sideN.every((b) => Math.abs(b.nx - b.cx) > 19 && Math.abs(b.fx - b.cx) > 19), 'U型竖列：文字与圆之间留出间隙（不压圆）');
+ok(bottomN.every((b) => b.ny < b.cy && b.fy > b.cy && b.na === 'middle'), 'U型底横边：工位名在圆上、夹具号在圆下');
+
+/* 直线形不受影响：仍是圆上/圆下且居中 */
+const lb0 = nodeBoxes('linear', 5).nodes;
+ok(lb0.every((b) => b.na === 'middle' && b.fa === 'middle' && b.ny < b.cy && b.fy > b.cy),
+  '直线形保持「圆上工位名 / 圆下夹具号、居中」不变');
+
+/* ===== v4.1.0：位置不够就把示意图拉长 ===== */
+const longRows = (n, serial) => Array.from({ length: n }, (_, i) => ({
+  station: { id: i + 1, name: (i + 1) + '号工位' }, seq: i + 1,
+  fixtures: [{ id: 900 + i, code: String(9001 + i), serialNo: serial, name: '夹具', status: 'stocked' }]
+}));
+const SN21 = 'SN-2024-0001-ABCDEFGH';   // 21 字，未触发 22 字截断
+const wShort = +M.renderLineDiagram({ name: 'L', type: 'u' }, longRows(6, 'SN-1')).match(/viewBox="0 0 (\d+)/)[1];
+ok(wShort === 1000, '短编号放得下时保持基准宽度 1000', 'W=' + wShort);
+const svgWide = M.renderLineDiagram({ name: 'L', type: 'u' }, longRows(30, SN21));
+const wWide = +svgWide.match(/viewBox="0 0 (\d+)/)[1];
+ok(wWide > 1000, 'U型底横边工位多、编号长时画布自动拉长', 'W=' + wWide);
+const bn = Math.max(1, Math.round(30 / 3));
+const pitch = (0.56 * (wWide - 120)) / (bn - 1);   // v4.1.0 底排跨度收窄为 0.56
+/* v4.1.0：底排编号上下错行 → 同一条基线上的相邻编号相隔 2 个节点间距 */
+ok(pitch * 2 >= M.svgTextWidth(SN21, 11) + M.sideGap - 0.01,
+  '底排编号错行后，同基线相邻编号间距（2 个节点间距）容得下编号文字', (pitch * 2).toFixed(1));
+
+/* v4.1.0：底横排相邻夹具号标签上下错开，不共用一条基线（用户截图：编号首尾粘连） */
+const botNodes = nodeBoxes2('u', 30, SN21).nodes.filter((b) => Math.abs(b.ny - b.cy) > 6);
+const codeDy = botNodes.map((b) => Math.round(b.fy - b.cy));
+ok(codeDy.every((d) => d === M.near || d === M.far), '底排编号只落在两档基线上（贴圆 / 下沉）',
+  codeDy.slice(0, 6).join(','));
+ok(codeDy.every((d, i) => i === 0 || d !== codeDy[i - 1]), '底排相邻编号不共用同一基线（上下错开）',
+  codeDy.slice(0, 6).join(','));
+ok(M.far - M.near === 20, '两条编号基线相差 20px（足够放下 11px 字号）', `${M.near}/${M.far}`);
+const pitchB = (0.56 * (nodeBoxes2('u', 30, SN21).W - 120)) / (botNodes.length - 1);
+ok(pitchB * 2 >= M.svgTextWidth(SN21, 11), '同基线相邻编号横向不粘连（间距 ≥ 字宽）',
+  (pitchB * 2).toFixed(1) + ' vs ' + M.svgTextWidth(SN21, 11).toFixed(1));
+const H30 = +M.renderLineDiagram({ name: 'LX', type: 'u' }, longRows(30, SN21)).match(/viewBox="0 0 \d+ (\d+)"/)[1];
+ok(Math.max(...botNodes.map((b) => b.fy)) + 4 <= H30, '错行后的编号不越出画布底边',
+  `${Math.max(...botNodes.map((b) => b.fy)).toFixed(0)} / H=${H30}`);
+ok(/style="min-width:\d+px"/.test(svgWide) && /style="min-width:1000px"/.test(svgWide) === false,
+  '拉长的画布带 min-width，避免整图被等比缩到看不清');
+/* 文字不越出画布：按估算宽度还原每段文字的左右边界 */
+function textBounds(type, n, serial) {
+  const { W, nodes } = nodeBoxes2(type, n, serial);
+  return nodes.map((b) => {
+    const wN = M.svgTextWidth(b.ntxt, 12);
+    const wF = M.svgTextWidth(b.ftxt, 11);
+    const span = (x, w, anchor) => (anchor === 'middle' ? [x - w / 2, x + w / 2]
+      : anchor === 'end' ? [x - w, x] : [x, x + w]);
+    const [n1, n2] = span(b.nx, wN, b.na);
+    const [f1, f2] = span(b.fx, wF, b.fa);
+    return { W, min: Math.min(n1, f1), max: Math.max(n2, f2) };
+  });
+}
+function nodeBoxes2(type, n, serial) {
+  const s = M.renderLineDiagram({ name: 'LX', type }, longRows(n, serial));
+  const W = +s.match(/viewBox="0 0 (\d+)/)[1];
+  const nodes = [...s.matchAll(/<g class="ld-node[\s\S]*?<\/g>/g)].map((m) => {
+    const g = m[0];
+    const c = g.match(/<circle cx="([\d.]+)" cy="([\d.]+)"/);
+    const nm = g.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" class="ld-name">([^<]*)</);
+    const cd = g.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(\w+)" class="ld-code[^>]*>([^<]*)</);
+    return {
+      cx: +c[1], cy: +c[2], nx: +nm[1], ny: +nm[2], na: nm[3], ntxt: nm[4],
+      fx: +cd[1], fy: +cd[2], fa: cd[3], ftxt: cd[4]
+    };
+  });
+  return { W, nodes };
+}
+
+const boundsU = textBounds('u', 30, SN21);
+ok(boundsU.every((b) => b.min >= 0 && b.max <= b.W),
+  'U型长编号文字不越出画布左右边界',
+  boundsU.map((b) => `${b.min.toFixed(0)}~${b.max.toFixed(0)}`).slice(0, 3).join(' '));
+const boundsL = textBounds('linear', 19, SN21);
+ok(boundsL.every((b) => b.min >= 0 && b.max <= b.W), '直线形长编号文字不越出画布左右边界');
+ok(M.lineDiagramHeight(6, 'linear') === 520, '单行布点沿用基准高度 520', M.lineDiagramHeight(6, 'linear'));
+ok(M.lineDiagramHeight(19, 'linear') > 520, '4 行布点自动加高', M.lineDiagramHeight(19, 'linear'));
+ok(M.lineDiagramHeight(15, 'u') > 520, 'U 型单列 5 工位自动加高', M.lineDiagramHeight(15, 'u'));
+
+/* v4.1.0 转角守护（用户截图反馈）：底横排两端必须与左右竖列**同 x**，
+ * 这样「5号→6号」「10号→11号」是竖直下落/上升，而不是斜线。
+ * 原来底排铺 0.08→0.92，比竖列（0.22 / 0.78）还宽，两端只能斜连。 */
+const cornerCases = [[6, 'u'], [9, 'u'], [15, 'u'], [21, 'u'], [30, 'u'], [33, 'u']];
+cornerCases.forEach(([n]) => {
+  const pts = M.computeLineLayout(n, 'u');
+  const lefts = pts.filter((q) => q.seg === 'left');
+  const bots = pts.filter((q) => q.seg === 'bottom');
+  const rights = pts.filter((q) => q.seg === 'right');
+  // 6 工位：底 2 / 左 2 / 右 2，三个段都非空
+  ok(lefts.length > 0 && bots.length > 0 && rights.length > 0, `U型 ${n}工位：三段布点都非空`);
+  if (bots.length > 1) {
+    ok(Math.abs(lefts[lefts.length - 1].x - bots[0].x) < 1e-9,
+      `U型 ${n}工位：左列末位与底排首位同 x（左转角竖直）`,
+      `left=${lefts[lefts.length - 1].x.toFixed(2)}, bottom=${bots[0].x.toFixed(2)}`);
+    ok(Math.abs(rights[0].x - bots[bots.length - 1].x) < 1e-9,
+      `U型 ${n}工位：底排末位与右列首位同 x（右转角竖直）`,
+      `bottom=${bots[bots.length - 1].x.toFixed(2)}, right=${rights[0].x.toFixed(2)}`);
+  }
+});
+
+/* 渲染出的折线也要真竖直：取 15 工位（底 5 / 左 5 / 右 5），检查第 5→6、第 10→11 段 */
+const uSvg15 = M.renderLineDiagram({ name: 'LX', type: 'u' }, mkRows(15));
+const poly = uSvg15.match(/<polyline points="([^"]+)"/)[1].trim().split(/\s+/)
+  .map((t) => t.split(',').map(Number));
+const segV = (k) => Math.abs(poly[k][0] - poly[k + 1][0]) < 0.05 && Math.abs(poly[k][1] - poly[k + 1][1]) > 1;
+ok(segV(4), '折线：第 5→6 段竖直（左转角）', `(${poly[4]})→(${poly[5]})`);
+ok(segV(9), '折线：第 10→11 段竖直（右转角）', `(${poly[9]})→(${poly[10]})`);
+ok(Math.abs(poly[5][1] - poly[6][1]) < 0.05, '折线：底横排 6→7 段水平');
+ok((uSvg15.match(/class="ld-plate"/g) || []).length === 2, 'U型转角两个标签带白色垫底（连线不割字）',
+  (uSvg15.match(/class="ld-plate"/g) || []).length);
+
+const uPts = M.computeLineLayout(15, 'u');
+const lastLeftY = Math.max(...uPts.filter((p) => p.seg === 'left').map((p) => p.y));
+const bottomY = uPts.filter((p) => p.seg === 'bottom')[0].y;
+ok(lastLeftY < bottomY - 0.1, 'U型竖列末端明显高于底横排（转角留白）', `col=${lastLeftY.toFixed(2)}, bottom=${bottomY.toFixed(2)}`);
+ok(uPts.filter((p) => p.seg === 'bottom').every((q) => q.x >= 0.22 - 1e-9 && q.x <= 0.78 + 1e-9),
+  'U型底横排收在左右竖列之间（0.22~0.78）');
 
 /* ============ G. 产线导入映射与计划（v4） ============ */
 section('G. 产线导入映射（v4 六列表头）');
