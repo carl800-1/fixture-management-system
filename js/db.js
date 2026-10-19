@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v4.1.0 — 工装夹具管理程序数据层
+ * db.js v4.5.0 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '4.1.0';
+  const APP_VERSION = '4.5.0';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
@@ -16,12 +16,13 @@ const DB = (function () {
   const MAX_STATIONS = 10;
   const MAX_SERIAL_NO = 64;
   const MAX_LOCATION = 20;
+  const MAX_CATEGORY = 30;
   const LOCATION_RE = /^[A-Za-z0-9]+(-[A-Za-z0-9]+){3}$/;
 
   if (electronApi) {
     const invoke = (channel, payload) => electronApi.invoke(channel, payload);
     return {
-      APP_VERSION, MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, LOCATION_RE,
+      APP_VERSION, MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, MAX_CATEGORY, LOCATION_RE,
       open: () => invoke('db-open'),
       getAll: (name) => invoke('db-getAll', name),
       get: (name, id) => invoke('db-get', { name, id }),
@@ -166,6 +167,8 @@ const DB = (function () {
     if (!f.stations.length) bad('请至少选择 1 个工位');
     if (f.stations.length > MAX_STATIONS) bad('一件夹具最多安装 ' + MAX_STATIONS + ' 个工位');
     if (!isValidLocation(f.location)) bad('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符');
+    const cat = String(f.category == null ? '' : f.category).trim();
+    if (cat.length > MAX_CATEGORY || /[|\r\n]/.test(cat)) bad('分类名称最多 ' + MAX_CATEGORY + ' 字符，且不能含 | 或换行');
   }
 
   async function fixtureAdd(fixture) {
@@ -211,6 +214,7 @@ const DB = (function () {
     f.lines = dedupeNumbers(f.lines);
     f.stations = dedupeNumbers(f.stations);
     f.location = String(f.location == null ? '' : f.location).trim();
+    f.category = String(f.category == null ? '' : f.category).trim();
     validateFixture(f);
     f.updatedAt = Date.now();
     fixtures[i] = f;
@@ -218,8 +222,10 @@ const DB = (function () {
     return f.id;
   }
 
+  /* 删除夹具：连带清除其流水（与主进程 store.delFixture 口径一致） */
   async function fixtureDel(id) {
     lsWrite(LS_FIXTURES, lsRead(LS_FIXTURES, []).filter((f) => f.id !== id));
+    lsWrite(LS_FIX_TX, lsRead(LS_FIX_TX, []).filter((t) => t.fixtureId !== id));
   }
 
   async function fixtureGetAll() { return lsRead(LS_FIXTURES, []); }

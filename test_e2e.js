@@ -67,6 +67,11 @@ const HELPERS = `
   const $=(s)=>document.querySelector(s);
   const $$=(s)=>[...document.querySelectorAll(s)];
   const setV=(s,v)=>{ const el=$(s); if(!el) return false; el.value=v; el.dispatchEvent(new Event('input')); return true; };
+  /* #fix_cat 已是下拉：值不在候选里时先补 option（等价于「＋ 新增分类」）再选中 */
+  const setCat=(v)=>{ const sel=$('#fix_cat'); if(!sel) return false;
+    if(v && ![...sel.options].some(o=>o.value===v)){ const o=document.createElement('option'); o.value=v; o.textContent=v;
+      sel.insertBefore(o, sel.querySelector('option[value="__NEW__"]')); }
+    sel.value=v; sel.dispatchEvent(new Event('change')); return true; };
   const btnByText=(t)=>$$('button').find(b=>b.textContent.includes(t));
   const btnByOnclick=(fn)=>$$('button').find(b=>String(b.getAttribute('onclick')||'').startsWith(fn));
   const idFromOnclick=(b,fn)=>Number(String((b&&b.getAttribute('onclick'))||'').match(new RegExp(fn+'\\\\((\\\\d+)\\\\)'))[1]);
@@ -82,7 +87,7 @@ const NEW_FIXTURE_FN = `
     const diag = [];
     if (!setV('#fix_serial', o.serialNo)) diag.push('no#fix_serial');
     setV('#fix_name', o.name);
-    setV('#fix_loc', o.location); setV('#fix_cat', o.cat || '');
+    setV('#fix_loc', o.location); setCat(o.cat || '');
     if (o.remark) setV('#fix_remark', o.remark);
     setV('#fix_lm_text', (o.models || []).join(' / ')); window.fixFormModelsInput();
     await sleep(100);
@@ -157,9 +162,9 @@ async function main() {
   ok('侧边栏品牌名为程序名（v4.0.4 起不再带版本号）', boot.brand.trim() === '工装夹具管理程序', boot.brand);
   ok('页脚版本号 = v' + PKG_VER, boot.foot.includes('v' + PKG_VER), boot.foot);
   ok('主内容容器存在', boot.hasContent);
-  ok('导航项 >= 9 个（含机种管理 / 按机种查询）', boot.navCount >= 9, String(boot.navCount));
-  ok('导航含 prod（机种管理）与 prodquery（按机种查询）',
-    boot.views.includes('prod') && boot.views.includes('prodquery'), boot.views);
+  ok('导航项 >= 8 个（含机种管理）', boot.navCount >= 8, String(boot.navCount));
+  ok('导航含 prod（机种管理）；v4.5.0 起「按机种查询」已合并，不再单独占导航',
+    boot.views.includes('prod') && !boot.views.includes('prodquery'), boot.views);
   const cssLoaded = await wc.executeJavaScript('getComputedStyle(document.body).backgroundColor');
   ok('CSS 已生效（v1.0 曾丢失样式）', cssLoaded !== 'rgba(0, 0, 0, 0)' && cssLoaded !== 'transparent', cssLoaded);
 
@@ -168,20 +173,26 @@ async function main() {
   const svRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     const out = {};
-    for (const v of ['fixtures','outbound','return','records','data','dashboard','location','linecfg','linequery','prod','prodquery']) {
+    for (const v of ['fixtures','outbound','return','records','data','dashboard','location','linecfg','linequery','prod']) {
       try { window.showView(v); await sleep(40); out[v] = 'OK'; }
       catch (e) { out[v] = 'FAIL:' + e.message; }
     }
+    /* v4.5.0 旧视图名别名：prodquery → prod，不得空白 */
+    try {
+      window.showView('prodquery'); await sleep(250);
+      out.aliasProdQuery = ((($('#viewTitle') || {}).textContent) || '').includes('机种管理') ? 'OK' : 'BAD_TITLE';
+    } catch (e) { out.aliasProdQuery = 'FAIL:' + e.message; }
     window.showView('outbound'); await sleep(120);
     const btn = btnByText('清除已选内容');
     if (btn) { try { btn.click(); out.btnClick='OK'; } catch(e){ out.btnClick='FAIL:'+e.message; } }
     else out.btnClick = 'NO_BTN';
     return out;
   })()`);
-  Object.keys(svRes).filter((k) => k !== 'btnClick').forEach((v) => {
+  Object.keys(svRes).filter((k) => k !== 'btnClick' && k !== 'aliasProdQuery').forEach((v) => {
     ok('showView(' + v + ')', svRes[v] === 'OK', svRes[v]);
   });
   ok('点击出库页「清除已选内容」不报错', svRes.btnClick === 'OK', svRes.btnClick);
+  ok('旧视图名 showView(\'prodquery\') 平滑落到机种管理', svRes.aliasProdQuery === 'OK', svRes.aliasProdQuery);
 
   /* ---------- 2. 产线配置（v4：建档前必须先有产线与工位） ---------- */
   section('2. 产线配置（线体 + 工位）');
@@ -357,7 +368,7 @@ async function main() {
     const txt = (($('#modalBody')||{}).textContent||'');
     const out = { hasSerial: !!$('#fix_serial'), noCodeInput: !$('#fix_new_code'), tip: /不可修改/.test(txt), title: (($('#modalTitle')||{}).textContent||'') };
     /* 改库位并保存 */
-    setV('#fix_loc','ZP1-U-1-3'); setV('#fix_cat','装配-改');
+    setV('#fix_loc','ZP1-U-1-3'); setCat('装配-改');
     window.submitFixForm();
     /* 保存同样是异步的（IPC 落盘）⇒ 轮询等弹窗关闭，别用固定 sleep 造成假失败 */
     for (let i = 0; i < 40; i++) { await sleep(100); if ($('#modalOverlay').hidden) break; }
@@ -799,7 +810,7 @@ async function main() {
     out.l1SvgPoly=$$('#lq_body svg polyline.ld-track').length;
     out.l1Title=(($('#lq_body .ld-title')||{}).textContent||'');
     out.l1Count=(($('#lq_count')||{}).textContent||'');
-    out.hasGotoProdQuery=$$('button').some(b=>String(b.getAttribute('onclick')||'').includes("showView('prodquery')"));
+    out.hasGotoProd=$$('button').some(b=>String(b.getAttribute('onclick')||'').includes("showView('prod')"));
     /* 切到 U 型线 */
     const sel=$('#lq_line');
     const uOpt=$$('#lq_line option').find(o=>o.textContent.includes('U型'));
@@ -832,10 +843,10 @@ async function main() {
   ok('L2 图标题含「U型」', lqRes.l2Title.includes('U型'), lqRes.l2Title);
   ok('报废夹具仍出现在产线视图中（状态列区分）', lqRes.l2HasRetired === true);
   ok('存在「重置筛选」按钮', lqRes.hasResetBtn === true);
-  ok('存在「🏷 按机种查询」跳转按钮', lqRes.hasGotoProdQuery === true);
+  ok('存在「🏷 机种管理」跳转按钮', lqRes.hasGotoProd === true);
 
-  /* ---------- 11. 机种管理 / 按机种查询 ---------- */
-  section('11. 机种管理与按机种查询');
+  /* ---------- 11. 机种管理（v4.5.0 已合并按机种查询：点机种名展开线体/工位明细） ---------- */
+  section('11. 机种管理与机种明细');
   const prodRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('prod'); await sleep(500);
@@ -874,34 +885,127 @@ async function main() {
     (db11.productions || []).every((p) => p.lineId === undefined && p.name && p.order !== undefined),
     db11.productions && db11.productions[0]);
 
+  /* v4.5.0：不再有独立「按机种查询」页 —— 机种管理里点机种名称，
+     下方展开「线体 → 工位 → 夹具」明细；再点一次收起。 */
   const pqRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
-    window.showView('prodquery'); await sleep(600);
+    window.showView('prod'); await sleep(600);
     const out={};
-    out.navOk=(($('#viewTitle')||{}).textContent||'').includes('按机种查询');
-    out.optCount=$('#pq_name') ? $('#pq_name').options.length : 0;
-    out.totalRows=$$('#pq_body table tbody tr').length;
-    const groups=$$('#pq_body .pq-head').map(x=>x.textContent.replace(/\\s+/g,' ').trim());
-    out.groups=groups;
-    out.headText=(($('#pq_body thead')||{}).textContent||'').replace(/\\s+/g,'');
-    /* 只看 DH40MC */
-    const sel=$('#pq_name');
-    const opt=$$('#pq_name option').find(o=>o.textContent.trim()==='DH40MC');
-    if (opt) { sel.value=opt.value; sel.dispatchEvent(new Event('change')); await sleep(450); }
-    out.pickedRows=$$('#pq_body table tbody tr').length;
-    out.pickedGroups=$$('#pq_body .pq-head').map(x=>x.textContent.replace(/\\s+/g,' ').trim());
-    out.hasLineCol=(($('#pq_body')||{}).textContent||'').includes('L1 总装线');
-    out.countText=(($('#pq_count')||{}).textContent||'');
+    out.navOk=(($('#viewTitle')||{}).textContent||'').includes('机种');
+    out.pickLinks=$$('#content a.prod-pick').length;
+    out.hasOldQueryPage=!!$('#pq_name');
+    const link=$$('#content a.prod-pick').find(a=>a.textContent.trim()==='DH40MC');
+    if (link) link.click();
+    await sleep(350);
+    out.detailShown=!!$('#prod_detail');
+    const dt=(($('#prod_detail')||{}).textContent||'');
+    out.detailText=dt.replace(/\\s+/g,'');
+    out.groups=$$('#prod_detail .pq-head').map(x=>x.textContent.replace(/\\s+/g,' ').trim());
+    out.headText=(($('#prod_detail thead')||{}).textContent||'').replace(/\\s+/g,'');
+    out.rowCount=$$('#prod_detail table tbody tr').length;
+    out.pickedRow=$$('#content tr.pick-row').length;
+    /* 再点一次同机种 → 收起 */
+    const link2=$$('#content a.prod-pick').find(a=>a.textContent.trim()==='DH40MC');
+    if (link2) link2.click();
+    await sleep(300);
+    out.collapsed=!$('#prod_detail');
     return out;
   })()`);
-  ok('按机种查询页可进入', pqRes.navOk === true, pqRes.navOk);
-  ok('机种下拉含字典 + 孤儿机种', pqRes.optCount >= 5, String(pqRes.optCount));
-  ok('默认按机种分组渲染多组', pqRes.groups.length >= 3, JSON.stringify(pqRes.groups));
-  ok('结果表固定列（产线 / 夹具编号 / 库位 / 状态）',
-    ['产线', '夹具编号', '库位', '状态'].every((h) => pqRes.headText.includes(h)), pqRes.headText);
-  ok('筛选 DH40MC 后只显示该机种分组', pqRes.pickedGroups.length === 1 && pqRes.pickedGroups[0].includes('DH40MC'), JSON.stringify(pqRes.pickedGroups));
-  ok('筛选后行数 = 该机种关联的产线行', pqRes.pickedRows >= 1, String(pqRes.pickedRows));
-  ok('结果中显示夹具所在产线名', pqRes.hasLineCol === true);
+  ok('机种管理页可进入', pqRes.navOk === true, pqRes.navOk);
+  ok('独立的「按机种查询」控件已移除（合并进机种管理）', pqRes.hasOldQueryPage === false, String(pqRes.hasOldQueryPage));
+  ok('机种名称渲染为可点击链接', pqRes.pickLinks >= 3, String(pqRes.pickLinks));
+  ok('点机种名称 → 下方出现明细面板', pqRes.detailShown === true);
+  ok('明细按线体分组（含 L1 总装线）', pqRes.groups.some((g) => g.includes('L1 总装线')), JSON.stringify(pqRes.groups));
+  ok('明细表头含「工位 / 夹具编号 / 库位 / 状态」',
+    ['工位', '夹具编号', '库位', '状态'].every((h) => pqRes.headText.includes(h)), pqRes.headText);
+  ok('明细里能看到具体工位名（上料工位 / 压装工位）', /上料工位|压装工位/.test(pqRes.detailText), pqRes.detailText.slice(0, 160));
+  ok('明细列出夹具实物编号', pqRes.detailText.includes('DH40MC-921-001-001'), pqRes.detailText.slice(0, 160));
+  ok('选中机种行高亮', pqRes.pickedRow === 1, String(pqRes.pickedRow));
+  ok('再次点击同一机种 → 明细收起', pqRes.collapsed === true);
+
+  /* ---------- 11.5 删除夹具（录错纠正） ---------- */
+  section('11.5 删除夹具（录错纠正 + 连带清流水）');
+  const delPre = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    ${NEW_FIXTURE_FN}
+    const out = {};
+    window.showView('fixtures'); await sleep(250);
+    /* ⚠️ 第 9 节的视图切换用例可能把界面留在列表模式 ⇒ 必须先切回卡片，否则找不到 .fixture-card */
+    window.setFixViewMode('card'); await sleep(250);
+    out.beforeCards = $$('.fixture-card').length;
+    out.made = await newFixture({ serialNo:'DEL-TEST-001', name:'待删除夹具', location:'ZP1-U-3-1', cat:'金属',
+      models:['DH40MC'], lines:['L1 总装线'], stations:['上料工位'] });
+    window.showView('fixtures'); await sleep(300);
+    window.setFixViewMode('card'); await sleep(250);
+    const card = $$('.fixture-card').find(c => c.textContent.includes('DEL-TEST-001'));
+    if (!card) return { err:'卡片未找到', made: out.made, cards: $$('.fixture-card').length };
+    const delBtn = [...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='删除');
+    if (!delBtn) return { err:'卡片无删除按钮', made: out.made };
+    out.id = idFromOnclick(delBtn, 'fixtureDelete');
+    /* 用真实 UI 造 2 条流水（出库 → 回库）：这样 state.fixTransactions 会随操作刷新，
+       弹窗里的「关联流水条数」才是真实值（直接调 DB 只写文件、不会同步渲染层 state） */
+    const cardOf = () => $$('.fixture-card').find(c => c.textContent.includes('DEL-TEST-001'));
+    const pickBtn = (c, t) => [...((c && c.querySelectorAll('button')) || [])].find(b => b.textContent.trim() === t);
+    const waitModal = async () => { for (let i=0;i<40;i++){ await sleep(100); if ($('#modalOverlay').hidden) break; } await sleep(400); };
+
+    const ob = pickBtn(cardOf(), '出库');
+    if (!ob) return { err:'卡片无出库按钮', made: out.made };
+    ob.click(); await sleep(320);
+    setV('#fix_out_op','测试员');
+    if ($('#fix_out_party')) setV('#fix_out_party','测试车间');
+    btnByText('确认出库').click(); await waitModal();
+
+    const rb = pickBtn(cardOf(), '回库');
+    if (!rb) return { err:'卡片无回库按钮', made: out.made };
+    rb.click(); await sleep(320);
+    setV('#fix_return_op','测试员');
+    btnByText('确认回库').click(); await waitModal();
+
+    const delBtn2 = pickBtn(cardOf(), '删除');
+    if (!delBtn2) return { err:'重绘后卡片无删除按钮', made: out.made };
+    delBtn2.click(); await sleep(320);
+    out.modalShown = $('#modalOverlay').hidden === false;
+    out.modalText = (($('#modalOverlay')||{}).textContent||'').replace(/\\s+/g,' ').trim();
+    /* ⚠️ 弹窗里的夹具信息是 disabled input，value 不进 textContent ⇒ 必须单独读 value */
+    out.modalInputs = $$('#modalOverlay input').map(i => i.value);
+    return out;
+  })()`);
+  ok('前置：测试夹具已成功建档', !!(delPre.made && delPre.made.ok), JSON.stringify(delPre.made));
+  ok('卡片操作区有「删除」按钮', !delPre.err, delPre.err + ' / cards=' + JSON.stringify(delPre.cards));
+  ok('删除确认弹窗已弹出', delPre.modalShown === true);
+  ok('弹窗展示夹具编号与名称',
+    (delPre.modalText || '').includes('DEL-TEST-001') && (delPre.modalText || '').includes('待删除夹具'), delPre.modalText);
+  ok('弹窗列出状态 / 库位与关联流水条数',
+    (delPre.modalInputs || []).join(' | ').includes('2 条（将一并删除）')
+    && (delPre.modalInputs || []).join(' | ').includes('ZP1-U-3-1'),
+    JSON.stringify(delPre.modalInputs));
+  ok('弹窗提示不可恢复并引导改用报废',
+    (delPre.modalText || '').includes('不可恢复') && (delPre.modalText || '').includes('报废'));
+
+  const delDone = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const btn = [...$$('#modalOverlay button')].find(b=>b.textContent.includes('确认删除'));
+    if (!btn) return { err:'无确认删除按钮' };
+    btn.click();
+    for (let i=0;i<40;i++){ await sleep(100); if ($('#modalOverlay').hidden) break; }
+    await sleep(500);
+    return {
+      cards: $$('.fixture-card').length,
+      stillThere: (($('#fixture_list')||{}).textContent||'').includes('DEL-TEST-001'),
+      toast: (($('#toast')||{}).textContent||'')
+    };
+  })()`);
+  ok('确认删除后弹窗关闭', !delDone.err, delDone.err);
+  ok('卡片视图不再显示该夹具', delDone.stillThere === false);
+  ok('卡片数回到删除前（少 1 套）', delDone.cards === delPre.beforeCards,
+    String(delDone.cards) + ' / 期望 ' + String(delPre.beforeCards));
+  ok('删除后提示「夹具已删除」', (delDone.toast || '').includes('已删除'), delDone.toast);
+
+  await sleep(400);
+  const dbDel = readDb();
+  ok('落盘：该夹具已从 fixtures 移除', !dbDel.fixtures.some((f) => f.serialNo === 'DEL-TEST-001'));
+  ok('落盘：该夹具的流水被一并清除', dbDel.fixTransactions.filter((t) => t.fixtureId === delPre.id).length === 0,
+    String(dbDel.fixTransactions.filter((t) => t.fixtureId === delPre.id).length));
 
   /* ---------- 12. 清空数据落盘 ---------- */
   section('12. 清空数据落盘验证与重启恢复');

@@ -86,7 +86,7 @@ vm.runInContext(parts.join('\n') + `
   fixturesOfLine, fixturesOnStation, computeLineLayout, lineLayoutPoints, stationsOfLine,
   renderLineDiagram, stationLabel, lineDiagramHeight, lineDiagramWidth, svgTextWidth,
   fixtureBadgeText, sideGap: LD_GAP, near: LD_CODE_NEAR, far: LD_CODE_FAR, mapLineImportHeader, buildLineImportPlan, applyLineImportPlan,
-  buildProdQueryRows, isValidLocation, isValidSerialNo, isValidProductionName,
+  buildProdQueryRows, buildProdDetailRows, isValidLocation, isValidSerialNo, isValidProductionName,
   LINE_IMPORT_HEADERS, MAX_LINES, MAX_STATIONS, MAX_LINE_MODELS
 };`, ctx);
 const M = sandbox.__export;
@@ -805,6 +805,45 @@ ok(M.buildLineImportPlan([['线体', '工位', '夹具编号'], [null, null, nul
     'lines 非数组时占位「未关联产线」');
   ok(M.buildProdQueryRows([{ id: 9, code: '9', lineModels: ['机种甲'], lines: [7] }], jLines, ['机种甲'])[0].lineName === '（未关联产线）',
     '产线 id 已失效（被删）时同样占位');
+
+  /* ============ J2. 机种明细（v4.5.0 合并进机种管理） ============ */
+  section('J2. buildProdDetailRows 机种 × 线体 × 工位（明细面板数据源）');
+  const kLines = [{ id: 1, name: 'K1 线' }, { id: 2, name: 'K2 线' }];
+  const kStations = [
+    { id: 11, lineId: 1, name: '上料工位', seq: 10 },
+    { id: 12, lineId: 1, name: '压装工位', seq: 20 },
+    { id: 21, lineId: 2, name: '上料工位', seq: 10 },   // 同名工位跨线体（工位表必须保留）
+    { id: 22, lineId: 2, name: '焊接工位', seq: 20 }
+  ];
+  const kFixtures = [
+    /* 一条夹具跨 2 条线，线1 两个工位、线2 一个工位 */
+    { id: 31, code: '4001', serialNo: 'SN-K1', name: '定位销压板', location: 'ZP1-U-1-1', status: 'stocked', lineModels: ['机种甲'], lines: [1, 2], stations: [11, 12, 21] },
+    /* 只关联线2、一个工位都没选 → 出「未指定工位」行 */
+    { id: 32, code: '4002', serialNo: 'SN-K2', name: '焊接夹具', location: 'ZP1-U-1-2', status: 'checked_out', lineModels: ['机种甲'], lines: [2], stations: [] },
+    /* 完全没关联产线 → 出「未关联产线」行 */
+    { id: 33, code: '4003', serialNo: 'SN-K3', name: '无产线夹具', location: '', status: 'stocked', lineModels: ['机种甲'], lines: [], stations: [] },
+    /* 别的机种 → 必须被过滤掉 */
+    { id: 34, code: '4004', serialNo: 'SN-K4', name: '别的机种夹具', location: 'X', status: 'stocked', lineModels: ['机种乙'], lines: [1], stations: [11] }
+  ];
+  const kd = M.buildProdDetailRows(kFixtures, kLines, kStations, ['机种甲']);
+  ok(kd.length === 5, '机种甲共 5 行（线1 两工位 + 线2 一工位 + 线2 未指定 + 未关联）', kd.length);
+  ok(kd.every((r) => r.production === '机种甲'), '非目标机种被过滤（机种乙的夹具不出现）');
+  const k1 = kd.filter((r) => r.lineName === 'K1 线');
+  ok(k1.length === 2 && k1.every((r) => r.fixtureId === 31), 'K1 线 2 行，均来自夹具 31', k1.map((r) => r.stationName));
+  ok(k1.map((r) => r.stationName).sort().join(',') === '上料工位,压装工位', 'K1 线工位 = 上料工位 / 压装工位', k1.map((r) => r.stationName));
+  const k2 = kd.filter((r) => r.lineName === 'K2 线');
+  ok(k2.length === 2, 'K2 线 2 行（31 的上料工位 + 32 的未指定工位）', k2.map((r) => r.stationName));
+  ok(k2.some((r) => r.stationName === '上料工位' && r.fixtureId === 31), 'K2 线上料工位来自夹具 31（同名工位按 lineId 归属，不串线）');
+  ok(k2.some((r) => r.stationName === '（未指定工位）' && r.fixtureId === 32), '只关联产线未选工位 → 「（未指定工位）」');
+  ok(!k2.some((r) => r.stationName === '压装工位'), 'K2 线不会串入 K1 的压装工位');
+  const orphanK = kd.filter((r) => r.lineName === '（未关联产线）');
+  ok(orphanK.length === 1 && orphanK[0].fixtureId === 33 && orphanK[0].stationName === '—', '无产线夹具 → 「（未关联产线）」占位', orphanK[0]);
+  ok(kd.every((r) => ['production', 'lineId', 'lineName', 'stationName', 'fixtureId', 'code', 'serialNo', 'name', 'location', 'status'].every((k) => k in r)),
+    '明细行字段齐备（线体 / 工位 / 夹具字段）', Object.keys(kd[0]));
+  ok(M.buildProdDetailRows(kFixtures, kLines, kStations, []).length === 0, '未指定机种 → 0 行');
+  ok(M.buildProdDetailRows([
+    { id: 35, code: '4005', serialNo: 'SN-K5', name: '坏工位', location: '', status: 'stocked', lineModels: ['机种甲'], lines: [1], stations: [999] }
+  ], kLines, kStations, ['机种甲']).length === 1, '工位 id 已失效时按产线出 1 行，不丢夹具');
 
   syncState();
   ok(store.getAll('fixtures').length === 5 && sandbox.state.fixtures.length === 5,

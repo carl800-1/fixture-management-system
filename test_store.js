@@ -242,6 +242,22 @@ store.addFixture(fix({ code: '5005', serialNo: 'CAS-2', lines: [lineA], stations
 store.delStation(stTmp);
 ok('删工位后夹具上该 id 被摘除', !store.getAll('fixtures').find((f) => f.code === '5005').stations.includes(stTmp));
 
+/* ---------- 8b. 删除夹具（纠正录错，连带清理流水） ---------- */
+section('8b. 删除夹具（连带清理流水）');
+const idDel = store.addFixture(fix({ code: '5006', serialNo: 'DEL-1', lines: [lineA], stations: [stA1] }));
+store.addFixTransaction({ fixtureId: idDel, type: 'out', operator: '李四', time: t + 200000 });
+store.addFixTransaction({ fixtureId: idDel, type: 'return', operator: '王五', time: t + 201000 });
+const idKeep = store.addFixture(fix({ code: '5007', serialNo: 'KEEP-1', lines: [lineA], stations: [stA1] }));
+store.addFixTransaction({ fixtureId: idKeep, type: 'out', operator: '李四', time: t + 202000 });
+const txBeforeDel = store.getAll('fixTransactions').length;
+ok('删除前目标夹具流水为 2 条', store.getAll('fixTransactions').filter((x) => x.fixtureId === idDel).length === 2);
+store.delFixture(idDel);
+ok('夹具已从 fixtures 消失', !store.getAll('fixtures').some((f) => f.id === idDel));
+ok('该夹具的流水被连带清除（不留孤儿记录）', store.getAll('fixTransactions').filter((x) => x.fixtureId === idDel).length === 0);
+ok('其它夹具的流水不受影响', store.getAll('fixTransactions').some((x) => x.fixtureId === idKeep));
+ok('流水总数只减去被删夹具的条数', store.getAll('fixTransactions').length === txBeforeDel - 2, String(store.getAll('fixTransactions').length));
+ok('删除不存在的夹具不报错（幂等）', !throws(() => store.delFixture(999999)));
+
 /* ---------- 9. 机种字典 ---------- */
 section('9. 机种字典（productions）');
 const p1 = store.ensureProduction('DH40MC');
@@ -343,6 +359,21 @@ ok('落盘文件已无 products', migRaw.products === undefined);
 ok('落盘文件已无 stationFixtures', migRaw.stationFixtures === undefined);
 ok('落盘文件含 productions', Array.isArray(migRaw.productions));
 try { fs.rmSync(TMP2, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+
+/* ---------- 导入批次号（v4.4.0：撤销本次导入的落点） ---------- */
+section('导入批次号 importBatch');
+const idBatch = store.addFixture(fix({ serialNo: 'BATCH-001', name: '带批次夹具', location: 'ZP1-U-3-1', importBatch: 'bTEST-1' }));
+const fBatch = store.getAll('fixtures').find((f) => f.id === idBatch);
+ok('addFixture 透传未知字段 importBatch', !!fBatch && fBatch.importBatch === 'bTEST-1', fBatch && fBatch.importBatch);
+store.updateFixture({ id: idBatch, name: '改过名的批次夹具' });
+const fBatch2 = store.getAll('fixtures').find((f) => f.id === idBatch);
+ok('编辑夹具不丢 importBatch', !!fBatch2 && fBatch2.importBatch === 'bTEST-1', fBatch2 && fBatch2.importBatch);
+ok('可按批次号精确筛出本批记录',
+  store.getAll('fixtures').filter((f) => f.importBatch === 'bTEST-1').length === 1,
+  store.getAll('fixtures').filter((f) => f.importBatch === 'bTEST-1').length);
+store.delFixture(idBatch);
+ok('删除后该批次为空（撤销本次导入即可整体回滚）',
+  store.getAll('fixtures').filter((f) => f.importBatch === 'bTEST-1').length === 0);
 
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));

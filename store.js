@@ -29,6 +29,7 @@ const MAX_LINES = 5;          // 一件夹具最多涉及产线数
 const MAX_STATIONS = 10;      // 一件夹具最多安装工位数
 const MAX_SERIAL_NO = 64;     // 实物夹具编号最大字符数
 const MAX_LOCATION = 20;      // 库位号最大字符数（真实样例 ZP1-U-1-1 = 10）
+const MAX_CATEGORY = 30;      // 分类名称最大字符数（可空 = 未分类）
 /* 库位号形态：4 段、短横线分隔、每段非空（如 ZP1-U-1-1 / ZP10-U-12-15） */
 const LOCATION_RE = /^[A-Za-z0-9]+(-[A-Za-z0-9]+){3}$/;
 
@@ -263,6 +264,8 @@ function validateFixture(f, opts) {
     bad('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符');
   }
   if (f.serialNo !== undefined && f.serialNo !== null && /[|]/.test(String(f.serialNo))) bad('实物编号不能包含竖线');
+  const cat = String(f.category == null ? '' : f.category).trim();
+  if (cat.length > MAX_CATEGORY || /[|\r\n]/.test(cat)) bad('分类名称最多 ' + MAX_CATEGORY + ' 字符，且不能含 | 或换行');
 }
 
 function addFixture(fixture) {
@@ -339,9 +342,13 @@ function updateFixture(fixture) {
   return f.id;
 }
 
+/* 删除夹具（用于录错 / 重复建档的纠正）。
+ * 与「报废」不同：报废是业务状态流转、记录留档；这里是抹掉记录本身，不可恢复。
+ * 连带删除该夹具的流水，否则报表与记录查询里会残留指向已不存在夹具的孤儿行。 */
 function delFixture(id) {
   load();
   data.fixtures = data.fixtures.filter((f) => f.id !== id);
+  data.fixTransactions = (data.fixTransactions || []).filter((t) => t.fixtureId !== id);
   save();
 }
 
@@ -575,6 +582,6 @@ module.exports = {
   isValidSerialNo, isValidLocation, isValidProductionName, isBridgeCode,
   stockCountBySerial,
   // 常量
-  MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, LOCATION_RE,
+  MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, MAX_CATEGORY, LOCATION_RE,
   COLLECTIONS
 };

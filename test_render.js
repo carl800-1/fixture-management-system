@@ -221,9 +221,32 @@ const badRow = (appJs.match(/^[ \t]*<td>\$\{esc\(f\.serialNo \|\| '—'\)\}<\/td
 ok('数据行无「夹具编号 在前、序号 在后」', badRow === 0, String(badRow));
 const goodRow = (appJs.match(/^[ \t]*<td class="muted">\$\{esc\(f\.code\)\}<\/td>/gm) || []).length;
 ok('数据行「序号 在前」共 5 处（3 单行 + 2 跨行）', goodRow === 5, String(goodRow));
-/* CSV 导出列序（夹具列表导出本来就是序号在前，此处仅锁定现状，避免误改） */
-const exportSeqFirst = appJs.indexOf("const headers = ['序号', '夹具编号'") >= 0;
-ok('夹具列表导出 CSV：序号 为第 1 列', exportSeqFirst);
+/* CSV 导出列序（v4.5.0：夹具清单导出与「下载模板」共用 FIX_IMPORT_HEADERS，22 列同构） */
+const expStart = appJs.indexOf('window.fixtureExportCSV = async function');
+const expEnd = appJs.indexOf('* 夹具批量导入', expStart);
+const exportSrc = appJs.slice(expStart, expEnd > expStart ? expEnd : expStart + 4000);
+ok('夹具清单导出使用与模板共用的 FIX_IMPORT_HEADERS',
+  /const headers = FIX_IMPORT_HEADERS\.slice\(\)/.test(exportSrc));
+ok('夹具清单导出不再输出模板外的「序号 / 状态 / 累计出库 / 累计回库 / 维修次数」列',
+  !/累计出库|累计回库|维修次数|'状态'/.test(exportSrc), exportSrc.slice(0, 200));
+ok('导出与模板共用 buildCsvText（BOM / 换行 / 转义一致）',
+  /buildCsvText\(headers, rows\)/.test(exportSrc) && /buildCsvText\(FIX_IMPORT_HEADERS, sample\)/.test(appJs));
+ok('导出保留 7 列机种（机种名称1~7），不再合并成一格',
+  /for \(let i = 0; i < MAX_LINE_MODELS; i\+\+\) models\.push/.test(exportSrc));
+
+/* ---------- 9.5 机种管理（v4.5.0 合并按机种查询） ---------- */
+section('9.5 机种管理：点机种名展开线体/工位明细');
+ok('机种名称渲染为可点击链接（prod-pick → prodPick）',
+  appJs.includes('class="prod-pick"') && appJs.includes('window.prodPick = function'));
+ok('明细用纯函数 buildProdDetailRows（机种 × 线体 × 工位）', appJs.includes('function buildProdDetailRows('));
+ok('明细面板渲染函数 prodDetailHtml 存在', appJs.includes('function prodDetailHtml('));
+ok('明细表头含「工位 / 夹具编号 / 库位 / 状态」',
+  appJs.includes('>工位</th>') && appJs.includes('>库位</th>') && appJs.includes('>状态</th>'));
+ok('导航与视图表已移除 prodquery（按机种查询）',
+  !html.includes('data-view="prodquery"') && !appJs.includes('prodquery: renderProdQuery'));
+ok('保留旧视图名别名 prodquery → prod', appJs.includes("const VIEW_ALIAS = { prodquery: 'prod' }"));
+ok('paintProduction 拆出纯渲染（点机种不重新读盘）',
+  appJs.includes('function paintProduction()') && appJs.includes('paintProduction();'));
 
 /* ---------- 10. 机种名称输入：输入框（草稿）+「添加」按钮 → 标签区 ---------- */
 section('10. 机种名称输入（输入框 + 添加按钮 → 标签区）');
@@ -757,6 +780,47 @@ ok('submitFixtureOut 传递 outReason 给 DB.fixtureAddTransaction',
     }
   }
 }
+
+/* ---------- 15. 删除夹具入口 ---------- */
+section('15. 删除夹具入口（录错纠正）');
+ok('window.fixtureDelete / fixtureDeleteConfirm 均已挂载',
+  mounted.has('fixtureDelete') && mounted.has('fixtureDeleteConfirm'));
+ok('删除入口调用 DB.fixtureDel', appJs.includes('await DB.fixtureDel(id)'));
+ok('卡片视图含删除按钮', /fixtureDelete\(\$\{f\.id\}\)">删除</.test(appJs));
+ok('列表视图含删除按钮', (appJs.match(/fixtureDelete\(\$\{f\.id\}\)">删除</g) || []).length >= 2);
+ok('查询结果与详情弹窗含删除入口', appJs.includes('🗑 删除该夹具'));
+ok('删除确认弹窗说明「不可恢复」并引导改用报废',
+  appJs.includes('删除后<b>不可恢复</b>') && appJs.includes('请改用「报废」保留记录'));
+ok('删除确认弹窗展示关联流水条数', appJs.includes('（将一并删除）') && appJs.includes('（无流水）'));
+ok('已出库 / 维修中状态给额外警告',
+  appJs.includes('已出库未回库') && appJs.includes('处于维修中'));
+ok('删除后清理选中态', appJs.includes('if (state.fixSelectedId === id) state.fixSelectedId = 0'));
+ok('查询页删除后就地重跑查询（不切回夹具管理）',
+  appJs.includes("if ($('#query_results')) renderQueryResults(applyQueryFilters(state.query));"));
+ok('报废按钮不再使用未定义的 btn-danger 类',
+  !appJs.includes('btn-danger') && /class="btn sm" onclick="event\.stopPropagation\(\); fixtureRetire/.test(appJs));
+
+/* ---------- 16. 导入幂等与撤销（v4.4.0） ---------- */
+section('16. 导入幂等与撤销本次导入');
+ok('导入查重签名函数存在（_sigOfNames / _sigOfFixture）',
+  appJs.includes('function _sigOfNames(') && appJs.includes('function _sigOfFixture('));
+ok('buildImportPlan 计算重复行数 _dupCount',
+  appJs.includes('plan._dupCount = plan.filter((p) => p.isDup).length'));
+ok('预览提供「跳过重复」按钮（默认口径）',
+  appJs.includes("confirmImportPlan('skip')") && appJs.includes('跳过重复，导入'));
+ok('预览提供「全部导入」按钮',
+  appJs.includes("confirmImportPlan('all')") && appJs.includes('全部导入'));
+ok('预览列出重复统计横幅', appJs.includes('行与库内已有记录<b>完全一致</b>'));
+ok('预览表格有「状态」列且区分重复/新增',
+  appJs.includes('<th>状态</th>') && appJs.includes("'<span class=\"badge warn\">重复</span>'"));
+ok('落库写入 importBatch 批次号', appJs.includes('importBatch: batchId'));
+ok('导入结果弹窗提供「撤销本次导入」', appJs.includes('undoFixtureImport(') && appJs.includes('↩ 撤销本次导入'));
+ok('撤销按批次过滤（只删这一批）',
+  appJs.includes("state.fixtures.filter((f) => f.importBatch === batchId)"));
+ok('整份表全部被拒时给出原因明细（BUG-007）',
+  appJs.includes('function showImportFailure(') && appJs.includes('行被跳过'));
+ok('confirmImportPlan 默认跳过重复（mode !== \'all\'）',
+  appJs.includes("const skipDup = mode !== 'all';"));
 
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
