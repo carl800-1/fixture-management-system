@@ -1,0 +1,3563 @@
+{
+  "meta": {},
+  "fixtures": [
+    {
+      "serialNo": "DH40MC-921-001-001",
+      "name": "定子压入机壳-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        22
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1001",
+      "id": 423,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680084,
+      "updatedAt": 1792402680084
+    },
+    {
+      "serialNo": "DH40MC-921-002-001",
+      "name": "轴承压入齿轮箱",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-1",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        23
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1002",
+      "id": 424,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680089,
+      "updatedAt": 1792402680089
+    },
+    {
+      "serialNo": "DH40MC-921-003-001",
+      "name": "连杆铆压",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        24
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1003",
+      "id": 425,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680094,
+      "updatedAt": 1792402680094
+    },
+    {
+      "serialNo": "DH40MC-921-004-001",
+      "name": "含油轴承压入曲轴箱",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-3",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        25
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1004",
+      "id": 426,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680099,
+      "updatedAt": 1792402680099
+    },
+    {
+      "serialNo": "DH40MC-921-005-001",
+      "name": "油封压入曲轴箱-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        26
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1005",
+      "id": 427,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680103,
+      "updatedAt": 1792402680103
+    },
+    {
+      "serialNo": "DH40MC-921-006-001",
+      "name": "6203轴承压入曲轴箱",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        27
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1006",
+      "id": 428,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680106,
+      "updatedAt": 1792402680106
+    },
+    {
+      "serialNo": "DH40MC-921-008-001",
+      "name": "曲轴、齿轮压入齿轮箱",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        28
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1007",
+      "id": 429,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680110,
+      "updatedAt": 1792402680110
+    },
+    {
+      "serialNo": "DH40MC-921-009-001",
+      "name": "油封压入曲轴箱",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        29
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1008",
+      "id": 430,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680114,
+      "updatedAt": 1792402680114
+    },
+    {
+      "serialNo": "DH40MC-921-010-011",
+      "name": "油封、轴承、卡环压入气缸箱",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        30
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1009",
+      "id": 431,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680116,
+      "updatedAt": 1792402680116
+    },
+    {
+      "serialNo": "DH40MC-921-020-001",
+      "name": "D2销压入手柄",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-3",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        31
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1010",
+      "id": 432,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680121,
+      "updatedAt": 1792402680121
+    },
+    {
+      "serialNo": "DH40MC-921-011-001",
+      "name": "轴承压入斜齿轮工装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        32
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1011",
+      "id": 433,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680124,
+      "updatedAt": 1792402680124
+    },
+    {
+      "serialNo": "DH40MC-921-012-001",
+      "name": "第二齿轮装入斜齿轮工装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        33
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1012",
+      "id": 434,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680126,
+      "updatedAt": 1792402680126
+    },
+    {
+      "serialNo": "DH38MC-921-005-001",
+      "name": "脱扣扭力测试",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "DH38YE3",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-1",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        34
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1013",
+      "id": 435,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680128,
+      "updatedAt": 1792402680128
+    },
+    {
+      "serialNo": "DH40MC-921-013-001",
+      "name": "转换杆部装工装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        35
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1014",
+      "id": 436,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680130,
+      "updatedAt": 1792402680130
+    },
+    {
+      "serialNo": "DH40MC-921-014-001",
+      "name": "轴承压入齿轮箱-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-3",
+      "remark": "",
+      "lines": [
+        15
+      ],
+      "stations": [
+        36
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1015",
+      "id": 437,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680132,
+      "updatedAt": 1792402680132
+    },
+    {
+      "serialNo": "DH40MC-921-015-001",
+      "name": "连杆铆压-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        37
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1016",
+      "id": 438,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680134,
+      "updatedAt": 1792402680134
+    },
+    {
+      "serialNo": "DH40MC-921-016-001",
+      "name": "油封压入曲轴箱-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "DH38YE3",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        38
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1017",
+      "id": 439,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680136,
+      "updatedAt": 1792402680136
+    },
+    {
+      "serialNo": "DH40MC-921-017-001",
+      "name": "曲轴、齿轮压入齿轮箱-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-3",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        39
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1018",
+      "id": 440,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680140,
+      "updatedAt": 1792402680140
+    },
+    {
+      "serialNo": "DH40MC-921-018-001",
+      "name": "卡环压入气缸-压头",
+      "lineModels": [
+        "DH40MC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        40
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1019",
+      "id": 441,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680144,
+      "updatedAt": 1792402680144
+    },
+    {
+      "serialNo": "DH40MC-921-019-001",
+      "name": "卡环压入气缸-导向套",
+      "lineModels": [
+        "DH40MC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        41
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1020",
+      "id": 442,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680147,
+      "updatedAt": 1792402680147
+    },
+    {
+      "serialNo": "DH40MC-921-021-001",
+      "name": "油封、轴承、卡环压入气缸箱-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        42
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1021",
+      "id": 443,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680150,
+      "updatedAt": 1792402680150
+    },
+    {
+      "serialNo": "DH40MC-921-022-001",
+      "name": "D2销压入手柄-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-3",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        43
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1022",
+      "id": 444,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680152,
+      "updatedAt": 1792402680152
+    },
+    {
+      "serialNo": "DH40MC-921-023-001",
+      "name": "第二齿轮装入斜齿轮工装-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-2",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        44
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1023",
+      "id": 445,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680155,
+      "updatedAt": 1792402680155
+    },
+    {
+      "serialNo": "DH40MC-921-024-001",
+      "name": "转换杆部装工装-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-3",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        45
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1024",
+      "id": 446,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680158,
+      "updatedAt": 1792402680158
+    },
+    {
+      "serialNo": "DH40MC-921-025-001",
+      "name": "转换杆部装工装-导向套",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        46
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1025",
+      "id": 447,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680160,
+      "updatedAt": 1792402680160
+    },
+    {
+      "serialNo": "DH40MC-921-026-001",
+      "name": "含油轴承压入曲轴箱-压头",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-4",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        47
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1026",
+      "id": 448,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680162,
+      "updatedAt": 1792402680162
+    },
+    {
+      "serialNo": "DH40MC-921-027-001",
+      "name": "活塞摆杆销压入工装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "DH38YE3",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-5",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        48
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1027",
+      "id": 449,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680165,
+      "updatedAt": 1792402680165
+    },
+    {
+      "serialNo": "DH40MC-921-028-001",
+      "name": "刷握压入机壳定位块",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "DH38YE3",
+        "KH540"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-5",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        49
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1028",
+      "id": 450,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680167,
+      "updatedAt": 1792402680167
+    },
+    {
+      "serialNo": "DH40MC-921-029-001",
+      "name": "刷握压入机壳底座",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "DH38YE3",
+        "KH540"
+      ],
+      "category": "POM",
+      "location": "ZP1-A-2-5",
+      "remark": "",
+      "lines": [
+        16
+      ],
+      "stations": [
+        50
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1029",
+      "id": 451,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680168,
+      "updatedAt": 1792402680168
+    },
+    {
+      "serialNo": "DH40SC-921-001-001",
+      "name": "前盖总成",
+      "lineModels": [
+        "DH40SC"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-6",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        255
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1030",
+      "id": 452,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680171,
+      "updatedAt": 1792402680171
+    },
+    {
+      "serialNo": "DH40SC-921-002-001",
+      "name": "滚针轴承装入气缸箱底座",
+      "lineModels": [
+        "DH40SC"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-6",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        256
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1031",
+      "id": 453,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680173,
+      "updatedAt": 1792402680173
+    },
+    {
+      "serialNo": "DH40SC-921-003-001",
+      "name": "滚针轴承装入气缸箱压头",
+      "lineModels": [
+        "DH40SC"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-6",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        257
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1032",
+      "id": 454,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680176,
+      "updatedAt": 1792402680176
+    },
+    {
+      "serialNo": "DH40MC-921-030-001",
+      "name": "定子压入机壳-底座",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        258
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1033",
+      "id": 455,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680179,
+      "updatedAt": 1792402680179
+    },
+    {
+      "serialNo": "DH40MC-921-031-001",
+      "name": "O型圈，气缸销压入气缸箱总成",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        259
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1034",
+      "id": 456,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680180,
+      "updatedAt": 1792402680180
+    },
+    {
+      "serialNo": "DH40MC-921-032-001",
+      "name": "开关接线",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        260
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1035",
+      "id": 457,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680182,
+      "updatedAt": 1792402680182
+    },
+    {
+      "serialNo": "DH40MC-921-033-001",
+      "name": "锁手柄盖",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        261
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1036",
+      "id": 458,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680184,
+      "updatedAt": 1792402680184
+    },
+    {
+      "serialNo": "DH40MC-921-034-001",
+      "name": "电缆接线",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        262
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1037",
+      "id": 459,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680185,
+      "updatedAt": 1792402680185
+    },
+    {
+      "serialNo": "DH40MC-921-035-001",
+      "name": "扭力确认1",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        263
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1038",
+      "id": 460,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680187,
+      "updatedAt": 1792402680187
+    },
+    {
+      "serialNo": "DH40MC-921-036-001",
+      "name": "扭力确认2",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        264
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1039",
+      "id": 461,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680189,
+      "updatedAt": 1792402680189
+    },
+    {
+      "serialNo": "DH40MC-921-037-001",
+      "name": "电机总成与曲轴箱总成组合",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        265
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1040",
+      "id": 462,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680190,
+      "updatedAt": 1792402680190
+    },
+    {
+      "serialNo": "DH40MC-921-038-001",
+      "name": "曲轴箱与气缸箱组合",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-1",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        266
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1041",
+      "id": 463,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680192,
+      "updatedAt": 1792402680192
+    },
+    {
+      "serialNo": "DH40MC-921-039-001",
+      "name": "齿轮箱底座部装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        267
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1042",
+      "id": 464,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680194,
+      "updatedAt": 1792402680194
+    },
+    {
+      "serialNo": "DH40MC-921-040-001",
+      "name": "扭力追锁",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        268
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1043",
+      "id": 465,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680196,
+      "updatedAt": 1792402680196
+    },
+    {
+      "serialNo": "DH40MC-921-041-001",
+      "name": "齿轮箱气缸箱组合",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        269
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1044",
+      "id": 466,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680200,
+      "updatedAt": 1792402680200
+    },
+    {
+      "serialNo": "DH40MC-921-042-001",
+      "name": "油盖装入",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        221
+      ],
+      "stations": [
+        255
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1045",
+      "id": 467,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680203,
+      "updatedAt": 1792402680203
+    },
+    {
+      "serialNo": "DH40MC-921-043-001",
+      "name": "气缸箱部装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        270
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1046",
+      "id": 468,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680205,
+      "updatedAt": 1792402680205
+    },
+    {
+      "serialNo": "DH40MC-921-044-001",
+      "name": "气缸箱装入定子机壳总成",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        271
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1047",
+      "id": 469,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680206,
+      "updatedAt": 1792402680206
+    },
+    {
+      "serialNo": "DH40MC-921-045-001",
+      "name": "引线整理",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        272
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1048",
+      "id": 470,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680209,
+      "updatedAt": 1792402680209
+    },
+    {
+      "serialNo": "DH40MC-921-046-001",
+      "name": "齿轮箱部装",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        273
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1049",
+      "id": 471,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680211,
+      "updatedAt": 1792402680211
+    },
+    {
+      "serialNo": "DH40MC-921-047-001",
+      "name": "定子机壳总成",
+      "lineModels": [
+        "DH40MC",
+        "DH40SC",
+        "KH540"
+      ],
+      "category": "PVC",
+      "location": "ZP1-C-5-3",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        274
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1050",
+      "id": 472,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680212,
+      "updatedAt": 1792402680212
+    },
+    {
+      "serialNo": "DH38YE3-921-003-001",
+      "name": "定子压入机壳",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-7",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        275
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1051",
+      "id": 473,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680214,
+      "updatedAt": 1792402680214
+    },
+    {
+      "serialNo": "DH38YE3-921-004-001",
+      "name": "含油轴承压入曲轴箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        276
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1052",
+      "id": 474,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680217,
+      "updatedAt": 1792402680217
+    },
+    {
+      "serialNo": "DH38YE3-921-005-001",
+      "name": "轴承压入齿轮箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-7",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        277
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1053",
+      "id": 475,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680219,
+      "updatedAt": 1792402680219
+    },
+    {
+      "serialNo": "DH38YE3-921-006-001",
+      "name": "油封压入曲轴箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        278
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1054",
+      "id": 476,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680220,
+      "updatedAt": 1792402680220
+    },
+    {
+      "serialNo": "DH38YE3-921-007-001",
+      "name": "轴承压入曲轴箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        279
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1055",
+      "id": 477,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680223,
+      "updatedAt": 1792402680223
+    },
+    {
+      "serialNo": "DH38YE3-921-008-001",
+      "name": "油封A压入曲轴箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        280
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1056",
+      "id": 478,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680226,
+      "updatedAt": 1792402680226
+    },
+    {
+      "serialNo": "DH38YE3-921-009-001",
+      "name": "曲轴、齿轮压入曲轴箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        281
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1057",
+      "id": 479,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680228,
+      "updatedAt": 1792402680228
+    },
+    {
+      "serialNo": "DH38YE3-921-010-001",
+      "name": "轴承压入斜齿轮工装",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-7",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        282
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1058",
+      "id": 480,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680230,
+      "updatedAt": 1792402680230
+    },
+    {
+      "serialNo": "DH38YE3-921-011-001",
+      "name": "第二齿轮装入斜齿",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        283
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1059",
+      "id": 481,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680232,
+      "updatedAt": 1792402680232
+    },
+    {
+      "serialNo": "DH38YE3-921-012-001",
+      "name": "连杆铆压",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        222
+      ],
+      "stations": [
+        284
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1060",
+      "id": 482,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680234,
+      "updatedAt": 1792402680234
+    },
+    {
+      "serialNo": "DH38YE3-921-013-001",
+      "name": "曲轴箱盖部装",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-7",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        285
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1061",
+      "id": 483,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680235,
+      "updatedAt": 1792402680235
+    },
+    {
+      "serialNo": "DH38YE3-921-001-001",
+      "name": "连杆铆压压头",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        286
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1062",
+      "id": 484,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680237,
+      "updatedAt": 1792402680237
+    },
+    {
+      "serialNo": "DH38YE3-921-002-001",
+      "name": "含油轴承压入曲轴箱-压头",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        287
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1063",
+      "id": 485,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680239,
+      "updatedAt": 1792402680239
+    },
+    {
+      "serialNo": "DH38YE3-921-014-001",
+      "name": "曲轴齿轮压入曲轴箱压头",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        288
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1064",
+      "id": 486,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680240,
+      "updatedAt": 1792402680240
+    },
+    {
+      "serialNo": "DH38YE3-921-015-001",
+      "name": "第二齿轮装入斜齿",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        289
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1065",
+      "id": 487,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680243,
+      "updatedAt": 1792402680243
+    },
+    {
+      "serialNo": "DH38YE3-921-016-001",
+      "name": "曲轴箱盖部装压头",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        290
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1066",
+      "id": 488,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680244,
+      "updatedAt": 1792402680244
+    },
+    {
+      "serialNo": "DH38YE3-921-017-001",
+      "name": "前盖总成组装",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-7",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        291
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1067",
+      "id": 489,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680246,
+      "updatedAt": 1792402680246
+    },
+    {
+      "serialNo": "DH38YE3-921-018-001",
+      "name": "轴承压入齿轮箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-7",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        292
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1068",
+      "id": 490,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680249,
+      "updatedAt": 1792402680249
+    },
+    {
+      "serialNo": "DH38YE3-921-019-001",
+      "name": "含油轴承压入气缸箱底座",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        293
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1069",
+      "id": 491,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680250,
+      "updatedAt": 1792402680250
+    },
+    {
+      "serialNo": "DH38YE3-921-020-001",
+      "name": "含油轴承压入气缸箱压头",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        294
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1070",
+      "id": 492,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680252,
+      "updatedAt": 1792402680252
+    },
+    {
+      "serialNo": "DH38YE3-921-021-001",
+      "name": "曲轴箱盖部装导向套",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "金属",
+      "location": "ZP1-A-2-8",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        295
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1071",
+      "id": 493,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680254,
+      "updatedAt": 1792402680254
+    },
+    {
+      "serialNo": "DH38YE3-921-022-001",
+      "name": "电缆手柄盖装入",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        296
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1072",
+      "id": 494,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680256,
+      "updatedAt": 1792402680256
+    },
+    {
+      "serialNo": "DH38YE3-921-023-001",
+      "name": "气缸体装入齿轮箱",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        297
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1073",
+      "id": 495,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680257,
+      "updatedAt": 1792402680257
+    },
+    {
+      "serialNo": "DH38YE3-921-024-001",
+      "name": "扭力确认",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        298
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1074",
+      "id": 496,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680259,
+      "updatedAt": 1792402680259
+    },
+    {
+      "serialNo": "DH38YE3-921-025-001",
+      "name": "手柄装入",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        223
+      ],
+      "stations": [
+        299
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1075",
+      "id": 497,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680261,
+      "updatedAt": 1792402680261
+    },
+    {
+      "serialNo": "DH38YE3-921-026-001",
+      "name": "齿轮箱装入",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        300
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1076",
+      "id": 498,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680263,
+      "updatedAt": 1792402680263
+    },
+    {
+      "serialNo": "DH38YE3-921-027-001",
+      "name": "尾盖装入",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        301
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1077",
+      "id": 499,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680264,
+      "updatedAt": 1792402680264
+    },
+    {
+      "serialNo": "DH38YE3-921-028-001",
+      "name": "齿轮箱部装",
+      "lineModels": [
+        "DH38YE3"
+      ],
+      "category": "PVC",
+      "location": "ZP1-A-1-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        302
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1078",
+      "id": 500,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680266,
+      "updatedAt": 1792402680266
+    },
+    {
+      "serialNo": "DH3628DA-921-001-001",
+      "name": "转子、轴承、防尘片压入工装",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        303
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1079",
+      "id": 501,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680268,
+      "updatedAt": 1792402680268
+    },
+    {
+      "serialNo": "DH3628DA-921-002-001",
+      "name": "油封压入齿轮箱",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        304
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1080",
+      "id": 502,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680270,
+      "updatedAt": 1792402680270
+    },
+    {
+      "serialNo": "DH3628DA-921-003-001",
+      "name": "轴承压入齿轮箱",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        305
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1081",
+      "id": 503,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680271,
+      "updatedAt": 1792402680271
+    },
+    {
+      "serialNo": "DH3628DA-921-004-001",
+      "name": "第二轴轴承压入工装",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        306
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1082",
+      "id": 504,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680273,
+      "updatedAt": 1792402680273
+    },
+    {
+      "serialNo": "DH3628DA-921-005-001",
+      "name": "齿轮压入第二轴工装",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        307
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1083",
+      "id": 505,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680275,
+      "updatedAt": 1792402680275
+    },
+    {
+      "serialNo": "DH3628DA-921-006-001",
+      "name": "含油轴承压入中间盖B工装",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        308
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1084",
+      "id": 506,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680277,
+      "updatedAt": 1792402680277
+    },
+    {
+      "serialNo": "DH3628DA-921-007-001",
+      "name": "转子压入齿轮箱",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        309
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1085",
+      "id": 507,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680279,
+      "updatedAt": 1792402680279
+    },
+    {
+      "serialNo": "DH3628DA-921-008-001",
+      "name": "转换干总成工装",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        310
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1086",
+      "id": 508,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680280,
+      "updatedAt": 1792402680280
+    },
+    {
+      "serialNo": "DH3628DA-921-009-001",
+      "name": "卡簧压入气缸",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        311
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1087",
+      "id": 509,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680282,
+      "updatedAt": 1792402680282
+    },
+    {
+      "serialNo": "DH3628DA-921-010-001",
+      "name": "卡簧压入气缸压头",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        312
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1088",
+      "id": 510,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680284,
+      "updatedAt": 1792402680284
+    },
+    {
+      "serialNo": "DH3628DA-921-011-001",
+      "name": "第二齿轮卡簧压入",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        313
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1089",
+      "id": 511,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680287,
+      "updatedAt": 1792402680287
+    },
+    {
+      "serialNo": "DH3628DA-921-012-001",
+      "name": "第二齿轮卡簧压入压头",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        224
+      ],
+      "stations": [
+        314
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1090",
+      "id": 512,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680288,
+      "updatedAt": 1792402680288
+    },
+    {
+      "serialNo": "DH3628DA-921-013-001",
+      "name": "第二齿轮卡簧压入导向套",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        315
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1091",
+      "id": 513,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680291,
+      "updatedAt": 1792402680291
+    },
+    {
+      "serialNo": "DH3628DA-921-014-001",
+      "name": "油封压入气缸",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-2",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        316
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1092",
+      "id": 514,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680293,
+      "updatedAt": 1792402680293
+    },
+    {
+      "serialNo": "DH3628DA-921-015-001",
+      "name": "第二齿轮与齿轮箱部装工装",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        317
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1093",
+      "id": 515,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680294,
+      "updatedAt": 1792402680294
+    },
+    {
+      "serialNo": "DH3628DA-921-016-001",
+      "name": "齿轮压入第二轴工装压头",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3628DC",
+        "DH1826DA",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-1",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        318
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1094",
+      "id": 516,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680296,
+      "updatedAt": 1792402680296
+    },
+    {
+      "serialNo": "DH3628DA-921-017-001",
+      "name": "活动夹卡簧压入压头",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH1826DA",
+        "DH3646DC",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-3",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        319
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1095",
+      "id": 517,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680298,
+      "updatedAt": 1792402680298
+    },
+    {
+      "serialNo": "DH3628DA-921-018-001",
+      "name": "活动夹卡簧压入导向套",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH1826DA",
+        "DH3646DC",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-3",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        320
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1096",
+      "id": 518,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680300,
+      "updatedAt": 1792402680300
+    },
+    {
+      "serialNo": "DH3628DA-921-019-001",
+      "name": "配重块总成压入中间盖",
+      "lineModels": [
+        "DH3628DA",
+        "DH3628DB",
+        "DH3646DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-3",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        321
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1097",
+      "id": 519,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680301,
+      "updatedAt": 1792402680301
+    },
+    {
+      "serialNo": "DH3628DC-921-001-001",
+      "name": "锁环装入钻头支架",
+      "lineModels": [
+        "DH3646DC",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-3",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        322
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1098",
+      "id": 520,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680303,
+      "updatedAt": 1792402680303
+    },
+    {
+      "serialNo": "DH3628DC-921-002-001",
+      "name": "轴用弹性挡圈压入钻头支架压头",
+      "lineModels": [
+        "DH3646DC",
+        "DH1826DC"
+      ],
+      "category": "金属",
+      "location": "ZP1-B-2-3",
+      "remark": "",
+      "lines": [
+        225
+      ],
+      "stations": [
+        323
+      ],
+      "importBatch": "bmvf29zbn-j0yzp",
+      "code": "1099",
+      "id": 521,
+      "status": "stocked",
+      "totalOutCount": 0,
+      "totalReturnCount": 0,
+      "repairCount": 0,
+      "createdAt": 1792402680305,
+      "updatedAt": 1792402680305
+    }
+  ],
+  "fixTransactions": [],
+  "lines": [
+    {
+      "name": "1",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402363829,
+      "id": 15
+    },
+    {
+      "name": "2",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402363832,
+      "id": 16
+    },
+    {
+      "name": "3",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402521192,
+      "id": 221
+    },
+    {
+      "name": "4",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402521196,
+      "id": 222
+    },
+    {
+      "name": "5",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402521199,
+      "id": 223
+    },
+    {
+      "name": "6",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402521203,
+      "id": 224
+    },
+    {
+      "name": "7",
+      "type": "linear",
+      "remark": "导入自动建档",
+      "createdAt": 1792402521207,
+      "id": 225
+    }
+  ],
+  "productions": [
+    {
+      "name": "DH40MC",
+      "order": null,
+      "createdAt": 1792377254336,
+      "remark": "自夹具自动补登",
+      "id": 9
+    },
+    {
+      "name": "DH40SC",
+      "order": null,
+      "createdAt": 1792377254338,
+      "remark": "自夹具自动补登",
+      "id": 10
+    },
+    {
+      "name": "KH540",
+      "order": null,
+      "createdAt": 1792377254340,
+      "remark": "自夹具自动补登",
+      "id": 11
+    },
+    {
+      "name": "DH38YE3",
+      "order": null,
+      "createdAt": 1792402724963,
+      "remark": "自夹具自动补登",
+      "id": 522
+    },
+    {
+      "name": "DH1826DA",
+      "order": null,
+      "createdAt": 1792402724970,
+      "remark": "自夹具自动补登",
+      "id": 523
+    },
+    {
+      "name": "DH1826DC",
+      "order": null,
+      "createdAt": 1792402724975,
+      "remark": "自夹具自动补登",
+      "id": 524
+    },
+    {
+      "name": "DH3628DA",
+      "order": null,
+      "createdAt": 1792402724980,
+      "remark": "自夹具自动补登",
+      "id": 525
+    },
+    {
+      "name": "DH3628DB",
+      "order": null,
+      "createdAt": 1792402724985,
+      "remark": "自夹具自动补登",
+      "id": 526
+    },
+    {
+      "name": "DH3628DC",
+      "order": null,
+      "createdAt": 1792402724989,
+      "remark": "自夹具自动补登",
+      "id": 527
+    },
+    {
+      "name": "DH3646DC",
+      "order": null,
+      "createdAt": 1792402724992,
+      "remark": "自夹具自动补登",
+      "id": 528
+    }
+  ],
+  "stations": [
+    {
+      "lineId": 15,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363848,
+      "id": 22
+    },
+    {
+      "lineId": 15,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363851,
+      "id": 23
+    },
+    {
+      "lineId": 15,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363853,
+      "id": 24
+    },
+    {
+      "lineId": 15,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363855,
+      "id": 25
+    },
+    {
+      "lineId": 15,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363858,
+      "id": 26
+    },
+    {
+      "lineId": 15,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363860,
+      "id": 27
+    },
+    {
+      "lineId": 15,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363862,
+      "id": 28
+    },
+    {
+      "lineId": 15,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363864,
+      "id": 29
+    },
+    {
+      "lineId": 15,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363865,
+      "id": 30
+    },
+    {
+      "lineId": 15,
+      "name": "10",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363866,
+      "id": 31
+    },
+    {
+      "lineId": 15,
+      "name": "11",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363867,
+      "id": 32
+    },
+    {
+      "lineId": 15,
+      "name": "12",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363869,
+      "id": 33
+    },
+    {
+      "lineId": 15,
+      "name": "13",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363870,
+      "id": 34
+    },
+    {
+      "lineId": 15,
+      "name": "14",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363871,
+      "id": 35
+    },
+    {
+      "lineId": 15,
+      "name": "15",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363872,
+      "id": 36
+    },
+    {
+      "lineId": 16,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363875,
+      "id": 37
+    },
+    {
+      "lineId": 16,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363876,
+      "id": 38
+    },
+    {
+      "lineId": 16,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363877,
+      "id": 39
+    },
+    {
+      "lineId": 16,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363878,
+      "id": 40
+    },
+    {
+      "lineId": 16,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363879,
+      "id": 41
+    },
+    {
+      "lineId": 16,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363880,
+      "id": 42
+    },
+    {
+      "lineId": 16,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363881,
+      "id": 43
+    },
+    {
+      "lineId": 16,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363882,
+      "id": 44
+    },
+    {
+      "lineId": 16,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363883,
+      "id": 45
+    },
+    {
+      "lineId": 16,
+      "name": "10",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363884,
+      "id": 46
+    },
+    {
+      "lineId": 16,
+      "name": "11",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363885,
+      "id": 47
+    },
+    {
+      "lineId": 16,
+      "name": "12",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363886,
+      "id": 48
+    },
+    {
+      "lineId": 16,
+      "name": "13",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363887,
+      "id": 49
+    },
+    {
+      "lineId": 16,
+      "name": "14",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402363888,
+      "id": 50
+    },
+    {
+      "lineId": 221,
+      "name": "15",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521283,
+      "id": 255
+    },
+    {
+      "lineId": 221,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521285,
+      "id": 256
+    },
+    {
+      "lineId": 221,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521287,
+      "id": 257
+    },
+    {
+      "lineId": 221,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521288,
+      "id": 258
+    },
+    {
+      "lineId": 221,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521290,
+      "id": 259
+    },
+    {
+      "lineId": 221,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521292,
+      "id": 260
+    },
+    {
+      "lineId": 221,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521294,
+      "id": 261
+    },
+    {
+      "lineId": 221,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521295,
+      "id": 262
+    },
+    {
+      "lineId": 221,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521297,
+      "id": 263
+    },
+    {
+      "lineId": 221,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521299,
+      "id": 264
+    },
+    {
+      "lineId": 221,
+      "name": "10",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521301,
+      "id": 265
+    },
+    {
+      "lineId": 221,
+      "name": "11",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521303,
+      "id": 266
+    },
+    {
+      "lineId": 221,
+      "name": "12",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521304,
+      "id": 267
+    },
+    {
+      "lineId": 221,
+      "name": "13",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521306,
+      "id": 268
+    },
+    {
+      "lineId": 221,
+      "name": "14",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521308,
+      "id": 269
+    },
+    {
+      "lineId": 222,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521309,
+      "id": 270
+    },
+    {
+      "lineId": 222,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521311,
+      "id": 271
+    },
+    {
+      "lineId": 222,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521313,
+      "id": 272
+    },
+    {
+      "lineId": 222,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521314,
+      "id": 273
+    },
+    {
+      "lineId": 222,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521316,
+      "id": 274
+    },
+    {
+      "lineId": 222,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521317,
+      "id": 275
+    },
+    {
+      "lineId": 222,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521319,
+      "id": 276
+    },
+    {
+      "lineId": 222,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521320,
+      "id": 277
+    },
+    {
+      "lineId": 222,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521322,
+      "id": 278
+    },
+    {
+      "lineId": 222,
+      "name": "10",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521324,
+      "id": 279
+    },
+    {
+      "lineId": 222,
+      "name": "11",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521325,
+      "id": 280
+    },
+    {
+      "lineId": 222,
+      "name": "12",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521327,
+      "id": 281
+    },
+    {
+      "lineId": 222,
+      "name": "13",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521329,
+      "id": 282
+    },
+    {
+      "lineId": 222,
+      "name": "14",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521330,
+      "id": 283
+    },
+    {
+      "lineId": 222,
+      "name": "15",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521331,
+      "id": 284
+    },
+    {
+      "lineId": 223,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521333,
+      "id": 285
+    },
+    {
+      "lineId": 223,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521335,
+      "id": 286
+    },
+    {
+      "lineId": 223,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521337,
+      "id": 287
+    },
+    {
+      "lineId": 223,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521338,
+      "id": 288
+    },
+    {
+      "lineId": 223,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521340,
+      "id": 289
+    },
+    {
+      "lineId": 223,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521341,
+      "id": 290
+    },
+    {
+      "lineId": 223,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521342,
+      "id": 291
+    },
+    {
+      "lineId": 223,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521345,
+      "id": 292
+    },
+    {
+      "lineId": 223,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521346,
+      "id": 293
+    },
+    {
+      "lineId": 223,
+      "name": "10",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521348,
+      "id": 294
+    },
+    {
+      "lineId": 223,
+      "name": "11",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521350,
+      "id": 295
+    },
+    {
+      "lineId": 223,
+      "name": "12",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521351,
+      "id": 296
+    },
+    {
+      "lineId": 223,
+      "name": "13",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521353,
+      "id": 297
+    },
+    {
+      "lineId": 223,
+      "name": "14",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521355,
+      "id": 298
+    },
+    {
+      "lineId": 223,
+      "name": "15",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521357,
+      "id": 299
+    },
+    {
+      "lineId": 224,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521358,
+      "id": 300
+    },
+    {
+      "lineId": 224,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521360,
+      "id": 301
+    },
+    {
+      "lineId": 224,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521362,
+      "id": 302
+    },
+    {
+      "lineId": 224,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521364,
+      "id": 303
+    },
+    {
+      "lineId": 224,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521365,
+      "id": 304
+    },
+    {
+      "lineId": 224,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521367,
+      "id": 305
+    },
+    {
+      "lineId": 224,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521369,
+      "id": 306
+    },
+    {
+      "lineId": 224,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521371,
+      "id": 307
+    },
+    {
+      "lineId": 224,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521372,
+      "id": 308
+    },
+    {
+      "lineId": 224,
+      "name": "10",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521374,
+      "id": 309
+    },
+    {
+      "lineId": 224,
+      "name": "11",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521376,
+      "id": 310
+    },
+    {
+      "lineId": 224,
+      "name": "12",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521378,
+      "id": 311
+    },
+    {
+      "lineId": 224,
+      "name": "13",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521380,
+      "id": 312
+    },
+    {
+      "lineId": 224,
+      "name": "14",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521382,
+      "id": 313
+    },
+    {
+      "lineId": 224,
+      "name": "15",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521383,
+      "id": 314
+    },
+    {
+      "lineId": 225,
+      "name": "1",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521385,
+      "id": 315
+    },
+    {
+      "lineId": 225,
+      "name": "2",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521387,
+      "id": 316
+    },
+    {
+      "lineId": 225,
+      "name": "3",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521388,
+      "id": 317
+    },
+    {
+      "lineId": 225,
+      "name": "4",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521391,
+      "id": 318
+    },
+    {
+      "lineId": 225,
+      "name": "5",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521393,
+      "id": 319
+    },
+    {
+      "lineId": 225,
+      "name": "6",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521395,
+      "id": 320
+    },
+    {
+      "lineId": 225,
+      "name": "7",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521398,
+      "id": 321
+    },
+    {
+      "lineId": 225,
+      "name": "8",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521399,
+      "id": 322
+    },
+    {
+      "lineId": 225,
+      "name": "9",
+      "seq": null,
+      "remark": "导入自动建档",
+      "createdAt": 1792402521401,
+      "id": 323
+    }
+  ]
+}

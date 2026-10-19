@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v4.5.0 — 工装夹具管理程序数据层
+ * db.js v4.5.1 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '4.5.0';
+  const APP_VERSION = '4.5.1';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */

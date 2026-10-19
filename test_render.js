@@ -822,6 +822,29 @@ ok('整份表全部被拒时给出原因明细（BUG-007）',
 ok('confirmImportPlan 默认跳过重复（mode !== \'all\'）',
   appJs.includes("const skipDup = mode !== 'all';"));
 
+/* ---------- 17. 产线名归并与撤销回收（v4.5.1） ---------- */
+section('17. 产线名归并 / 撤销回收结构项');
+ok('存在产线名归一化函数 normalizeLineName',
+  appJs.includes('function normalizeLineName('));
+ok('归一化去掉 # 与空白（1# → 1）',
+  appJs.includes('/[#＃\\s]+/g'));
+ok('buildImportPlan 内建立归一化别名表 normToLine',
+  appJs.includes('const normToLine = new Map();'));
+ok('buildImportPlan 输出归并提示 plan._lineHints',
+  appJs.includes('plan._lineHints = Array.from(lineHints.entries())'));
+ok('预览顶部展示自动归并横幅',
+  appJs.includes('已自动归并<b>同名产线</b>'));
+ok('confirmImportPlan 记录本批新建的产线 / 工位 id',
+  appJs.includes('const createdLineIds = [];') && appJs.includes('const createdStationIds = [];'));
+ok('本批新建结构项挂在 __importCreatedByBatch',
+  appJs.includes('window.__importCreatedByBatch[batchId] = { lineIds: createdLineIds.slice(), stationIds: createdStationIds.slice() }'));
+ok('存在结构回收纯函数 planStructureRecycle',
+  appJs.includes('function planStructureRecycle(created, fixtures, stations)'));
+ok('撤销导入调用结构回收（BUG-011）',
+  appJs.includes('planStructureRecycle(created, state.fixtures || [], state.stations || [])'));
+ok('撤销结果提示回收数量',
+  appJs.includes('并回收自动补建的'));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

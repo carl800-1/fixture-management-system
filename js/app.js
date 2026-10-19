@@ -111,6 +111,17 @@
   function lineModelCount(f) {
     return (Array.isArray(f.lineModels) ? f.lineModels : []).filter((x) => String(x).trim() !== '').length;
   }
+  /* 产线名归一化：**只用于判断「是不是同一条产线」**，绝不改写用户填写的原值。
+   * 去掉 # / ＃ / 全部空白，全角字符转半角，再统一小写 —— 「1#」「1 」「１」「1　」都归到「1」。
+   * 背景（BUG-010）：台账里 1 和 1# 混写时，导入会按字面各补建一条线，
+   * 夹具被拆到两条同义产线上，用户在「产线使用」里选哪条都看不全。
+   * 注意：「3号线」与「3」归一化后不同（后缀属于真实命名差异），不会被误并。 */
+  function normalizeLineName(name) {
+    return String(name == null ? '' : name)
+      .replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      .replace(/[#＃\s]+/g, '')
+      .toLowerCase();
+  }
 
   /* ---------------- 关联字段派生显示（不冗余存名，一律从 id 推导） ---------------- */
   /* 产线名列表：fixtures.lines([lineId]) → lines.name */
@@ -381,6 +392,13 @@
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
+    {
+      version: '4.5.1', date: '2026-10-19', items: [
+        '【修复】导入时<b>产线名只按字面比对</b>，「1#」与「1」被补建成两条线，夹具被拆到两条同义产线上 —— 用户在「产线使用」里选哪条都看不到全部（BUG-010）。现在导入按「去 # / 去空格 / 全角转半角」归一化比对：<b>库内已有名称优先，其次文件内首个写法</b>，「1#」「1 」「１」都落到同一条线，预览顶部会明示「已自动归并：1# → 1（N 行）」',
+        '【修复】「撤销本次导入」以前<b>只删夹具、不回收自动补建的产线与工位</b>，每撤销一次就留下一整套「有工位、0 夹具」的空壳线，产线下拉里越积越多（BUG-011）。现在撤销时按「先工位、后产线」回收本批新建且已无人引用的结构项，结果提示会写明回收了 N 条产线 / M 个工位',
+        '【说明】归并<b>只影响落库用哪个名称</b>，不改写你的表格；「3号线」与「3」因后缀不同不会被误并，确需两条线请用可区分的名称（如「1号线」「1号备用线」）'
+      ]
+    },
     {
       version: '4.5.0', date: '2026-10-19', items: [
         '【修复】「下载模板」与「导出CSV」两个文件<b>列结构不一致</b>（导出多「序号 / 状态 / 累计出库 / 累计回库 / 维修次数」、机种合并成一格、少 7 列机种位）⇒ 用户拿导出表改完回灌时常整列被忽略。现在两者<b>共用同一份 22 列定义（FIX_IMPORT_HEADERS）与同一个 CSV 生成函数</b>，除模板多几行示例外逐列同构，导出文件改完可直接导入',
@@ -1527,6 +1545,25 @@
 
     const linesByName = new Map((c.lines || []).map((l) => [l.name, l]));
     const lineIdToName = new Map((c.lines || []).map((l) => [l.id, l.name]));
+    /* 产线名归并表（BUG-010）：归一化名 -> 正式名。库内已有名称优先，其次本次文件里首个出现的写法。
+     * 只影响「落库用哪个名字」，不改动用户文件；归并结果会在预览顶部明示。 */
+    const normToLine = new Map();
+    (c.lines || []).forEach((l) => {
+      const k = normalizeLineName(l.name);
+      if (k && !normToLine.has(k)) normToLine.set(k, l.name);
+    });
+    const lineHints = new Map();   // 原文写法 -> { to, rows: Set<行号> }
+    const remapLineName = (n, rowNo) => {
+      const k = normalizeLineName(n);
+      if (!k) return n;
+      if (!normToLine.has(k)) { normToLine.set(k, n); return n; }
+      const target = normToLine.get(k);
+      if (target === n) return n;
+      const h = lineHints.get(n) || { to: target, rows: new Set() };
+      h.rows.add(rowNo);
+      lineHints.set(n, h);
+      return target;
+    };
     // 工位键 = 产线名 + \u0000 + 工位名（工位从属于产线）
     const stationByKey = new Map();
     (c.stations || []).forEach((s) => {
@@ -1550,6 +1587,24 @@
       const parsed = parseImportRow(row, idx);
       if (!parsed.ok) { skipped.push({ row: r + 1, reason: parsed.reason }); continue; }
       const f = parsed.fixture;
+
+      /* 产线名归并（BUG-010）：把「1#」「1 」这类同义写法并到同一条产线上，
+       * 归并后同一产线的工位合并去重（原来 1#：2 号工位 + 1：3 号工位 ⇒ 1：2 号工位、3 号工位）。 */
+      {
+        const pairMap = new Map();   // 归并后产线名 -> Set(工位名)
+        (f.lineNames || []).forEach((n) => {
+          const to = remapLineName(n, r + 1);
+          if (!pairMap.has(to)) pairMap.set(to, new Set());
+        });
+        (f.linePairs || []).forEach((pair) => {
+          const to = remapLineName(pair.lineName, r + 1);
+          if (!pairMap.has(to)) pairMap.set(to, new Set());
+          pair.stationNames.forEach((sn) => pairMap.get(to).add(sn));
+        });
+        f.lineNames = Array.from(pairMap.keys());
+        f.linePairs = Array.from(pairMap.entries()).map(([lineName, set]) => ({ lineName, stationNames: Array.from(set) }));
+        f.stationNames = Array.from(new Set(f.linePairs.flatMap((p) => p.stationNames)));
+      }
 
       // 产线 / 工位按名称引用：未建档的记入「待自动补建」，不再整行跳过
       if (!f.lineNames.length) { skipped.push({ row: r + 1, reason: '产线为空' }); continue; }
@@ -1601,6 +1656,8 @@
     // 把「待自动补建」清单挂在 plan 上，供预览展示与落库时使用
     plan._autoLines = Array.from(autoLines.keys());
     plan._autoStations = Array.from(autoStations.values());
+    // 归并了哪些写法（预览顶部明示，避免用户以为文件写错了）
+    plan._lineHints = Array.from(lineHints.entries()).map(([from, v]) => ({ from, to: v.to, rows: v.rows.size }));
     plan._dupCount = plan.filter((p) => p.isDup).length;
     // 每行逐条记录缺少的产线 / 工位（供跳过 / 新建对话框使用）
     plan._missing = plan.map((p) => {
@@ -1732,6 +1789,13 @@
     const autoStations = Array.isArray(plan._autoStations) ? plan._autoStations : [];
     const dupCount = plan._dupCount || 0;
     const newCount = plan.length - dupCount;
+    const lineHints = Array.isArray(plan._lineHints) ? plan._lineHints : [];
+    const aliasBanner = lineHints.length ? `
+      <div class="tip" style="margin-bottom:10px;border-color:#5b8def;background:#eef4ff;color:#1e4b9c;">
+        🔗 已自动归并<b>同名产线</b>：${lineHints.map((h) => `「${esc(h.from)}」→「${esc(h.to)}」（${h.rows} 行）`).join('、')}
+        <br>这些写法只差 <b>#</b> / 空格 / 全角半角，按同一条产线处理，避免把夹具拆到两条同义线上。
+        如需分别建档，请改成能区分的名称（如「1号线」「1号备用线」）后再导入。
+      </div>` : '';
     const dupBanner = dupCount ? `
       <div class="tip" style="margin-bottom:10px;border-color:#e0b34d;background:#fff8e6;color:#8a5a00;">
         ⚠️ 本次 <b>${plan.length}</b> 行中，有 <b>${dupCount}</b> 行与库内已有记录<b>完全一致</b>
@@ -1739,6 +1803,7 @@
         若这是同一份表重复导入，请选「跳过重复」；若确实又增加了实物（同库位放多套同号），请选「全部导入」。
       </div>` : '';
     const body = `
+      ${aliasBanner}
       ${dupBanner}
       <div class="tip" style="margin-bottom:10px;">
         来源：<b>${esc(sourceName)}</b> ｜ 待导入 <b>${plan.length}</b> 条${skipped.length ? ` ｜ 跳过 <b>${skipped.length}</b> 条` : ''}${(autoLines.length || autoStations.length) ? ` ｜ 自动补建 <b>${autoLines.length}</b> 产线 / <b>${autoStations.length}</b> 工位` : ''}
@@ -1802,6 +1867,8 @@
 
     /* ① 只对「真正要落库」的行补建产线 / 工位：被跳过的不建，避免留下空壳字典项 */
     const lineIdByName = new Map((state.lines || []).map((l) => [l.name, l.id]));
+    const createdLineIds = [];      // 本批新建的产线，撤销时回收（BUG-011）
+    const createdStationIds = [];   // 本批新建的工位，撤销时回收
     const needLines = [];
     effective.forEach((p) => (p.fixture.lineNames || []).forEach((n) => {
       if (!lineIdByName.has(n) && !needLines.includes(n)) needLines.push(n);
@@ -1809,6 +1876,7 @@
     for (const name of needLines) {
       const id = await DB.add('lines', { name, type: 'linear', remark: '导入自动建档', createdAt: Date.now() });
       lineIdByName.set(name, id);
+      createdLineIds.push(id);
     }
     const lineIdToName = new Map((state.lines || []).map((l) => [l.id, l.name]));
     lineIdByName.forEach((id, name) => lineIdToName.set(id, name));
@@ -1827,10 +1895,15 @@
       if (stIdByKey.has(key)) continue;
       const id = await DB.add('stations', { lineId, name: s.name, seq: null, remark: '导入自动建档', createdAt: Date.now() });
       stIdByKey.set(key, id);
+      createdStationIds.push(id);
     }
 
     /* ② 逐行落库夹具；打批次号 importBatch，供「撤销本次导入」精确回滚这一批 */
     const batchId = 'b' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    /* 记录本批新建的结构项 —— 撤销时若已无人引用就一并回收（BUG-011：
+     * 以前只删夹具，每撤销一次就留下一整套「有工位、0 夹具」的空壳产线）。 */
+    window.__importCreatedByBatch = window.__importCreatedByBatch || {};
+    window.__importCreatedByBatch[batchId] = { lineIds: createdLineIds.slice(), stationIds: createdStationIds.slice() };
     let added = 0, failed = 0;
     for (const p of effective) {
       try {
@@ -1888,7 +1961,29 @@
     openModal('导入结果', body);
   }
 
-  /* 撤销本次导入：按批次号删除本批记录（连带清理其流水） */
+  /* 撤销导入时该回收哪些「本批自动补建」的结构项（纯函数，便于测试）。
+   * 规则：先工位（撤销后已无任何夹具引用），再产线（既无夹具、也无**剩余**工位引用）。
+   * 顺序不能颠倒 —— 若先判产线，它必然还被这批工位引用着，一条也回收不掉。
+   * created = { lineIds:[], stationIds:[] }，由 confirmImportPlan 记录（BUG-011）。 */
+  function planStructureRecycle(created, fixtures, stations) {
+    const usedSt = new Set();
+    (fixtures || []).forEach((f) => (f.stations || []).forEach((s) => usedSt.add(Number(s))));
+    const createdSt = ((created && created.stationIds) || []).map(Number);
+    const stationIds = createdSt.filter((sid) => !usedSt.has(sid));
+
+    const goneSt = new Set(stationIds);
+    const remainSt = (stations || []).filter((s) => !goneSt.has(Number(s.id)));
+    const remainLineIds = new Set(remainSt.map((s) => Number(s.lineId)));
+
+    const usedLine = new Set();
+    (fixtures || []).forEach((f) => (f.lines || []).forEach((l) => usedLine.add(Number(l))));
+    const createdLine = ((created && created.lineIds) || []).map(Number);
+    const lineIds = createdLine.filter((lid) => !usedLine.has(lid) && !remainLineIds.has(lid));
+    return { stationIds, lineIds };
+  }
+
+  /* 撤销本次导入：按批次号删除本批记录（连带清理其流水），
+   * 并回收本批「自动补建」且撤销后已无人引用的产线 / 工位（BUG-011）。 */
   window.undoFixtureImport = async function (batchId) {
     if (!batchId) return;
     const list = state.fixtures.filter((f) => f.importBatch === batchId);
@@ -1900,8 +1995,31 @@
     }
     closeModal();
     await reloadAll();
+    /* ③ 回收结构项：先工位（无夹具引用即删），再产线（无夹具、无工位引用即删）。
+     * 顺序不能反 —— 先删产线会留下孤儿工位；也不能只看 lineIds，
+     * 因为同一产线可能同时被别的批次或手工建档的夹具使用。 */
+    const created = (window.__importCreatedByBatch || {})[batchId];
+    let recycledLine = 0, recycledStation = 0;
+    if (created) {
+      try {
+        const rp = planStructureRecycle(created, state.fixtures || [], state.stations || []);
+        for (const sid of rp.stationIds) {
+          try { await DB.stationDel(sid); recycledStation++; } catch (e) { /* 已不存在则忽略 */ }
+        }
+        if (recycledStation) await reloadAll();
+        for (const lid of rp.lineIds) {
+          try { await DB.lineDel(lid); recycledLine++; } catch (e) { /* 已不存在则忽略 */ }
+        }
+        if (recycledLine) await reloadAll();
+      } catch (e) {
+        console.warn('回收本次导入新建的产线/工位失败', e);
+      }
+      delete window.__importCreatedByBatch[batchId];
+    }
     renderFixtures();
-    toast(fail ? `已撤销 ${ok} 条，${fail} 条失败` : `已撤销本次导入，删除 ${ok} 条`, fail ? 'warn' : 'ok');
+    const recycled = (recycledLine || recycledStation)
+      ? `，并回收自动补建的 ${recycledLine} 条产线 / ${recycledStation} 个工位` : '';
+    toast(fail ? `已撤销 ${ok} 条，${fail} 条失败${recycled}` : `已撤销本次导入，删除 ${ok} 条${recycled}`, fail ? 'warn' : 'ok');
   };
 
   /* 整份表都不可导入时的详细说明（BUG-007：原来只弹一句「没有可导入的有效数据行」，用户无法定位） */

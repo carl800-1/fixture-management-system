@@ -1007,6 +1007,70 @@ async function main() {
   ok('落盘：该夹具的流水被一并清除', dbDel.fixTransactions.filter((t) => t.fixtureId === delPre.id).length === 0,
     String(dbDel.fixTransactions.filter((t) => t.fixtureId === delPre.id).length));
 
+  /* ---------- 11.6 导入 → 撤销 → 回收自动补建结构（v4.5.1 BUG-011） ---------- */
+  section('11.6 撤销导入回收自动补建的产线 / 工位');
+  const dbImpBefore = readDb();
+  const impRun = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    window.showView('fixtures'); await sleep(200);
+    /* buildImportPlan 未挂 window，这里直接构造落库计划：
+       只验「补建结构 → 落库 → 撤销 → 回收」这条链路（解析/归并由 test_import 覆盖） */
+    window.__importPlan = [{
+      row: 2, isDup: false,
+      fixture: { serialNo: 'ZZ-IMP-001', name: '导入回收集合', lineModels: ['DH40MC'], category: '金属',
+        location: 'ZP1-U-9-9', remark: '', lineNames: ['E2E临时线'],
+        linePairs: [{ lineName: 'E2E临时线', stationNames: ['1号工位', '2号工位'] }] }
+    }];
+    await confirmImportPlan('all');
+    await sleep(700);
+    return { modalOpen: !$('#modalOverlay').hidden,
+             modalText: (($('#modalOverlay') || {}).textContent || '').replace(/\\s+/g, ' ').trim() };
+  })()`);
+  await sleep(400);
+  const dbImpAfter = readDb();
+  const impFixture = dbImpAfter.fixtures.find((f) => f.serialNo === 'ZZ-IMP-001') || null;
+  const impBatch = impFixture ? impFixture.importBatch : '';
+  const impLine = dbImpAfter.lines.find((l) => l.name === 'E2E临时线') || null;
+  ok('导入后新建了 1 条产线 / 2 个工位 / 1 套夹具',
+    dbImpAfter.lines.length === dbImpBefore.lines.length + 1
+    && dbImpAfter.stations.length === dbImpBefore.stations.length + 2
+    && dbImpAfter.fixtures.length === dbImpBefore.fixtures.length + 1,
+    JSON.stringify({ lines: [dbImpBefore.lines.length, dbImpAfter.lines.length],
+      stations: [dbImpBefore.stations.length, dbImpAfter.stations.length],
+      fixtures: [dbImpBefore.fixtures.length, dbImpAfter.fixtures.length] }));
+  ok('补建的工位都挂在该线体下',
+    !!impLine && dbImpAfter.stations.filter((s) => s.lineId === impLine.id).length === 2,
+    impLine ? JSON.stringify(dbImpAfter.stations.filter((s) => s.lineId === impLine.id)) : 'line=null');
+  ok('落库的夹具带批次号', !!impBatch, impBatch);
+  const impCreated = await wc.executeJavaScript(`(window.__importCreatedByBatch || {})[${JSON.stringify(impBatch)}] || null`);
+  ok('渲染层记录了本批新建的产线 / 工位 id',
+    !!impCreated && impCreated.lineIds.length === 1 && impCreated.stationIds.length === 2,
+    JSON.stringify(impCreated));
+
+  const impUndo = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const orig = window.confirm;
+    window.confirm = () => true;   // undoFixtureImport 走原生 confirm，E2E 里必须打桩
+    await window.undoFixtureImport(${JSON.stringify(impBatch)});
+    window.confirm = orig;
+    for (let i = 0; i < 40; i++) { await sleep(100); if ($('#modalOverlay').hidden) break; }
+    await sleep(600);
+    return { toast: (($('#toast') || {}).textContent || '') };
+  })()`);
+  await sleep(400);
+  const dbImpUndo = readDb();
+  ok('撤销后夹具已移除', !dbImpUndo.fixtures.some((f) => f.serialNo === 'ZZ-IMP-001'));
+  ok('撤销后自动补建的产线被回收', !dbImpUndo.lines.some((l) => l.name === 'E2E临时线'));
+  ok('撤销后产线 / 工位数量回到导入前',
+    dbImpUndo.lines.length === dbImpBefore.lines.length
+    && dbImpUndo.stations.length === dbImpBefore.stations.length,
+    JSON.stringify({ lines: [dbImpBefore.lines.length, dbImpUndo.lines.length],
+      stations: [dbImpBefore.stations.length, dbImpUndo.stations.length] }));
+  ok('撤销后没有留下孤儿工位（指向已删线体）',
+    !dbImpUndo.stations.some((s) => !dbImpUndo.lines.some((l) => l.id === s.lineId)),
+    String(dbImpUndo.stations.filter((s) => !dbImpUndo.lines.some((l) => l.id === s.lineId)).length));
+  ok('撤销提示写明回收了产线 / 工位', (impUndo.toast || '').includes('回收自动补建'), impUndo.toast);
+
   /* ---------- 12. 清空数据落盘 ---------- */
   section('12. 清空数据落盘验证与重启恢复');
   const clearRes = await wc.executeJavaScript(`(async () => {

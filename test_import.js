@@ -37,6 +37,8 @@ function slice(startMark, endMark) {
 const constSrc = slice('/* ---------------- 业务上限与格式约束', '/* 机种名称：展示 / 搜索 helpers */');
 // ①-b 关联字段派生（线体/工位 id → 名称，导出用）
 const relSrc = slice('/* ---------------- 关联字段派生显示', '/* 某产线下已选的工位');
+// ①-c 产线名归一化（v4.5.1：导入时把 1 / 1# 归并成同一条产线）
+const normSrc = slice('/* 产线名归一化：', '/* ---------------- 关联字段派生显示');
 // ② 夹具导入模块（FIX_IMPORT_HEADERS → 导入入口之前）
 const importSrc = slice('const FIX_IMPORT_HEADERS', '/* 导入入口');
 // ③ 产线导入模块（LINE_IMPORT_HEADERS → 落库函数之前；纯计划逻辑）
@@ -64,7 +66,7 @@ sandbox.global = sandbox;
 const vm = require('vm');
 const ctx = vm.createContext(sandbox);
 
-let moduleSrc = constSrc + '\n' + relSrc + '\n' + importSrc + '\n' + tmplSrc + '\n' + exportSrc + '\n' + lineImportSrc;
+let moduleSrc = constSrc + '\n' + normSrc + '\n' + relSrc + '\n' + importSrc + '\n' + tmplSrc + '\n' + exportSrc + '\n' + lineImportSrc;
 moduleSrc = moduleSrc.replace(/window\.__importPlan/g, '__importPlan')
   .replace(/window\.__lineImportPlan/g, '__lineImportPlan')
   .replace(/window\.showImportPreview/g, '__export_showImportPreview')
@@ -79,6 +81,7 @@ moduleSrc += `
               buildLineImportPlan,
               MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, isValidSerialNo, isValidLocation,
               MAX_CATEGORY, isValidCategory, CATEGORY_PRESETS,
+              normalizeLineName, planStructureRecycle,
               stationNamesOf, fixtureLinePairsForExport,
               _sigOfNames, _sigOfFixture,
               __export_confirmImportPlan, undoFixtureImport: window.undoFixtureImport, showImportFailure,
@@ -647,6 +650,68 @@ ok((p5.skipped || []).every((s) => /产线/.test(s.reason)), '原因指向「产
     && back.fixture.linePairs[1].lineName === 'L2 线',
     '回灌后 产线/工位层级 一致（不串线、不笛卡尔积）', back.fixture.linePairs);
   ok(back.fixture.remark === '备注,含逗号', '回灌后 备注 一致（引号转义可逆）', back.fixture.remark);
+
+  /* ---------- 9. 产线名归并（v4.5.1 BUG-010） ---------- */
+  section('[产线名归并 · BUG-010]');
+  ok(M.normalizeLineName('1#') === '1', '「1#」归一化为「1」', M.normalizeLineName('1#'));
+  ok(M.normalizeLineName(' 1 ') === '1', '去空格后归一化为「1」', M.normalizeLineName(' 1 '));
+  ok(M.normalizeLineName('１') === '1', '全角「１」归一化为「1」', M.normalizeLineName('１'));
+  ok(M.normalizeLineName('３号线') === '3号线', '全角数字转半角、「号线」后缀保留', M.normalizeLineName('３号线'));
+  ok(M.normalizeLineName('3号线') !== M.normalizeLineName('3'), '「3号线」与「3」不归并（后缀是真实命名差异）');
+
+  const mergeRows = [
+    ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '工位1', '备注'],
+    ['SN-M1', '归并测试A', 'M1', '金属', 'ZP1-U-1-1', '1#', '2号工位', ''],
+    ['SN-M2', '归并测试B', 'M1', '金属', 'ZP1-U-1-2', '1', '3号工位', ''],
+    ['SN-M3', '归并测试C', 'M1', '金属', 'ZP1-U-1-3', '1#', '4号工位', '']
+  ];
+  const mergePlan = M.buildImportPlan(mergeRows, { fixtures: [], lines: [{ id: 1, name: '1' }], stations: [] });
+  ok(mergePlan.ok === true, '归并场景能正常生成计划', mergePlan.error);
+  ok(mergePlan.plan.length === 3, '3 行全部进入计划', mergePlan.plan.length);
+  ok(mergePlan.plan.every((p) => p.fixture.lineNames.length === 1 && p.fixture.lineNames[0] === '1'),
+    '「1#」与「1」都归并到库内已有的「1」', mergePlan.plan.map((p) => p.fixture.lineNames));
+  ok(mergePlan.plan._lineHints.length === 1 && mergePlan.plan._lineHints[0].from === '1#'
+    && mergePlan.plan._lineHints[0].to === '1', '预览能拿到归并提示 1# → 1', mergePlan.plan._lineHints);
+  ok(mergePlan.plan._lineHints[0].rows === 2, '归并提示统计到 2 行', mergePlan.plan._lineHints[0].rows);
+  ok(mergePlan.plan._autoLines.length === 0, '归并后不再重复补建产线', mergePlan.plan._autoLines);
+
+  const oneRow = [
+    ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '工位1', '产线2', '工位2', '备注'],
+    ['SN-M4', '同行两条同义产线', 'M1', '金属', 'ZP1-U-1-4', '1', '1号工位', '1#', '1号工位 / 2号工位', '']
+  ];
+  const onePlan = M.buildImportPlan(oneRow, { fixtures: [], lines: [{ id: 1, name: '1' }], stations: [] });
+  ok(onePlan.ok === true && onePlan.plan[0].fixture.lineNames.length === 1,
+    '同一行里的 1 与 1# 合并成 1 条产线', onePlan.ok ? onePlan.plan[0].fixture.lineNames : onePlan.error);
+  ok(onePlan.plan[0].fixture.linePairs[0].stationNames.join('|') === '1号工位|2号工位',
+    '归并后工位合并去重', onePlan.plan[0].fixture.linePairs);
+
+  const firstWins = [
+    ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '工位1', '备注'],
+    ['SN-M5', '首现为准A', 'M1', '金属', 'ZP1-U-2-1', 'A#', '1号工位', ''],
+    ['SN-M6', '首现为准B', 'M1', '金属', 'ZP1-U-2-2', 'A', '2号工位', '']
+  ];
+  const fwPlan = M.buildImportPlan(firstWins, { fixtures: [], lines: [], stations: [] });
+  ok(fwPlan.plan.every((p) => p.fixture.lineNames[0] === 'A#'),
+    '库内无同名时按文件内首个写法「A#」统一', fwPlan.plan.map((p) => p.fixture.lineNames));
+  ok(fwPlan.plan._autoLines.length === 1 && fwPlan.plan._autoLines[0] === 'A#',
+    '只补建 1 条产线（不再同时建 A 与 A#）', fwPlan.plan._autoLines);
+
+  /* ---------- 10. 撤销导入的结构回收（v4.5.1 BUG-011） ---------- */
+  section('[撤销导入回收结构项 · BUG-011]');
+  const created = { lineIds: [90], stationIds: [901, 902] };
+  const allSt = [{ id: 901, lineId: 90, name: '1号工位' }, { id: 902, lineId: 90, name: '2号工位' }];
+  const rp0 = M.planStructureRecycle(created, [], allSt);
+  ok(rp0.stationIds.length === 2 && rp0.lineIds.length === 1,
+    '夹具全删后：2 个工位 + 1 条产线全部回收', rp0);
+  const rp1 = M.planStructureRecycle(created, [{ id: 1, stations: [901], lines: [90] }], allSt);
+  ok(rp1.stationIds.join('|') === '902', '仍被夹具引用的工位不回收', rp1.stationIds);
+  ok(rp1.lineIds.length === 0, '产线仍被夹具/工位引用时不回收', rp1.lineIds);
+  const rp2 = M.planStructureRecycle({ lineIds: [90], stationIds: [901] }, [],
+    [{ id: 901, lineId: 90 }, { id: 999, lineId: 90 }]);
+  ok(rp2.stationIds.join('|') === '901' && rp2.lineIds.length === 0,
+    '产线上还剩其它工位时不回收产线（避免造出孤儿工位）', rp2);
+  const rp3 = M.planStructureRecycle(null, [], []);
+  ok(rp3.stationIds.length === 0 && rp3.lineIds.length === 0, '没有批次记录时安全返回空', rp3);
 
   console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
   process.exit(fail ? 1 : 0);

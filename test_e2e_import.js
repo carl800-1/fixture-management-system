@@ -58,7 +58,9 @@ const csvSrc = slice('function parseCSV(text)', '/* ============================
 // 导入模块：业务上限常量 + 表头别名 + 解析/计划
 const importSrc = slice('const FIX_IMPORT_HEADERS', '/* 导入入口');
 const limitsSrc = slice('/* ---------------- 业务上限与格式约束', '/* 机种名称：展示 / 搜索 helpers */');
-const modSrc = [limitsSrc, importSrc, csvSrc, ';__export = { buildImportPlan, parseCSV };'].join('\n');
+// 产线名归一化（v4.5.1 BUG-010：导入时把 1 / 1# 归并成同一条产线，buildImportPlan 依赖）
+const normSrc = slice('/* 产线名归一化：', '/* ---------------- 关联字段派生显示');
+const modSrc = [limitsSrc, normSrc, importSrc, csvSrc, ';__export = { buildImportPlan, parseCSV };'].join('\n');
 
 const sandbox = {
   state: { fixtures: [], lines: [], stations: [], productions: [] },

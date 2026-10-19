@@ -8,8 +8,8 @@ build/
 *.exe
 
 # 运行时数据（本地 JSON 数据库，含业务数据，不入库）
+# 例外：fixture-data.json 自 v4.5.1 起随仓库一起分发（含产线/工位/机种/夹具台账，开箱即可看到真实数据）
 spms-data.json
-fixture-data.json
 *.json.bak
 
 # 日志
