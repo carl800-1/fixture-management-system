@@ -8,9 +8,9 @@
  *   - 全部视图可切换
  *   - v4 新增的关键全局函数已挂载
  *   - 打包模式数据在 exe 同目录落盘（dataDir = exeDir）
- *   - v4 业务链路：建产线 → 建工位 → 建档（含产线工位）→ 出库派生数量
+ *   - v5 业务链路：建线体 → 建档（关联产线）→ 建人员卡 → 刷卡出库（v5.1.0）
  *   - 建档强校验：零产线被拒
- *   - 落盘结构：无 products / stationFixtures / qrToken / quantity
+ *   - 落盘结构：无 stations / products / stationFixtures / qrToken / quantity
  *   - 无 console.error / 致命 stderr
  *
  * ── 指定被测 exe 的三种方式（优先级从高到低）──
@@ -310,9 +310,9 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     ok('品牌栏为程序名（v4.0.4 起不再带版本号）', info.brand.trim() === '工装夹具管理程序', info.brand);
     ok('页脚版本号 = v' + VERSION, info.foot.indexOf('v' + VERSION) >= 0, info.foot);
     const EX_VIEWS = ['dashboard', 'fixtures', 'outbound', 'return', 'location', 'records',
-      'query', 'prod', 'linequery', 'linecfg', 'data'];
+      'query', 'prod', 'linequery', 'linecfg', 'staff', 'data'];
     const missView = EX_VIEWS.filter((v) => !info.views.includes(v));
-    ok('11 个导航项齐备（按机种查询已并入机种管理）', info.navCount >= EX_VIEWS.length && missView.length === 0,
+    ok('12 个导航项齐备（v5.1.0 增加「人员卡库」）', info.navCount >= EX_VIEWS.length && missView.length === 0,
       'count=' + info.navCount + ' missing=' + missView.join(','));
     ok('CSS 已生效', info.bg !== 'rgba(0, 0, 0, 0)' && info.bg !== 'transparent', info.bg);
 
@@ -329,15 +329,22 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     /* ---- 4. 全局函数挂载 ---- */
     const fns = ['fixtureNew','fixtureEdit','fixtureOut','fixtureReturn','fixtureRepair',
       'fixtureRepairComplete','fixtureRetire','fixtureSearch','submitFixForm',
-      'fixFormLinePicked','fixFormStationPicked','fixFormAddStation','fixFormRemoveStation',
+      'fixFormLinePicked','fixFormAddLine','fixFormRemoveLine',
       'fixFormModelsInput','fixFormRemoveModel','fixFormCheckSerial','fixFormGotoLineCfg',
-      'lineCfgLineForm','lineCfgSaveLine','lineCfgPickLine','lineCfgStationForm','lineCfgSaveStation',
+      'lineCfgLineForm','lineCfgSaveLine','lineCfgPickLine',
       'lineCfgDelLine','lineCfgImport','lineQueryChangeLine','lineQueryChangeModel','lineQueryReset',
-      'openFixtureQR','printSingleLabel','batchPrintLabels','clearAllData','exportData'];
+      'openFixtureQR','printSingleLabel','batchPrintLabels','clearAllData','exportData',
+      'printLineQueryList','staffForm','submitStaffForm','staffDelConfirm','staffImport',
+      'downloadStaffTemplate','exportStaffCsv'];
     const missing = JSON.parse(await evaluate('JSON.stringify(' + JSON.stringify(fns) + '.filter(f => typeof window[f] !== "function"))'));
-    ok('v4 关键全局函数全部挂载（' + fns.length + ' 个）', missing.length === 0, missing.join(', '));
+    ok('v5 关键全局函数全部挂载（' + fns.length + ' 个）', missing.length === 0, missing.join(', '));
+    /* v5.0.0：工位相关的全局函数必须已不存在 */
+    const gone = ['fixFormStationPicked','fixFormAddStation','fixFormRemoveStation',
+      'lineCfgStationForm','lineCfgSaveStation','lineCfgDelStation','lineCfgStationEditFixtures'];
+    const leftover = JSON.parse(await evaluate('JSON.stringify(' + JSON.stringify(gone) + '.filter(f => typeof window[f] === "function"))'));
+    ok('v5：工位相关全局函数已全部移除（' + gone.length + ' 个）', leftover.length === 0, leftover.join(', '));
 
-    /* ---- 5. 建产线 + 工位 ---- */
+    /* ---- 5. 建线体（v5.0.0 起产线配置只有线体，没有工位） ---- */
     const setup = await evaluate(`(async () => {
       const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
       const $=(s)=>document.querySelector(s);
@@ -354,22 +361,17 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       log.push('lid='+lid);
       if(!lid) return JSON.stringify({step:'no-lid',log});
       window.lineCfgPickLine(lid); await sleep(400);
-      /* 新建工位 */
-      window.lineCfgStationForm(0); await sleep(300);
-      if (!$('#lc_st_name')) return JSON.stringify({step:'no-station-form',log});
-      $('#lc_st_name').value='冒烟工位A'; $('#lc_st_seq').value='10';
-      window.lineCfgSaveStation(0); await sleep(900);
-      /* 反查工位 id */
-      const sb=[...document.querySelectorAll('[onclick*="lineCfgDelStation("]')];
-      const sid = sb.length ? Number(sb[0].getAttribute('onclick').match(/lineCfgDelStation\\((\\d+)\\)/)[1]) : 0;
-      log.push('sid='+sid);
-      return JSON.stringify({ step:'ok', lid, sid, log });
+      /* 确认页面上已无工位入口 */
+      const hasStForm = !!document.querySelector('[onclick*="lineCfgStationForm("]');
+      const hasStWord = /工位/.test(($('#content')||{}).textContent||'');
+      return JSON.stringify({ step:'ok', lid, hasStForm, hasStWord, log });
     })()`);
     const sj = JSON.parse(setup);
     ok('新建线体成功（lineCfgSaveLine）', sj.step === 'ok', setup);
-    ok('新建工位成功（lineCfgSaveStation）', sj.step === 'ok' && !!sj.sid, setup);
+    ok('v5：产线配置页无工位表单入口', sj.hasStForm === false, String(sj.hasStForm));
+    ok('v5：产线配置页正文无「工位」字样', sj.hasStWord === false, String(sj.hasStWord));
     if (sj.step !== 'ok') throw new Error('产线配置阶段失败：' + setup);
-    const LID = sj.lid, SID = sj.sid;
+    const LID = sj.lid;
 
     /* ---- 6. 建档强校验：零产线被拒 ---- */
     const reject = await evaluate(`(async () => {
@@ -396,7 +398,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     ok('被拒时错误样式 err', /\berr\b/.test(rj.cls || ''), rj.cls);
     ok('被拒时表单未被关闭（可继续填）', rj.modalOpen === true, String(rj.modalOpen));
 
-    /* ---- 7. 正常建档：含产线 + 工位 ---- */
+    /* ---- 7. 正常建档：关联产线 ---- */
     const build = await evaluate(`(async () => {
       const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
       const $=(s)=>document.querySelector(s);
@@ -410,36 +412,36 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       /* 机种 */
       $('#fix_lm_text').value='冒烟机种X';
       window.fixFormModelsInput(); await sleep(300);
-      /* 产线（两级下拉：先选产线） */
+      /* 产线：选下拉 → 点「+ 添加」加入标签区 */
       const pick=$('#fix_line_pick');
       if(!pick) return JSON.stringify({step:'no-line-pick'});
-      pick.value='${LID}'; window.fixFormLinePicked(); await sleep(400);
-      /* 工位（选该产线下的工位 → 点「+ 添加」） */
-      const spick=$('#fix_st_pick');
-      if(!spick) return JSON.stringify({step:'no-st-pick'});
-      spick.value='${SID}'; window.fixFormStationPicked(); await sleep(200);
-      window.fixFormAddStation(); await sleep(400);
+      pick.value='${LID}'; window.fixFormLinePicked(); await sleep(300);
+      window.fixFormAddLine(); await sleep(400);
+      const hasStPick = !!$('#fix_st_pick');
       const cnt=$('#fix_ls_count')?$('#fix_ls_count').textContent:'';
       window.submitFixForm(); await sleep(1100);
       const t=$('#toast');
       const txt=(t&&!t.hidden)?t.textContent:'';
       const cards=[...document.querySelectorAll('.fixture-card')];
-      return JSON.stringify({ step:'ok', cnt, toast: txt,
+      return JSON.stringify({ step:'ok', cnt, hasStPick, toast: txt,
         cards: cards.length,
         hit: cards.some(c=>c.textContent.includes('冒烟测试夹具')) });
     })()`);
     const bj = JSON.parse(build);
-    ok('产线/工位已选入表单（计数文案）', /1\s*\/\s*5\s*条产线/.test(bj.cnt || ''), bj.cnt);
+    ok('v5：建档表单无工位选择控件（#fix_st_pick）', bj.hasStPick === false, String(bj.hasStPick));
+    ok('产线已选入表单（计数文案 1 / 5 条产线）', /1\s*\/\s*5\s*条产线/.test(bj.cnt || ''), bj.cnt);
     ok('建档成功（toast 提示）', /建档成功/.test(bj.toast || ''), build);
     ok('列表出现新夹具', bj.hit === true, build);
 
-    /* ---- 8. 落盘结构（exe 同目录 + v4 集合） ---- */
+    /* ---- 8. 落盘结构（exe 同目录 + v5 集合） ---- */
     await sleep(900);
     ok('打包模式数据在 exe 同目录落盘', fs.existsSync(DATA_FILE), DATA_FILE);
     if (fs.existsSync(DATA_FILE)) {
       const db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      ok('落盘含 lines / stations / productions',
-        Array.isArray(db.lines) && Array.isArray(db.stations) && Array.isArray(db.productions));
+      ok('落盘含 lines / productions',
+        Array.isArray(db.lines) && Array.isArray(db.productions));
+      ok('v5.1.0：落盘含 staffs（人员卡库）', Array.isArray(db.staffs), JSON.stringify(Object.keys(db)));
+      ok('v5：落盘无 stations 集合', db.stations === undefined, JSON.stringify(Object.keys(db)));
       ok('落盘无 products（v4 已移除）', db.products === undefined, JSON.stringify(Object.keys(db)));
       ok('落盘无 stationFixtures（v4 已废弃）', db.stationFixtures === undefined);
       ok('落盘无 qrToken（派生值不落库）', (db.fixtures || []).every((f) => f.qrToken === undefined));
@@ -447,14 +449,13 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       const f = (db.fixtures || []).find((x) => x.serialNo === 'SMOKE-921-001-001');
       ok('新夹具已写入 JSON', !!f, JSON.stringify((db.fixtures || []).map((x) => x.serialNo)));
       ok('序号为 4 位纯数字', f && /^\d{4}$/.test(f.code), f && f.code);
-      ok('夹具携带 lines 数组', f && Array.isArray(f.lines) && f.lines.length === 1, f && JSON.stringify(f.lines));
-      ok('夹具携带 stations 数组', f && Array.isArray(f.stations) && f.stations.length === 1, f && JSON.stringify(f.stations));
+      ok('夹具携带 lines 数组（1 条产线）', f && Array.isArray(f.lines) && f.lines.length === 1, f && JSON.stringify(f.lines));
+      ok('v5：夹具记录不带 stations 字段', f && f.stations === undefined, f && JSON.stringify(f.stations));
       ok('机种存名称数组', f && Array.isArray(f.lineModels) && f.lineModels.includes('冒烟机种X'), f && JSON.stringify(f.lineModels));
       ok('初始状态 stocked', f && f.status === 'stocked', f && f.status);
       ok('零产线那条未被写入（强校验生效）',
         !(db.fixtures || []).some((x) => x.serialNo === 'SMOKE-NOLINE-001'));
-      console.log('  夹具 ' + (db.fixtures || []).length + ' 套 · 产线 ' + (db.lines || []).length
-        + ' 条 · 工位 ' + (db.stations || []).length + ' 个');
+      console.log('  夹具 ' + (db.fixtures || []).length + ' 套 · 产线 ' + (db.lines || []).length + ' 条');
     }
 
     /* ---- 8.5 二维码内容 = 纯序号（无 SPMS1| 前缀） ---- */
@@ -483,15 +484,26 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     const derive = await evaluate(`(async () => {
       const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
       const $=(s)=>document.querySelector(s);
+      /* v5.1.0：出库改为刷卡 —— 先建两张卡（重复建卡会因卡号唯一被拒，忽略即可） */
+      await window.api.staffAdd({ cardNo:'SMOKE-BR-01', name:'冒烟领用人', dept:'车间', role:'borrower' }).catch(()=>{});
+      await window.api.staffAdd({ cardNo:'SMOKE-OP-01', name:'冒烟经办人', dept:'仓库', role:'operator' }).catch(()=>{});
+      /* 切到出库页会 reloadStaff，让渲染层拿到新卡（否则 findStaffLocal 查不到） */
+      window.showView('outbound'); await sleep(700);
       window.showView('fixtures'); await sleep(400);
       const card=[...document.querySelectorAll('.fixture-card')].find(c=>c.textContent.includes('冒烟测试夹具'));
       if(!card) return JSON.stringify({step:'no-card'});
       const outBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
       if(!outBtn) return JSON.stringify({step:'no-out-btn'});
       outBtn.click(); await sleep(500);
-      const op=$('#fix_out_op')||$('#out_operator');
-      if(!op) return JSON.stringify({step:'no-out-form'});
-      op.value='冒烟测试员';
+      if(!$('#swipe_dlg_operator')) return JSON.stringify({step:'no-swipe-form'});
+      /* 刷卡：读卡器 = 键盘 —— 写入卡号后派发 Enter */
+      const swipe=(sel,card)=>{ const el=$(sel); if(!el) return false;
+        el.focus(); el.value=card; el.dispatchEvent(new Event('input'));
+        el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+        return true; };
+      const sParty = swipe('#swipe_dlg_party','SMOKE-BR-01');
+      const sOp = swipe('#swipe_dlg_operator','SMOKE-OP-01');
+      if(!sParty || !sOp) return JSON.stringify({step:'no-swipe-field'});
       const locInput=$('#fix_out_loc')||$('#out_location');
       if(locInput && !locInput.value) locInput.value='ZP1-U-1-1';
       const okBtn=[...document.querySelectorAll('button')].find(b=>/确认出库/.test(b.textContent));

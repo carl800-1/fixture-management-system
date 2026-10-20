@@ -3,7 +3,7 @@
  * test_store.js — store.js 数据层功能测试（纯 Node，无需 Electron）v4.0.0
  * 运行：node test_store.js
  *
- * v4.0.0 覆盖：序号自动分配、实物编号（可重复）、产线/工位扁平关联强校验、
+ * v5.0.0 覆盖：序号自动分配、实物编号（可重复）、产线关联强校验（工位模型已移除）、
  *   出库冻结库位 / 回库可改库位、撤销接口、级联删除重写、机种字典保护与重命名写穿、
  *   派生数量、v3.0.x → v4.0.0 数据迁移。
  * ============================================================ */
@@ -34,16 +34,13 @@ function throws(fn, msgMatch) {
   }
 }
 
-/* 造一条合规的夹具入参（产线/工位先建好） */
+/* 造一条合规的夹具入参（产线先建好；v5.0.0 起无工位） */
 const lineA = store.add('lines', { name: '3 号线', type: 'linear' });
-const stA1 = store.add('stations', { lineId: lineA, name: '1号工位', seq: 10 });
-const stA2 = store.add('stations', { lineId: lineA, name: '2号工位', seq: 20 });
 const lineB = store.add('lines', { name: 'L2 U型线', type: 'u' });
-const stB1 = store.add('stations', { lineId: lineB, name: '1号工位', seq: 10 });
 function fix(extra) {
   return Object.assign({
     serialNo: 'DH40MC-921-001-001', name: '焊接夹具A', lineModels: ['DH40MC'],
-    lines: [lineA], stations: [stA1], location: 'ZP1-U-1-1', category: '焊接', remark: ''
+    lines: [lineA], location: 'ZP1-U-1-1', category: '焊接', remark: ''
   }, extra || {});
 }
 
@@ -65,14 +62,13 @@ const id2 = store.addFixture(fix({ serialNo: 'DH40MC-921-001-002', name: '冲压
 ok('第二个夹具编号顺延 1002', store.getAll('fixtures').find((f) => f.id === id2).code === '1002');
 ok('夹具总数=2', store.count('fixtures') === 2);
 
-section('1b. 建档强校验（v4.0.0 七条规则）');
+section('1b. 建档强校验（v5.0.0：产线 1~5 条，无工位）');
 ok('缺实物编号被拒绝', throws(() => store.addFixture(fix({ serialNo: '' })), '实物夹具编号'));
 ok('实物编号含竖线被拒绝', throws(() => store.addFixture(fix({ serialNo: 'A|B' })), '实物夹具编号'));
 ok('缺名称被拒绝', throws(() => store.addFixture(fix({ name: '' })), '夹具名称'));
 ok('产线为空被拒绝', throws(() => store.addFixture(fix({ lines: [] })), '至少选择 1 条产线'));
-ok('工位为空被拒绝', throws(() => store.addFixture(fix({ stations: [] })), '至少选择 1 个工位'));
 ok('产线超过 5 条被拒绝', throws(() => store.addFixture(fix({ lines: [1, 2, 3, 4, 5, 6] })), '最多关联 5 条产线'));
-ok('工位超过 10 个被拒绝', throws(() => store.addFixture(fix({ stations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] })), '最多安装 10 个工位'));
+ok('旧数据带 stations 字段会被静默丢弃（不报错）', (() => { const i = store.addFixture(fix({ code: '3901', serialNo: 'S-OLD-ST', lines: [lineA], stations: [7, 8] })); return store.getAll('fixtures').find((f) => f.id === i).stations === undefined; })());
 ok('机种超过 7 个被拒绝', throws(() => store.addFixture(fix({ lineModels: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] })), '最多 7 个'));
 ok('库位空被拒绝', throws(() => store.addFixture(fix({ location: '' })), '库位号需为 4 段式'));
 ok('库位非 4 段被拒绝', throws(() => store.addFixture(fix({ location: 'A1-03' })), '库位号需为 4 段式'));
@@ -205,49 +201,39 @@ ok('出库后 location 仍在（供回库预填）', store.getAll('fixtures').fi
 
 /* ---------- 8. 撤销接口与级联删除 ---------- */
 section('8. 撤销接口与级联删除（扁平化代价）');
-const idR = store.addFixture(fix({ code: '5001', serialNo: 'REV-1', lines: [lineA, lineB], stations: [stA1, stA2, stB1] }));
+const idR = store.addFixture(fix({ code: '5001', serialNo: 'REV-1', lines: [lineA, lineB] }));
 let fR = store.getAll('fixtures').find((f) => f.id === idR);
-ok('双产线三工位落库', fR.lines.length === 2 && fR.stations.length === 3, fR.lines + ' / ' + fR.stations);
+ok('双产线落库', fR.lines.length === 2, JSON.stringify(fR.lines));
 const afterRmLine = store.removeFixtureLine('5001', lineA);
-ok('撤销产线连带摘掉该产线工位', afterRmLine.lines === 1 && afterRmLine.stations === 1, JSON.stringify(afterRmLine));
+ok('撤销产线返回剩余条数 1', afterRmLine.lines === 1, JSON.stringify(afterRmLine));
 fR = store.getAll('fixtures').find((f) => f.id === idR);
-ok('剩余工位属于保留的产线', fR.stations.length === 1 && fR.stations[0] === stB1, JSON.stringify(fR.stations));
-ok('撤销单工位（产线保留）', store.removeFixtureStation('5001', stB1).stations === 0);
-fR = store.getAll('fixtures').find((f) => f.id === idR);
-ok('产线仍在（单条产线允许 0 工位）', fR.lines.length === 1 && fR.lines[0] === lineB, JSON.stringify(fR.lines));
+ok('剩余产线为被保留的那条', fR.lines.length === 1 && fR.lines[0] === lineB, JSON.stringify(fR.lines));
 ok('按归一化编号也能命中撤销', !throws(() => store.removeFixtureLine('5001', lineB)));
+fR = store.getAll('fixtures').find((f) => f.id === idR);
+ok('撤销后产线为空数组（不影响记录本身）', fR.lines.length === 0, JSON.stringify(fR.lines));
 ok('撤销不存在的夹具报错', throws(() => store.removeFixtureLine('9999', lineB), '夹具不存在'));
 
 // 批量撤销
-const idB1 = store.addFixture(fix({ code: '5002', serialNo: 'BAT-1', lines: [lineA], stations: [stA1] }));
-const idB2 = store.addFixture(fix({ code: '5003', serialNo: 'BAT-2', lines: [lineA], stations: [stA2] }));
+const idB1 = store.addFixture(fix({ code: '5002', serialNo: 'BAT-1', lines: [lineA] }));
+const idB2 = store.addFixture(fix({ code: '5003', serialNo: 'BAT-2', lines: [lineA] }));
 ok('批量撤销返回命中数 2', store.removeFixtureLinesByBatch(['5002', '5003'], lineA) === 2);
-ok('批量撤销后产线已摘除', store.getAll('fixtures').find((f) => f.id === idB1).lines.length === 0);
-ok('批量撤销后工位已摘除', store.getAll('fixtures').find((f) => f.id === idB2).stations.length === 0);
+ok('批量撤销后产线已摘除（1）', store.getAll('fixtures').find((f) => f.id === idB1).lines.length === 0);
+ok('批量撤销后产线已摘除（2）', store.getAll('fixtures').find((f) => f.id === idB2).lines.length === 0);
 
 // 级联删除线体
 const lineC = store.add('lines', { name: '临时线', type: 'linear' });
-const stC1 = store.add('stations', { lineId: lineC, name: 'C1', seq: 10 });
-const idC = store.addFixture(fix({ code: '5004', serialNo: 'CAS-1', lines: [lineA, lineC], stations: [stA1, stC1] }));
+const idC = store.addFixture(fix({ code: '5004', serialNo: 'CAS-1', lines: [lineA, lineC] }));
 store.delLine(lineC);
 const fC = store.getAll('fixtures').find((f) => f.id === idC);
-ok('删线体后其工位记录消失', !store.getAll('stations').some((s) => s.id === stC1));
 ok('删线体后夹具上的产线被摘除', fC.lines.indexOf(lineC) < 0 && fC.lines.indexOf(lineA) >= 0, JSON.stringify(fC.lines));
-ok('删线体后夹具上的工位被摘除', fC.stations.indexOf(stC1) < 0 && fC.stations.indexOf(stA1) >= 0, JSON.stringify(fC.stations));
-ok('删线体不影响他线工位', store.getAll('stations').some((s) => s.id === stA1));
-
-// 删除工位
-const stTmp = store.add('stations', { lineId: lineA, name: '临时工位', seq: 99 });
-store.addFixture(fix({ code: '5005', serialNo: 'CAS-2', lines: [lineA], stations: [stA1, stTmp] }));
-store.delStation(stTmp);
-ok('删工位后夹具上该 id 被摘除', !store.getAll('fixtures').find((f) => f.code === '5005').stations.includes(stTmp));
+ok('删线体不影响其它产线', store.getAll('lines').some((l) => l.id === lineA));
 
 /* ---------- 8b. 删除夹具（纠正录错，连带清理流水） ---------- */
 section('8b. 删除夹具（连带清理流水）');
-const idDel = store.addFixture(fix({ code: '5006', serialNo: 'DEL-1', lines: [lineA], stations: [stA1] }));
+const idDel = store.addFixture(fix({ code: '5006', serialNo: 'DEL-1', lines: [lineA] }));
 store.addFixTransaction({ fixtureId: idDel, type: 'out', operator: '李四', time: t + 200000 });
 store.addFixTransaction({ fixtureId: idDel, type: 'return', operator: '王五', time: t + 201000 });
-const idKeep = store.addFixture(fix({ code: '5007', serialNo: 'KEEP-1', lines: [lineA], stations: [stA1] }));
+const idKeep = store.addFixture(fix({ code: '5007', serialNo: 'KEEP-1', lines: [lineA] }));
 store.addFixTransaction({ fixtureId: idKeep, type: 'out', operator: '李四', time: t + 202000 });
 const txBeforeDel = store.getAll('fixTransactions').length;
 ok('删除前目标夹具流水为 2 条', store.getAll('fixTransactions').filter((x) => x.fixtureId === idDel).length === 2);
@@ -295,6 +281,8 @@ ok('文件含 fixTransactions 表', Array.isArray(raw.fixTransactions));
 ok('文件含 productions 表', Array.isArray(raw.productions));
 ok('文件含 meta 表', typeof raw.meta === 'object');
 ok('已无 stationFixtures 集合', raw.stationFixtures === undefined);
+ok('已无 stations 集合（v5.0.0）', raw.stations === undefined);
+ok('夹具不含 stations 字段（v5.0.0）', !raw.fixtures.some((f) => f.stations !== undefined));
 ok('已无 products 集合', raw.products === undefined);
 ok('夹具不含 qrToken 字段', !raw.fixtures.some((f) => f.qrToken !== undefined));
 
@@ -314,7 +302,7 @@ ok('重启后编号不冲突', (() => {
 })());
 
 /* ---------- 13. v3.0.x → v4.0.0 迁移 ---------- */
-section('13. 旧数据迁移（v3.0.1 → v4.0.0）');
+section('13. 旧数据迁移（v3.0.1 → v5.0.0）');
 const TMP2 = path.join(os.tmpdir(), 'fixture-migrate-' + Date.now());
 fs.mkdirSync(TMP2, { recursive: true });
 fs.writeFileSync(path.join(TMP2, 'fixture-data.json'), JSON.stringify({
@@ -341,7 +329,7 @@ const m1 = store3.getAll('fixtures').find((f) => f.code === '2001');
 ok('spec/lineNo 合并进 lineModels', Array.isArray(m1.lineModels) && m1.lineModels.join(',') === 'L9,OLD-SPEC', JSON.stringify(m1.lineModels));
 ok('新增 serialNo 字段（空串）', m1.serialNo === '');
 ok('新增 lines 数组', Array.isArray(m1.lines) && m1.lines.length === 0);
-ok('新增 stations 数组', Array.isArray(m1.stations) && m1.stations.length === 0);
+ok('stations 字段已移除（v5.0.0）', m1.stations === undefined, String(m1.stations));
 ok('qrToken 已清理', m1.qrToken === undefined);
 const m2 = store3.getAll('fixtures').find((f) => f.code === '2002');
 ok('机种上限 4 → 7（原 5 个全部保留）', m2.lineModels.length === 5, JSON.stringify(m2.lineModels));
@@ -352,11 +340,14 @@ ok('productions 无 code 字段', prods.every((p) => p.code === undefined));
 ok('productions 带 order', prods.every((p) => Number.isFinite(Number(p.order))));
 ok('products 集合已移除', store3.getAll('products').length === 0);
 ok('stationFixtures 已移除', store3.getAll('stationFixtures').length === 0);
-ok('lines / stations 保留', store3.getAll('lines').length === 1 && store3.getAll('stations').length === 1);
+ok('stations 集合已移除（v5.0.0）', store3.getAll('stations').length === 0);
+ok('lines 保留', store3.getAll('lines').length === 1);
 ok('迁移后 meta 保留', store3.getMeta('k') === 'v');
 const migRaw = JSON.parse(fs.readFileSync(path.join(TMP2, 'fixture-data.json'), 'utf8'));
 ok('落盘文件已无 products', migRaw.products === undefined);
 ok('落盘文件已无 stationFixtures', migRaw.stationFixtures === undefined);
+ok('落盘文件已无 stations 集合', migRaw.stations === undefined);
+ok('落盘夹具已无 stations 字段', !migRaw.fixtures.some((f) => f.stations !== undefined));
 ok('落盘文件含 productions', Array.isArray(migRaw.productions));
 try { fs.rmSync(TMP2, { recursive: true, force: true }); } catch (e) { /* ignore */ }
 

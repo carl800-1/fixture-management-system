@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * store.js — 工装夹具管理程序数据层（Node fs，本地 JSON 文件）v4.0.4
+ * store.js — 工装夹具管理程序数据层（Node fs，本地 JSON 文件）v5.1.0
  * ============================================================ */
 const fs = require('fs');
 const path = require('path');
@@ -11,25 +11,37 @@ let loaded = false;
 let seq = 1;
 
 /* 数据集合清单：新增集合只需在此登记，load / save / 通用 CRUD 自动覆盖。
- * v4.0.0 起业务表收敛为 3 张 + 1 张候选字典 + 1 张流水：
- *   fixture    { id, code, serialNo, name, lineModels[], lines[], stations[], location, ... }
- *   line       { id, name, type:'linear'|'u', remark }
- *   station    { id, lineId, seq, name, remark }
- *   production { id, name, order }          ← 机种候选字典（不隶属线体）
+ * v5.0.0 起业务表收敛为 2 张 + 1 张候选字典 + 1 张流水：
+ *   fixture    { id, code, serialNo, name, lineModels[], lines[], location, ... }
+ *   line       { id, name, remark }         ← 产线字典（夹具直接关联产线）
+ *   production { id, name, order }          ← 机种候选字典（不隶属产线）
  *   fixTransaction { ... }                  ← 出入库/维修流水
  *
- * ⚠️ v4.0.0 已废弃 stationFixtures（工位↔夹具绑定改为 fixtures.stations 扁平字段）、
- *    已废弃 products（改为 productions，且不再隶属线体）。旧数据文件自动迁移。
+ * ⚠️ v5.0.0 已**整体移除工位（stations）模型**：工位集合、fixtures.stations 字段、
+ *    工位图（产线示意图）与产线导入的工位列全部删除；旧数据文件在 migrate() 里自动清理，
+ *    夹具仅保留 lines（涉及产线，1~5 条）。
+ * ⚠️ 更早期废弃的 stationFixtures / products 同样在 migrate() 里丢弃。
+ *
+ * v5.1.0 新增 staffs（人员卡库）：
+ *   staff { id, cardNo, name, dept, role, active, remark, createdAt, updatedAt }
+ *   —— 卡号是主键性质的业务键（归一化后唯一），出入库「刷卡」按它反查姓名与角色。
+ *   —— 流水只存快照（operator/party 的姓名 + operatorCard/partyCard 卡号），
+ *      因此删除人员不会篡改历史流水，也无需级联清理。
  */
-const COLLECTIONS = ['fixtures', 'fixTransactions', 'lines', 'productions', 'stations'];
+const COLLECTIONS = ['fixtures', 'fixTransactions', 'lines', 'productions', 'staffs'];
 
 /* ---------------- 业务上限与格式约束（与文档第七节一致） ---------------- */
 const MAX_LINE_MODELS = 7;    // 一件夹具最多关联机种数（原 4）
 const MAX_LINES = 5;          // 一件夹具最多涉及产线数
-const MAX_STATIONS = 10;      // 一件夹具最多安装工位数
 const MAX_SERIAL_NO = 64;     // 实物夹具编号最大字符数
 const MAX_LOCATION = 20;      // 库位号最大字符数（真实样例 ZP1-U-1-1 = 10）
 const MAX_CATEGORY = 30;      // 分类名称最大字符数（可空 = 未分类）
+/* 人员卡库（v5.1.0） */
+const MAX_CARD_NO = 64;       // 卡号最大字符数（读卡器常见 8~10 位，留足余量）
+const MAX_STAFF_NAME = 30;    // 人员姓名最大字符数
+const MAX_STAFF_DEPT = 30;    // 部门名称最大字符数
+/* 角色：borrower=可作领用人/退库人，operator=可作经办人，both=两者皆可 */
+const STAFF_ROLES = ['borrower', 'operator', 'both'];
 /* 库位号形态：4 段、短横线分隔、每段非空（如 ZP1-U-1-1 / ZP10-U-12-15） */
 const LOCATION_RE = /^[A-Za-z0-9]+(-[A-Za-z0-9]+){3}$/;
 
@@ -79,6 +91,32 @@ function isValidProductionName(s) {
   return !!t && t.length <= 30 && !/[|\r\n]/.test(t);
 }
 
+/* ---------------- 人员卡库校验（v5.1.0，与 db.js 同源） ---------------- */
+/* 卡号归一化：USB 读卡器输出常带首尾空白/换行，同一张卡也可能被登记成
+ * 「A1B2-C3D4」「a1b2c3d4」「A1B2 C3D4」等形态，因此比较前统一去空白、
+ * 去连字符/下划线、转大写。**只用于比对，不改写用户登记的原值展示**。 */
+function normalizeCardNo(str) {
+  return String(str == null ? '' : str)
+    .replace(/[\s\u3000\-_]/g, '')
+    .toUpperCase();
+}
+/* 卡号：非空、≤64 字符、不含 | 与逗号（避免破坏 CSV 与列表拼接） */
+function isValidCardNo(s) {
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  if (!t || t.length > MAX_CARD_NO) return false;
+  if (/[|,\r\n]/.test(t)) return false;
+  return normalizeCardNo(t).length > 0;
+}
+/* 人员姓名：非空、≤30 字符、不含 | 与换行 */
+function isValidStaffName(s) {
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  return !!t && t.length <= MAX_STAFF_NAME && !/[|\r\n]/.test(t);
+}
+/* 角色：只允许 borrower / operator / both */
+function isValidStaffRole(r) { return STAFF_ROLES.indexOf(r) >= 0; }
+
 function bad(msg, name) {
   const e = new Error(msg);
   e.name = name || 'ValidationError';
@@ -101,9 +139,10 @@ function migrate() {
       changed = true;
     }
     if (f.lineModels.length > MAX_LINE_MODELS) { f.lineModels = f.lineModels.slice(0, MAX_LINE_MODELS); changed = true; }
-    // 2) v4.0.0 新增扁平关联字段
+    // 2) 扁平关联字段：只保留 lines
     if (!Array.isArray(f.lines)) { f.lines = []; changed = true; }
-    if (!Array.isArray(f.stations)) { f.stations = []; changed = true; }
+    // 2-b) v5.0.0 移除工位模型：清掉历史 fixtures.stations
+    if (f.stations !== undefined) { delete f.stations; changed = true; }
     // 3) 实物编号字段
     if (typeof f.serialNo !== 'string') { f.serialNo = ''; changed = true; }
     // 4) qrToken 改为派生值，不再落库（避免与 code 不一致的脏数据）
@@ -129,9 +168,10 @@ function migrate() {
     if (!Number.isFinite(Number(p.order))) { p.order = i + 1; changed = true; }
   });
 
-  // 6) 废弃集合直接丢弃
+  // 6) 废弃集合直接丢弃（v5.0.0 追加 stations）
   if (data.stationFixtures) { delete data.stationFixtures; changed = true; }
   if (data.products) { delete data.products; changed = true; }
+  if (data.stations) { delete data.stations; changed = true; }
 
   // 7) 补齐缺失的主键 id（旧样本/旧版数据夹具未带 id，会导致编辑/删除/出入库
   //    按 id 查找全部失效 → 卡片「编辑」误开「新建」）。seq 已在 load 阶段按现有
@@ -143,6 +183,16 @@ function migrate() {
         changed = true;
       }
     });
+  });
+
+  // 8) 人员卡库（v5.1.0）：补齐缺失字段默认值（旧文件本无该集合，此处只防手工编辑残缺）
+  (data.staffs || []).forEach((s) => {
+    if (typeof s.cardNo !== 'string') { s.cardNo = s.cardNo == null ? '' : String(s.cardNo); changed = true; }
+    if (typeof s.name !== 'string') { s.name = s.name == null ? '' : String(s.name); changed = true; }
+    if (typeof s.dept !== 'string') { s.dept = ''; changed = true; }
+    if (!isValidStaffRole(s.role)) { s.role = 'both'; changed = true; }
+    if (typeof s.active !== 'boolean') { s.active = true; changed = true; }
+    if (typeof s.remark !== 'string') { s.remark = ''; changed = true; }
   });
 
   return changed;
@@ -201,6 +251,8 @@ function findFixtureByCode(code) {
 function add(name, item) {
   load();
   if (name === 'fixtures') return addFixture(item);
+  // 人员需卡号唯一校验，通用通道也必须走专用实现，否则绕过校验
+  if (name === 'staffs') return addStaff(item);
   if (!data[name]) data[name] = [];
   item.id = nextId();
   data[name].push(item);
@@ -210,6 +262,7 @@ function add(name, item) {
 function put(name, item) {
   load();
   if (name === 'meta') { data.meta[item.key] = item.value; save(); return item.key; }
+  if (name === 'staffs') return updateStaff(item);
   const arr = data[name];
   const i = arr.findIndex((x) => x.id === item.id);
   if (i >= 0) arr[i] = item; else arr.push(item);
@@ -221,7 +274,7 @@ function del(name, id) {
   if (name === 'meta') { delete data.meta[id]; save(); return; }
   if (name === 'productions') return delProduction(id);
   if (name === 'lines') return delLine(id);
-  if (name === 'stations') return delStation(id);
+  if (name === 'staffs') return delStaff(id);
   data[name] = data[name].filter((x) => x.id !== id);
   save();
 }
@@ -246,7 +299,7 @@ function setMeta(key, value) { load(); data.meta[key] = value; save(); }
  * 夹具管理专用函数
  * ============================================================ */
 
-/* 建档前的业务校验（v4.0.0 强校验 7 条里的 5 条落在这里，UI 另有即时校验） */
+/* 建档前的业务校验（强校验落在数据层，UI 另有即时校验） */
 function validateFixture(f, opts) {
   const skipCode = !!(opts && opts.skipCode);
   if (!skipCode && !isBridgeCode(f.code)) bad('序号必须是 4 位纯数字');
@@ -255,11 +308,8 @@ function validateFixture(f, opts) {
   const lms = Array.isArray(f.lineModels) ? f.lineModels.filter((x) => String(x).trim() !== '') : [];
   if (lms.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
   const lines = Array.isArray(f.lines) ? f.lines : [];
-  const sts = Array.isArray(f.stations) ? f.stations : [];
   if (!lines.length) bad('请至少选择 1 条产线');
   if (lines.length > MAX_LINES) bad('一件夹具最多关联 ' + MAX_LINES + ' 条产线');
-  if (!sts.length) bad('请至少选择 1 个工位');
-  if (sts.length > MAX_STATIONS) bad('一件夹具最多安装 ' + MAX_STATIONS + ' 个工位');
   if (!isValidLocation(f.location)) {
     bad('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符');
   }
@@ -281,7 +331,7 @@ function addFixture(fixture) {
   if (rawLms.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
   f.lineModels = rawLms.slice(0, MAX_LINE_MODELS);
   f.lines = dedupeNumbers(f.lines);
-  f.stations = dedupeNumbers(f.stations);
+  if (f.stations !== undefined) delete f.stations;
   f.location = String(f.location == null ? '' : f.location).trim();
   f.category = String(f.category == null ? '' : f.category).trim();
   f.remark = String(f.remark == null ? '' : f.remark).trim();
@@ -331,7 +381,7 @@ function updateFixture(fixture) {
   if (rawLms.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
   f.lineModels = rawLms.slice(0, MAX_LINE_MODELS);
   f.lines = dedupeNumbers(f.lines);
-  f.stations = dedupeNumbers(f.stations);
+  if (f.stations !== undefined) delete f.stations;
   f.location = String(f.location == null ? '' : f.location).trim();
   f.category = String(f.category == null ? '' : f.category).trim();
   f.remark = String(f.remark == null ? '' : f.remark).trim();
@@ -417,6 +467,9 @@ function addFixTransaction(tx) {
     type: tx.type,
     operator: tx.operator || '',
     counterparty: tx.counterparty || '',
+    // v5.1.0 刷卡：卡号快照（姓名在上两字段），便于事后按卡号追溯
+    operatorCard: tx.operatorCard || '',
+    partyCard: tx.partyCard || '',
     outReason: tx.type === 'out' ? outReason : '',
     outReasonText: tx.type === 'out' ? outReasonText : '',
     time: tx.time,
@@ -435,36 +488,83 @@ function addFixTransaction(tx) {
 }
 
 /* ============================================================
- * 关联维护：产线 / 工位 / 机种
+ * 人员卡库（v5.1.0）—— 供进出库「刷卡」按卡号反查姓名与角色
  *
- * v4.0.0 起「夹具 ↔ 工位」「夹具 ↔ 产线」是 fixtures 上的扁平数组字段，
- * 因此删除父级必须遍历 fixtures 全表摘 id（旧版只需清 stationFixtures 少量记录）。
+ * 业务键：cardNo（归一化后唯一，保证「一张卡只对应一个人」）。
+ * 流水侧另存姓名 + 卡号快照，因此删人/改名**不会改写历史流水**，无需级联。
+ * ============================================================ */
+function normalizeStaff(input, existing) {
+  const s = input || {};
+  const cardNo = String(s.cardNo == null ? '' : s.cardNo).trim();
+  const name = String(s.name == null ? '' : s.name).trim();
+  const dept = String(s.dept == null ? '' : s.dept).trim();
+  const role = String(s.role == null || s.role === '' ? 'both' : s.role).trim();
+  const remark = String(s.remark == null ? '' : s.remark).trim();
+
+  if (!isValidCardNo(cardNo)) bad('卡号不能为空，且不能含竖线/逗号，最长 ' + MAX_CARD_NO + ' 字符');
+  if (!isValidStaffName(name)) bad('姓名不能为空，且不能含竖线/换行，最长 ' + MAX_STAFF_NAME + ' 字符');
+  if (dept.length > MAX_STAFF_DEPT) bad('部门名称最长 ' + MAX_STAFF_DEPT + ' 字符');
+  if (!isValidStaffRole(role)) bad('角色只能是「领用人」「经办人」或「两者皆可」');
+
+  const norm = normalizeCardNo(cardNo);
+  const selfId = (s.id != null) ? s.id : (existing ? existing.id : null);
+  const dup = (data.staffs || []).find((x) => x.id !== selfId && normalizeCardNo(x.cardNo) === norm);
+  if (dup) bad('卡号 ' + cardNo + ' 已登记给「' + (dup.name || '未命名') + '」，一张卡只能对应一个人');
+
+  return { cardNo, name, dept, role, active: s.active === false ? false : true, remark };
+}
+
+function addStaff(input) {
+  load();
+  const st = normalizeStaff(input, null);
+  const rec = Object.assign({ id: nextId() }, st, { createdAt: Date.now(), updatedAt: Date.now() });
+  data.staffs.push(rec);
+  save();
+  return rec.id;
+}
+
+function updateStaff(input) {
+  load();
+  const src = input || {};
+  const i = (data.staffs || []).findIndex((x) => x.id === src.id);
+  if (i < 0) bad('人员不存在', 'NotFoundError');
+  const st = normalizeStaff(src, data.staffs[i]);
+  Object.assign(data.staffs[i], st, { updatedAt: Date.now() });
+  save();
+  return data.staffs[i].id;
+}
+
+function delStaff(id) {
+  load();
+  data.staffs = (data.staffs || []).filter((x) => x.id !== Number(id) && x.id !== id);
+  save();
+}
+
+/* 按卡号反查（唯一入口：出入库刷卡、批量导入查重都走这里） */
+function findStaffByCard(cardNo) {
+  load();
+  const n = normalizeCardNo(cardNo);
+  if (!n) return null;
+  return (data.staffs || []).find((x) => normalizeCardNo(x.cardNo) === n) || null;
+}
+
+/* ============================================================
+ * 关联维护：产线 / 机种
+ *
+ * 「夹具 ↔ 产线」是 fixtures 上的扁平数组字段，因此删除产线必须遍历
+ * fixtures 全表摘 id。
  * ============================================================ */
 
-/* 撤销接口：从某夹具上摘掉一条产线（连带摘掉该产线下的已选工位） */
+/* 撤销接口：从某夹具上摘掉一条产线 */
 function removeFixtureLine(code, lineId) {
   load();
   const f = findFixtureByCode(code);
   if (!f) bad('夹具不存在', 'NotFoundError');
   const lid = Number(lineId);
-  const stIds = new Set((data.stations || []).filter((s) => s.lineId === lid).map((s) => s.id));
   f.lines = (f.lines || []).filter((x) => Number(x) !== lid);
-  f.stations = (f.stations || []).filter((x) => !stIds.has(Number(x)));
   f.updatedAt = Date.now();
   save();
-  return { lines: f.lines.length, stations: f.stations.length };
-}
-
-/* 撤销接口：从某夹具上摘掉一个工位（产线保留 —— 单条产线允许 0 工位） */
-function removeFixtureStation(code, stationId) {
-  load();
-  const f = findFixtureByCode(code);
-  if (!f) bad('夹具不存在', 'NotFoundError');
-  const sid = Number(stationId);
-  f.stations = (f.stations || []).filter((x) => Number(x) !== sid);
-  f.updatedAt = Date.now();
-  save();
-  return { lines: (f.lines || []).length, stations: f.stations.length };
+  return { lines: f.lines.length };
 }
 
 /* 撤销接口：批量（一次导入批次的回滚）——按同一产线批量摘除 */
@@ -484,28 +584,13 @@ function removeFixtureLinesByBatch(codes, lineId) {
 function delLine(id) {
   load();
   const lid = Number(id);
-  const stSet = new Set(data.stations.filter((s) => s.lineId === lid).map((s) => s.id));
-  // 从所有夹具上摘掉该产线与其工位
+  // 从所有夹具上摘掉该产线
   data.fixtures.forEach((f) => {
-    const before = (f.lines || []).length + (f.stations || []).length;
+    const before = (f.lines || []).length;
     f.lines = (f.lines || []).filter((x) => Number(x) !== lid);
-    f.stations = (f.stations || []).filter((x) => !stSet.has(Number(x)));
-    if ((f.lines || []).length + (f.stations || []).length !== before) f.updatedAt = Date.now();
+    if ((f.lines || []).length !== before) f.updatedAt = Date.now();
   });
-  data.stations = data.stations.filter((s) => s.lineId !== lid);
   data.lines = data.lines.filter((l) => l.id !== lid);
-  save();
-}
-
-function delStation(id) {
-  load();
-  const sid = Number(id);
-  data.fixtures.forEach((f) => {
-    const before = (f.stations || []).length;
-    f.stations = (f.stations || []).filter((x) => Number(x) !== sid);
-    if ((f.stations || []).length !== before) f.updatedAt = Date.now();
-  });
-  data.stations = data.stations.filter((s) => s.id !== sid);
   save();
 }
 
@@ -574,14 +659,18 @@ module.exports = {
   // 夹具管理
   addFixture, updateFixture, delFixture, findFixtureByCode,
   addFixTransaction,
+  // 人员卡库（v5.1.0）
+  addStaff, updateStaff, delStaff, findStaffByCard,
   // 关联维护（v4.0.0）
-  delLine, delStation, delProduction, renameProduction, ensureProduction,
-  removeFixtureLine, removeFixtureStation, removeFixtureLinesByBatch,
+  delLine, delProduction, renameProduction, ensureProduction,
+  removeFixtureLine, removeFixtureLinesByBatch,
   // 校验 / 工具
-  nextFreeCode, normalizeCode, codeEq,
+  nextFreeCode, normalizeCode, codeEq, normalizeCardNo,
   isValidSerialNo, isValidLocation, isValidProductionName, isBridgeCode,
+  isValidCardNo, isValidStaffName, isValidStaffRole,
   stockCountBySerial,
   // 常量
-  MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, MAX_CATEGORY, LOCATION_RE,
+  MAX_LINE_MODELS, MAX_LINES, MAX_SERIAL_NO, MAX_LOCATION, MAX_CATEGORY, LOCATION_RE,
+  MAX_CARD_NO, MAX_STAFF_NAME, MAX_STAFF_DEPT, STAFF_ROLES,
   COLLECTIONS
 };

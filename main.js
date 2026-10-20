@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 工装夹具管理程序主进程（v4.5.1）
+ * main.js — 工装夹具管理程序主进程（v5.3.0）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -65,17 +65,19 @@ const handlers = {
   'fixture-getTransactions': () => store.getAll('fixTransactions'),
   // 桥梁编号分配（4 位纯数字，1001 起顺延填补空洞）
   'next-free-code': () => store.nextFreeCode(),
-  // 关联维护（v4.0.0）：线体 / 工位 / 机种 的「增改查」走通用 db-add / db-put / db-getAll
-  //（集合名 lines / stations / productions），删除需级联清理，故走专用通道。
+  // 关联维护：线体 / 机种 的「增改查」走通用 db-add / db-put / db-getAll
+  //（集合名 lines / productions），删除需级联清理，故走专用通道。
   'line-del': (e, id) => store.delLine(id),
-  'station-del': (e, id) => store.delStation(id),
   'production-del': (e, id) => store.delProduction(id),
   'production-rename': (e, p) => store.renameProduction(p.id, p.name),
   /* 撤销接口：产线导入只做「追加」，误加需能撤销。
    * 三者共用「编辑夹具」扇区的移除按钮代码路径。 */
   'fixture-line-remove': (e, p) => store.removeFixtureLine(p.code, p.lineId),
-  'fixture-station-remove': (e, p) => store.removeFixtureStation(p.code, p.stationId),
   'fixture-lines-removeBatch': (e, p) => store.removeFixtureLinesByBatch(p.codes, p.lineId),
+  /* 人员卡库（v5.1.0）：卡号唯一性只能在校验层保证，因此不能走通用 db-add/db-put。 */
+  'staff-add': (e, staff) => store.addStaff(staff),
+  'staff-update': (e, staff) => store.updateStaff(staff),
+  'staff-del': (e, id) => store.delStaff(id),
   /* Excel 导入：渲染进程读不到 zlib，故由它把文件字节传进来，此处解 zip + 解析 XML。
    * 返回首张工作表的二维数组；出错时返回 { ok:false, error } 而非 reject，便于 UI 提示。 */
   'read-spreadsheet': (e, buf) => {
@@ -111,20 +113,24 @@ const handlers = {
       return { ok: false, error: String((err && err.message) || err) };
     }
   },
-  /* 打印二维码标签：按传入的 pageSize（毫米换算的微米 / 标准尺寸名）与份数调用 Chromium 打印，
-   * 由渲染进程设置 #printArea 的 CSS 变量控制对齐与边距，这里只负责把纸张规格交给打印引擎。 */
+  /* 打印：按传入的 pageSize（毫米换算的微米 / 标准尺寸名）与份数调用 Chromium 打印，
+   * 由渲染进程设置打印容器的 CSS 变量控制对齐与边距，这里只负责把纸张规格交给打印引擎。
+   * v5.1.0 追加 landscape：产线清单按 A4 横向打印，标签打印沿用纵向。 */
   'print-labels': (e, opts) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return Promise.resolve({ ok: false, error: 'no-window' });
+    const o = opts || {};
     return new Promise((resolve) => {
       try {
         win.webContents.print({
           silent: false,            // 弹出系统打印对话框，由用户选择打印机/确认
           printBackground: true,    // 打印标签边框与背景
           color: true,
-          copies: (opts && opts.copies) || 1,
-          pageSize: opts && opts.pageSize, // { width, height } 微米 或 'A4' 等标准名
-          margins: { marginType: 'none' }  // 边距由渲染层 CSS 控制，避免双重计算
+          landscape: !!o.landscape,
+          copies: o.copies || 1,
+          pageSize: o.pageSize,     // { width, height } 微米 或 'A4' 等标准名
+          // 标签要求零边距（对齐由 CSS 控制）；清单用系统默认边距，避免贴边被裁
+          margins: o.margins || { marginType: 'none' }
         }, (success, reason) => resolve({ ok: !!success, reason: reason || '' }));
       } catch (err) {
         resolve({ ok: false, error: String((err && err.message) || err) });

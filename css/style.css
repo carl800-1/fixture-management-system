@@ -145,6 +145,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .about-list { margin: 0; padding-left: 20px; }
 .about-list li { margin: 6px 0; }
 .about-note { margin: 10px 0 0; font-style: italic; }
+.about-thanks { background: var(--primary-soft); border: 1px solid #cfe0ff; border-radius: 8px; padding: 10px 14px; margin-top: 6px; }
 .about-version { margin-top: 12px; }
 
 /* ---------- 面板 ---------- */
@@ -220,7 +221,7 @@ tbody tr.selected { background: var(--primary-soft); }
 /* ---------- 夹具卡片 ---------- *//* ---------- 表单 ---------- */
 .form-group { margin-bottom: 14px; }
 .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px; color: var(--muted); }
-/* 横向表单组（产线工位）：标签置顶、控件区充满剩余宽度，供内部 .ls-toolbar 横向排开 */
+/* 横向表单组（产线选择）：标签置顶、控件区充满剩余宽度，供内部 .ls-toolbar 横向排开 */
 .form-group.form-group-row { display: flex; flex-wrap: wrap; column-gap: 14px; }
 .form-group.form-group-row label { flex: 0 0 auto; margin-bottom: 0; margin-top: 3px; }
 .form-group.form-group-row > :not(label) { flex: 1 1 340px; }
@@ -483,8 +484,10 @@ tbody tr.selected { background: var(--primary-soft); }
 @media print {
   @page { margin: 0; }
   html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
-  /* 仅保留打印区域，其余（侧边栏/顶栏/模态/提示）全部隐藏 */
-  body > *:not(.print-area) { display: none !important; }
+  /* 仅保留打印区域，其余（侧边栏/顶栏/模态/提示）全部隐藏。
+     v5.1.0：两个打印容器（标签 .print-area / 清单 .print-sheet）都要留；
+     它们由 JS 保证互斥，只会有一个有内容。 */
+  body > *:not(.print-area):not(.print-sheet) { display: none !important; }
   #app, .sidebar, .topbar, .modal-overlay, #toast, #aboutBtn { display: none !important; }
   .print-area {
     display: flex !important;
@@ -501,7 +504,29 @@ tbody tr.selected { background: var(--primary-soft); }
     position: static;
     background: #fff;
   }
+  /* 表格类打印（产线夹具清单，A4 横向）：块级流式排版，表头每页重复 */
+  .print-sheet {
+    display: block !important;
+    box-sizing: border-box;
+    padding: 8mm 10mm;
+    width: 100% !important;
+    background: #fff;
+    color: #111;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+  .print-sheet h1 { font-size: 16pt; margin: 0 0 3mm; text-align: center; letter-spacing: 3px; font-weight: 700; }
+  .print-sheet .ps-meta { font-size: 9pt; color: #333; margin-bottom: 1.6mm; }
+  .print-sheet table { width: 100%; border-collapse: collapse; margin-top: 4mm; font-size: 9.5pt; }
+  .print-sheet th, .print-sheet td { border: 1px solid #8a8a8a; padding: 1.5mm 2mm; text-align: left; vertical-align: top; }
+  .print-sheet thead th { background: #ececec; font-weight: 700; }
+  .print-sheet thead { display: table-header-group; }
+  .print-sheet tr { page-break-inside: avoid; }
+  .print-sheet .ps-foot { display: flex; justify-content: space-between; margin-top: 3.5mm; font-size: 8.5pt; color: #444; }
+  .print-sheet .ps-sign { display: flex; gap: 18mm; margin-top: 10mm; font-size: 9pt; }
 }
+/* 屏幕态隐藏清单打印区（只在不打印时存在一份隐藏节点） */
+.print-sheet { display: none; }
 
 /* ===================== 夹具查询 ===================== */
 .query-bar {
@@ -555,49 +580,6 @@ tbody tr.selected { background: var(--primary-soft); }
 .row-selected { background: var(--primary-soft) !important; }
 .row-empty td { color: var(--muted); }
 
-/* 夹具编号标签（产线配置页） */
-.fx-cell { white-space: normal !important; }
-.fx-tag {
-  display: inline-block; margin: 0 4px 3px 0; padding: 1px 8px;
-  border-radius: 6px; background: var(--primary-soft); color: var(--primary-dark);
-  font-size: 12px; font-weight: 600;
-}
-.fx-tag-miss { background: var(--danger-soft); color: var(--danger); }
-
-/* 产线示意图 */
-.line-diagram {
-  margin: 14px 16px 18px; padding: 12px 14px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: #fff;
-}
-.line-diagram-head {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 8px; margin-bottom: 6px;
-}
-.ld-title { font-size: 13px; font-weight: 600; }
-.ld-legend { font-size: 12px; color: var(--muted); }
-.ld-lg {
-  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  margin: 0 5px 0 12px; vertical-align: middle;
-}
-.ld-lg:first-child { margin-left: 0; }
-.ld-lg-on { background: var(--primary); }
-.ld-lg-off { background: #fff; border: 2px solid #cbd5e1; box-sizing: border-box; }
-
-.ld-canvas { overflow-x: auto; overflow-y: hidden; }
-.ld-svg { display: block; width: 100%; height: auto; }
-.ld-track { fill: none; stroke: var(--border); stroke-width: 3; stroke-dasharray: 8 6; }
-.ld-link { stroke-dasharray: 4 6; opacity: .55; }
-.ld-dot-off { fill: #fff; stroke: #cbd5e1; stroke-width: 2; }
-.ld-dot-on { fill: var(--primary); stroke: var(--primary-dark); stroke-width: 2; }
-.ld-seq { font-size: 12px; font-weight: 700; fill: var(--muted); }
-.ld-dot-on + .ld-seq { fill: #fff; }
-.ld-name { font-size: 12px; font-weight: 600; fill: var(--text); }
-.ld-code { font-size: 11px; font-weight: 700; fill: var(--primary-dark); }
-.ld-code.ld-none { fill: #9ca3af; font-weight: 400; }
-.ld-node { cursor: default; }
-/* v4.1.0：U 型转角节点标签的白色垫底，让竖直连线从标签后面穿过 */
-.ld-plate { fill: #fff; }
-
 /* ============================================================
  * v4.0.0 新增：机种 chips、产线工位选择（v4.0.2 起为两级下拉 + 标签区）、派生数量合计、
  *            机种分组视图、库位卡片计数、字段提示
@@ -625,16 +607,15 @@ tbody tr.selected { background: var(--primary-soft); }
 .chip-add input[type="text"] { flex: 1; min-width: 180px; }
 .chip-add .btn { flex: 0 0 auto; white-space: nowrap; }
 
-/* ---------- 产线工位：两级下拉 + 标签区 ---------- */
+/* ---------- 产线选择：下拉 + 标签区（v5.0.0 起无工位） ---------- */
 .ls-box { border: 1px solid var(--border); border-radius: 8px; background: #fafbfd; padding: 10px; flex: 1 1 auto; min-width: 320px; }
-/* 工具区：产线下拉 + 工位下拉 +「+ 添加」+ 计数 一行排列（空间不足时换行，不截断） */
+/* 工具区：产线下拉 +「+ 添加」+ 计数 一行排列（空间不足时换行，不截断） */
 .ls-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
-/* 两下拉自适应宽度：容器够宽时与「+ 添加」「计数」同行；不足时自动换行，不截断 */
+/* 下拉自适应宽度：容器够宽时与「+ 添加」「计数」同行；不足时自动换行，不截断 */
 .ls-toolbar #fix_line_pick { flex: 0 1 auto; width: auto; min-width: 150px; max-width: 240px; }
-.ls-toolbar #fix_st_pick { flex: 0 1 auto; width: auto; min-width: 130px; max-width: 220px; }
 .ls-toolbar .muted { font-size: 12px; white-space: nowrap; }
 .ls-toolbar .btn { flex: 0 0 auto; white-space: nowrap; }
-/* 标签区空态：与旧版「尚未选择工位」边框一致，避免空区视觉断裂 */
+/* 标签区空态：与已选产线的边框一致，避免空区视觉断裂 */
 .chip-box.chip-box-empty { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
 .chip-box.chip-box-empty .chip-ls-empty { display: block; font-size: 12px; }
 .chip-tag.chip-ls b { font-weight: 700; }
@@ -652,16 +633,6 @@ tbody tr.selected { background: var(--primary-soft); }
 .fixture-serial { font-size: 14px; font-weight: 700; color: var(--primary-dark); word-break: break-all; }
 .bridge-code { font-size: 11px; font-weight: 600; color: var(--muted); }
 
-/* ---------- 派生数量合计（夹具查询页第 ① 段） ---------- */
-.agg-head {
-  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-  padding: 8px 16px 0; font-size: 13px; color: var(--muted);
-}
-.agg-tag {
-  padding: 2px 10px; border-radius: 999px;
-  background: var(--primary-soft); color: var(--primary-dark); font-size: 12px;
-}
-.agg-total td { background: #f8fafc; font-weight: 700; color: var(--text); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- 按机种分组视图 ---------- */
@@ -672,7 +643,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .pq-head b { font-size: 14px; color: var(--primary-dark); }
 
-/* ---------- 机种管理：点机种名展开「线体 / 工位」明细（v4.5.0 合并按机种查询） ---------- */
+/* ---------- 机种管理：点机种名展开「线体」明细（v5.0.0 起无工位） ---------- */
 .prod-pick {
   color: var(--primary-dark); font-weight: 700; text-decoration: none;
   border-bottom: 1px dashed rgba(0, 0, 0, .18); cursor: pointer;
@@ -687,3 +658,31 @@ tbody tr.pick-row:hover > td { background: var(--primary-soft); }
 .hint { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
 .hint-warn { color: var(--warn); font-weight: 600; }
 .tip.hint-warn { color: var(--warn); }
+
+/* ---------- 刷卡录入（v5.1.0）：出库 / 回库 / 单件出库弹窗共用 ---------- */
+.swipe-box { display: flex; align-items: center; gap: 8px; }
+.swipe-box input { flex: 1 1 auto; min-width: 0; }
+.swipe-state {
+  flex: 0 0 auto; max-width: 190px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  background: #eef2f7; color: var(--muted);
+  border: 1px solid transparent;
+}
+.swipe-state.ok { background: var(--ok-soft); color: var(--ok); border-color: #bbf7d0; }
+.swipe-state.err { background: var(--danger-soft); color: var(--danger); border-color: #fecaca; }
+.hint.err { color: var(--danger); font-weight: 600; }
+/* 表单内独立勾选行（如「启用」） */
+.chk-line {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500; color: var(--text);
+  padding: 9px 0; cursor: pointer;
+}
+.chk-line input { width: auto; margin: 0; }
+/* 人员卡库列表 */
+.table-meta { padding: 8px 16px; font-size: 12px; color: var(--muted); }
+.cell-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .3px; }
+
+/* v5.2.0：线体 ↔ 机种 派生列（多值用 / 分隔）。允许在「/」前后自然换行，长清单不会把表格撑爆 */
+.slash-text { display: inline-block; line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; }

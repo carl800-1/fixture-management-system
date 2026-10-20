@@ -1,26 +1,25 @@
-'use strict';
 /* ============================================================
- * test_import.js — 验证 app.js 的「夹具批量导入」纯函数（v4.0.0）
+ * test_import.js — 夹具批量导入 / 导出 / 产线配置导入 的纯逻辑测试
  *
- * v4.0.0 语义变化：
- *   · 表格**不再提供**序号 code（一律系统自动分配）
- *   · 实物编号 serialNo 为必填、允许重复
- *   · 库位 location 为必填且须 4 段式
- *   · 产线 / 工位按名称引用，**必须已在产线配置建档**（不自动补建）
- *   · 机种名称支持 1~7 独立列，上限由 4 提升到 7
- *
- * 做法：用 vm 沙箱载入 app.js 的两段真实源码（常量 + 校验 / 导入模块）。
+ * v5.0.0 适配：工位（station）模型已整体移除
+ *   · 夹具导入/导出模板 = 17 列（夹具编号 / 名称 / 机种名称1~7 / 分类 / 库位 / 产线1~5 / 备注）
+ *   · 产线配置导入模板 = 4 列（线体 / 线体形态 / 夹具编号 / 备注）
+ *   · 旧模板里的「工位N / 工位 / 工位顺序」列不参与映射，静默忽略
+ *   · 产线按名称引用，未建档则导入时自动补建（同名复用）
+ * 用 vm 沙箱从 js/app.js 切片抽取纯函数，不启动 Electron。
  * 运行：node test_import.js
  * ============================================================ */
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 let pass = 0, fail = 0;
-function ok(cond, msg, extra) {
-  if (cond) { pass++; console.log('  ✓ ' + msg); }
-  else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? '  → 实际: ' + JSON.stringify(extra) : '')); }
+const failures = [];
+function section(t) { console.log('\n[' + t + ']'); }
+function ok(cond, label, extra) {
+  if (cond) { pass++; console.log('  ✅ ' + label); }
+  else { fail++; failures.push(label + (extra === undefined ? '' : ' -> ' + extra)); console.log('  ❌ ' + label + (extra === undefined ? '' : ' -> ' + extra)); }
 }
-function section(t) { console.log('\n' + t); }
 
 const APP = path.join(__dirname, 'js', 'app.js');
 const src = fs.readFileSync(APP, 'utf8');
@@ -35,10 +34,10 @@ function slice(startMark, endMark) {
 
 // ① 业务上限与格式校验（parseImportRow 依赖）
 const constSrc = slice('/* ---------------- 业务上限与格式约束', '/* 机种名称：展示 / 搜索 helpers */');
-// ①-b 关联字段派生（线体/工位 id → 名称，导出用）
-const relSrc = slice('/* ---------------- 关联字段派生显示', '/* 某产线下已选的工位');
-// ①-c 产线名归一化（v4.5.1：导入时把 1 / 1# 归并成同一条产线）
+// ①-b 产线名归一化（v4.5.1：导入时把 1 / 1# 归并成同一条产线）
 const normSrc = slice('/* 产线名归一化：', '/* ---------------- 关联字段派生显示');
+// ①-c 关联字段派生（产线 id → 名称，导出用；v5.0.0 起无工位）
+const relSrc = slice('/* ---------------- 关联字段派生显示', '/* ---------------- 数量：派生值（不落库）');
 // ② 夹具导入模块（FIX_IMPORT_HEADERS → 导入入口之前）
 const importSrc = slice('const FIX_IMPORT_HEADERS', '/* 导入入口');
 // ③ 产线导入模块（LINE_IMPORT_HEADERS → 落库函数之前；纯计划逻辑）
@@ -49,21 +48,21 @@ const tmplSrc = slice('/* 下载导入模板', 'window.fixtureRetire');
 const exportSrc = slice('window.fixtureExportCSV = async function', '/* ============================================================\n   * 夹具批量导入');
 
 const sandbox = {
-  state: { fixtures: [], lines: [], stations: [] },
+  state: { fixtures: [], lines: [] },
   window: {},
   console,
-  DB: { fixtureAdd: async () => 1 },
+  DB: { fixtureAdd: async () => 1, fixtureDel: async () => {}, lineDel: async () => {}, add: async () => 1 },
   esc: (s) => String(s == null ? '' : s),
   openModal: () => {},
   toast: () => {},
   reloadAll: async () => {},
+  reloadLineConfig: async () => {},
   renderFixtures: () => {},
   closeModal: () => {},
   confirm: () => true,
   download: (name, content) => { sandbox.__downloaded = { name, content }; }
 };
 sandbox.global = sandbox;
-const vm = require('vm');
 const ctx = vm.createContext(sandbox);
 
 let moduleSrc = constSrc + '\n' + normSrc + '\n' + relSrc + '\n' + importSrc + '\n' + tmplSrc + '\n' + exportSrc + '\n' + lineImportSrc;
@@ -76,13 +75,13 @@ moduleSrc = moduleSrc.replace(/window\.__importPlan/g, '__importPlan')
   .replace(/window\.fixtureExportCSV/g, '__export_fixtureExportCSV');
 moduleSrc += `
 ;__export = { FIX_IMPORT_HEADERS, FIX_IMPORT_ALIAS, normalizeHeader, mapImportHeader,
-              parseImportRow, splitNames, buildImportPlan,
+              parseImportRow, splitNames, buildImportPlan, buildCsvText,
               LINE_IMPORT_HEADERS, LINE_IMPORT_ALIAS, mapLineImportHeader, parseLineType,
               buildLineImportPlan,
-              MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, isValidSerialNo, isValidLocation,
+              MAX_LINE_MODELS, MAX_LINES, MAX_LOCATION, isValidSerialNo, isValidLocation,
               MAX_CATEGORY, isValidCategory, CATEGORY_PRESETS,
               normalizeLineName, planStructureRecycle,
-              stationNamesOf, fixtureLinePairsForExport,
+              lineNamesOf, lineNamesLabel, fixtureLineNamesForExport,
               _sigOfNames, _sigOfFixture,
               __export_confirmImportPlan, undoFixtureImport: window.undoFixtureImport, showImportFailure,
               __export_downloadFixtureTemplate, __export_fixtureExportCSV };
@@ -92,627 +91,418 @@ vm.runInContext(moduleSrc, ctx);
 const M = sandbox.__export;
 if (!M) { console.error('模块导出失败'); process.exit(1); }
 
-console.log('=== 夹具导入映射逻辑测试（v4.0.0） ===');
+console.log('=== 夹具导入映射逻辑测试（v5.0.0，17 列 / 无工位） ===');
 
 /* ---------- 1. 表头归一化 ---------- */
-section('[表头归一化]');
+section('表头归一化');
 ok(M.normalizeHeader('实物编号') === '实物编号', '普通表头原样');
 ok(M.normalizeHeader('  名称  ') === '名称', '去首尾空格');
 ok(M.normalizeHeader('机种名称1') === '机种名称1', '含数字表头');
 ok(M.normalizeHeader('名称(必填)') === '名称', '剥离括号注释');
 ok(M.normalizeHeader('库位：') === '库位', '剥离冒号');
 ok(M.normalizeHeader('\uFEFF实物编号') === '实物编号', '剥离 BOM');
+ok(M.normalizeHeader(null) === '', 'null 安全');
 
-/* ---------- 2. 表头映射 · 标准顺序（v4.2.0 的 22 列成对模板） ---------- */
-section('[表头映射 · 标准]');
-ok(M.FIX_IMPORT_HEADERS.length === 22, '模板为 22 列', M.FIX_IMPORT_HEADERS.length);
-ok(M.FIX_IMPORT_HEADERS[0] === '夹具编号' && M.FIX_IMPORT_HEADERS[9] === '分类'
-  && M.FIX_IMPORT_HEADERS[10] === '库位'
-  && M.FIX_IMPORT_HEADERS[11] === '产线1' && M.FIX_IMPORT_HEADERS[12] === '工位1'
-  && M.FIX_IMPORT_HEADERS[19] === '产线5' && M.FIX_IMPORT_HEADERS[20] === '工位5'
-  && M.FIX_IMPORT_HEADERS[21] === '备注', '模板列序符合定稿（产线/工位成对）',
-  M.FIX_IMPORT_HEADERS.join('|'));
+/* ---------- 2. 表头映射 · 标准 17 列 ---------- */
+section('表头映射 · 标准 17 列');
+ok(M.FIX_IMPORT_HEADERS.length === 17, '模板为 17 列（v5.0.0 去工位列）', M.FIX_IMPORT_HEADERS.length);
+ok(M.FIX_IMPORT_HEADERS[0] === '夹具编号' && M.FIX_IMPORT_HEADERS[1] === '名称',
+  '第 0/1 列为「夹具编号 / 名称」', [M.FIX_IMPORT_HEADERS[0], M.FIX_IMPORT_HEADERS[1]]);
+ok(M.FIX_IMPORT_HEADERS.slice(2, 9).join('|') === '机种名称1|机种名称2|机种名称3|机种名称4|机种名称5|机种名称6|机种名称7',
+  '第 2~8 列为「机种名称1~7」', M.FIX_IMPORT_HEADERS.slice(2, 9));
+ok(M.FIX_IMPORT_HEADERS[9] === '分类' && M.FIX_IMPORT_HEADERS[10] === '库位',
+  '第 9/10 列为「分类 / 库位」', [M.FIX_IMPORT_HEADERS[9], M.FIX_IMPORT_HEADERS[10]]);
+ok(M.FIX_IMPORT_HEADERS.slice(11, 16).join('|') === '产线1|产线2|产线3|产线4|产线5',
+  '第 11~15 列为「产线1~5」', M.FIX_IMPORT_HEADERS.slice(11, 16));
+ok(M.FIX_IMPORT_HEADERS[16] === '备注', '最后一列为「备注」', M.FIX_IMPORT_HEADERS[16]);
+ok(!M.FIX_IMPORT_HEADERS.some((h) => /工位/.test(h)), '模板中已无任何「工位」列',
+  M.FIX_IMPORT_HEADERS.filter((h) => /工位/.test(h)));
 
 const idxStd = M.mapImportHeader(M.FIX_IMPORT_HEADERS);
-ok(idxStd.serialNo === 0, 'serialNo → 第 0 列', idxStd.serialNo);
-ok(idxStd.name === 1, 'name → 第 1 列', idxStd.name);
-ok(idxStd.lm1 === 2 && idxStd.lm4 === 5 && idxStd.lm7 === 8, '机种 1~7 列正确',
-  [idxStd.lm1, idxStd.lm4, idxStd.lm7]);
-ok(idxStd.category === 9, 'category → 第 9 列', idxStd.category);
-ok(idxStd.location === 10, 'location → 第 10 列', idxStd.location);
-ok(idxStd.line1 === 11 && idxStd.station1 === 12, '产线1/工位1 → 第 11/12 列',
-  [idxStd.line1, idxStd.station1]);
-ok(idxStd.line5 === 19 && idxStd.station5 === 20, '产线5/工位5 → 第 19/20 列',
-  [idxStd.line5, idxStd.station5]);
-ok(idxStd.remark === 21, 'remark → 第 21 列', idxStd.remark);
+ok(idxStd.serialNo === 0 && idxStd.name === 1, '夹具编号 → 第 0 列、名称 → 第 1 列', [idxStd.serialNo, idxStd.name]);
+ok(idxStd.lm1 === 2 && idxStd.lm7 === 8, '机种名称1 / 机种名称7 → 第 2 / 8 列', [idxStd.lm1, idxStd.lm7]);
+ok(idxStd.category === 9 && idxStd.location === 10, '分类 / 库位 → 第 9 / 10 列', [idxStd.category, idxStd.location]);
+ok(idxStd.line1 === 11 && idxStd.line5 === 15, '产线1 / 产线5 → 第 11 / 15 列', [idxStd.line1, idxStd.line5]);
+ok(idxStd.remark === 16, '备注 → 第 16 列', idxStd.remark);
+ok(idxStd.station1 === undefined && idxStd.station5 === undefined && idxStd.station === undefined,
+  '工位相关字段不再有映射（station1/station5/station 均 undefined）',
+  [idxStd.station1, idxStd.station5, idxStd.station]);
 
-/* ---------- 3. 表头映射 · 乱序 + 别名 ---------- */
-section('[表头映射 · 乱序 + 别名]');
-const idx2 = M.mapImportHeader(['备注', '存放位置', '夹具名称', '夹具编号', '适用机种', '类别', '多余列A', '线体', '工位名称']);
-ok(idx2.name === 2, '「夹具名称」别名 → name', idx2.name);
-ok(idx2.serialNo === 3, '「夹具编号」别名 → serialNo（v4 语义反转）', idx2.serialNo);
-ok(idx2.location === 1, '「存放位置」别名 → location', idx2.location);
-ok(idx2.category === 5, '「类别」别名 → category', idx2.category);
-ok(idx2.lms === 4, '「适用机种」别名 → lms', idx2.lms);
-ok(idx2.remark === 0, '「备注」→ remark', idx2.remark);
-ok(idx2.lines === 7, '「线体」别名 → lines', idx2.lines);
-ok(idx2.stations === 8, '「工位名称」别名 → stations', idx2.stations);
-ok(idx2.lm1 === undefined && idx2.lm7 === undefined, '未出现的机种列不映射');
+/* ---------- 3. 表头别名与乱序 ---------- */
+section('表头别名 / 乱序 / 旧列兼容');
+const idx2 = M.mapImportHeader(['备注', '存放位置', '夹具名称', '夹具编号', '适用机种', '类别', '多余列A', '线体']);
+ok(idx2.remark === 0 && idx2.location === 1 && idx2.name === 2 && idx2.serialNo === 3,
+  '乱序表头各自定位正确', JSON.stringify(idx2));
+ok(idx2.lms === 4, '「适用机种」→ 合并机种列 lms', idx2.lms);
+ok(idx2.category === 5, '「类别」→ category', idx2.category);
+ok(idx2.lines === 7, '「线体」→ 旧版扁平产线列 lines', idx2.lines);
+ok(Object.keys(idx2).length === 7, '未识别列被忽略（多余列A 不入映射）', Object.keys(idx2).join(','));
 
-/* ---------- 4. 行解析 · 机种合并 ---------- */
-section('[行解析 · 机种合并]');
-const base = { serialNo: 'SN-001', location: 'ZP1-U-1-1' };
-const idxLm = M.mapImportHeader(['机种名称1', '机种名称2', '机种名称3', '机种名称4', '机种名称5', '机种名称6', '机种名称7', '名称', '实物编号', '库位']);
-let p = M.parseImportRow(['A', 'B', 'C', 'D', 'E', 'F', 'G', '夹具A', base.serialNo, base.location], idxLm);
-ok(p.ok, '解析成功', p.reason);
-ok(JSON.stringify(p.fixture.lineModels) === JSON.stringify(['A', 'B', 'C', 'D', 'E', 'F', 'G']),
-  '7 个机种全部保留（上限由 4 提升到 7）', p.fixture.lineModels);
+const idxOldStation = M.mapImportHeader(['夹具编号', '名称', '机种名称1', '库位', '产线1', '工位1', '工位', '工位顺序']);
+ok(idxOldStation.line1 === 4, '旧模板「产线1」仍正常映射', idxOldStation.line1);
+ok(Object.keys(idxOldStation).every((k) => !/^station/.test(k) && k !== 'seq'),
+  '旧模板「工位 / 工位1 / 工位顺序」三列全部不映射（静默忽略）', Object.keys(idxOldStation).join(','));
 
-const idxLms = M.mapImportHeader(['机种名称', '名称', '实物编号', '库位']);
-p = M.parseImportRow(['MODEL-A,MODEL-B;MODEL-C', '夹具B', base.serialNo, base.location], idxLms);
-ok(p.ok && JSON.stringify(p.fixture.lineModels) === JSON.stringify(['MODEL-A', 'MODEL-B', 'MODEL-C']),
-  '逗号/分号分隔的多机种被拆开', p.fixture.lineModels);
+/* ---------- 4. parseImportRow ---------- */
+section('parseImportRow（单行解析）');
+const idxV = M.mapImportHeader(['实物编号', '名称', '机种名称1', '库位', '产线1']);
+let p = M.parseImportRow(['SN-1', '', 'M', 'ZP1-U-1-1', 'L1'], idxV);
+ok(!p.ok && /名称/.test(p.reason), '名称为空 → 拒绝', p.reason);
+p = M.parseImportRow(['', '夹具E', 'M', 'ZP1-U-1-1', 'L1'], idxV);
+ok(!p.ok && /编号/.test(p.reason), '夹具编号为空 → 拒绝', p.reason);
+p = M.parseImportRow(['SN-1', '夹具E', 'M', '', 'L1'], idxV);
+ok(!p.ok && /库位/.test(p.reason), '库位为空 → 拒绝', p.reason);
+p = M.parseImportRow(['SN-1', '夹具E', 'M', 'A-1', 'L1'], idxV);
+ok(!p.ok && /库位/.test(p.reason), '库位非 4 段式 → 拒绝', p.reason);
+p = M.parseImportRow(['SN-1', '夹具E', '', 'ZP1-U-1-1', 'L1'], idxV);
+ok(!p.ok && /机种/.test(p.reason), '机种为空 → 拒绝', p.reason);
+p = M.parseImportRow(['SN-1', '夹具E', 'M', 'ZP1-U-1-1', 'L1'], idxV);
+ok(p.ok && p.fixture.lineNames.length === 1 && p.fixture.lineNames[0] === 'L1',
+  '单产线列 → lineNames=["L1"]', JSON.stringify(p.fixture.lineNames));
+ok(p.ok && p.fixture.stations === undefined, 'parseImportRow 不再产出 stations 字段', JSON.stringify(p.fixture));
 
-p = M.parseImportRow(['M1,M2,M3,M4,M5,M6,M7,M8,M9', '夹具C', base.serialNo, base.location], idxLms);
-ok(p.ok && p.fixture.lineModels.length === 7, '机种超过 7 个时截断到 7', p.fixture.lineModels);
+const idxMulti = M.mapImportHeader(['夹具编号', '名称', '机种名称1', '库位', '产线1', '产线2', '产线3']);
+p = M.parseImportRow(['SN-2', '多线夹具', 'M', 'ZP1-U-1-1', '3 号线', 'L2 U型线', 'L3'], idxMulti);
+ok(p.ok && p.fixture.lineNames.join('|') === '3 号线|L2 U型线|L3',
+  '产线1~5 分列按顺序收集', JSON.stringify(p.fixture.lineNames));
+p = M.parseImportRow(['SN-3', '重复线夹具', 'M', 'ZP1-U-1-1', 'L1', 'L1', ''], idxMulti);
+ok(p.ok && p.fixture.lineNames.length === 1, '同名列内去重', JSON.stringify(p.fixture.lineNames));
 
-p = M.parseImportRow(['MODEL-A,MODEL-A', '夹具D', base.serialNo, base.location], idxLms);
-ok(p.ok && JSON.stringify(p.fixture.lineModels) === JSON.stringify(['MODEL-A']), '重复机种去重', p.fixture.lineModels);
+const idxFlat = M.mapImportHeader(['夹具编号', '名称', '机种名称1', '库位', '产线']);
+p = M.parseImportRow(['SN-4', '旧模板夹具', 'M', 'ZP1-U-1-1', 'L1、L2 / L3'], idxFlat);
+ok(p.ok && p.fixture.lineNames.length === 3 && p.fixture.lineNames.indexOf('L2') >= 0,
+  '旧版扁平「产线」列用分隔符拆成多条', JSON.stringify(p.fixture.lineNames));
 
-/* ---------- 5. 行解析 · 必填校验 ---------- */
-section('[行解析 · 校验]');
-const idxV = M.mapImportHeader(['实物编号', '名称', '机种名称1', '库位', '产线', '工位']);
-p = M.parseImportRow(['SN-1', '', 'M', 'ZP1-U-1-1', 'L1', '工位A'], idxV);
-ok(!p.ok && /名称为空/.test(p.reason), '名称为空被拒绝', p.reason);
+p = M.parseImportRow(['SN-5', '无产线夹具', 'M', 'ZP1-U-1-1', ''], idxV);
+ok(p.ok && p.fixture.lineNames.length === 0, '产线为空时 parseImportRow 放行（交给 buildImportPlan 判跳过）',
+  JSON.stringify(p.fixture.lineNames));
 
-p = M.parseImportRow(['', '夹具E', 'M', 'ZP1-U-1-1', 'L1', '工位A'], idxV);
-ok(!p.ok && /夹具编号/.test(p.reason), '夹具编号为空被拒绝', p.reason);
+const idxFull = M.mapImportHeader(['夹具编号', '名称', '机种名称1', '库位', '产线1', '分类', '备注']);
+p = M.parseImportRow(['SN-6', '全字段夹具', 'M1', 'ZP1-U-1-1', 'L1', 'PVC', '有备注'], idxFull);
+ok(p.ok && p.fixture.category === 'PVC' && p.fixture.remark === '有备注',
+  '分类 / 备注正常解析', JSON.stringify(p.fixture));
 
-p = M.parseImportRow(['SN-1', '夹具E', 'M', '', 'L1', '工位A'], idxV);
-ok(!p.ok && /库位/.test(p.reason), '库位为空被拒绝', p.reason);
-
-p = M.parseImportRow(['SN-1', '夹具E', 'M', 'A-1', 'L1', '工位A'], idxV);
-ok(!p.ok && /4 段式/.test(p.reason), '库位非 4 段式被拒绝', p.reason);
-
-p = M.parseImportRow(['SN-1', '夹具E', '', 'ZP1-U-1-1', 'L1', '工位A'], idxV);
-ok(!p.ok && /机种/.test(p.reason), '机种名称为空被拒绝', p.reason);
-
-p = M.parseImportRow(['SN-1', '夹具E', 'M', 'ZP1-U-1-1', 'L1', '工位A'], idxV);
-ok(p.ok && p.fixture.lineNames[0] === 'L1' && p.fixture.stationNames[0] === '工位A',
-  '产线 / 工位名称被解析成数组', [p.fixture.lineNames, p.fixture.stationNames]);
-
-p = M.parseImportRow(['SN-1', '夹具E', 'M', 'ZP1-U-1-1', 'L1,L2', '工位A、工位B'], idxV);
-ok(p.ok && p.fixture.lineNames.length === 2 && p.fixture.stationNames.length === 2,
-  '多产线 / 多工位用分隔符拆开', [p.fixture.lineNames, p.fixture.stationNames]);
-
-/* ---------- 5.1 行解析 · 成对列（v4.2.0 多产线层级） ---------- */
-section('[行解析 · 成对列]');
-const idxPair = M.mapImportHeader(['夹具编号', '名称', '机种名称1', '库位', '产线1', '工位1', '产线2', '工位2']);
-let pp = M.parseImportRow(['SN-P1', '跨线夹具', 'M', 'ZP1-U-1-1', '3 号线', '1号工位 / 2号工位', 'L2 U型线', '1号工位'], idxPair);
-ok(pp.ok, '成对列解析成功', pp.reason);
-ok(pp.fixture.legacyFlat === false, '成对列不标记为旧扁平模板');
-ok(pp.fixture.linePairs.length === 2, '解析出 2 对产线', pp.fixture.linePairs);
-ok(pp.fixture.linePairs[0].lineName === '3 号线'
-  && pp.fixture.linePairs[0].stationNames.join(',') === '1号工位,2号工位',
-  '第 1 对：3 号线 → 1号工位、2号工位', pp.fixture.linePairs[0]);
-ok(pp.fixture.linePairs[1].lineName === 'L2 U型线'
-  && pp.fixture.linePairs[1].stationNames.join(',') === '1号工位',
-  '第 2 对：L2 U型线 → 1号工位', pp.fixture.linePairs[1]);
-ok(pp.fixture.lineNames.join(',') === '3 号线,L2 U型线', '产线去重汇总正确', pp.fixture.lineNames);
-ok(pp.fixture.stationNames.join(',') === '1号工位,2号工位', '工位去重汇总正确', pp.fixture.stationNames);
-
-/* 旧扁平列：仍按「每条产线 × 全部工位」展开（向后兼容） */
-const idxFlat = M.mapImportHeader(['夹具编号', '名称', '机种名称1', '库位', '产线', '工位']);
-pp = M.parseImportRow(['SN-F1', '旧模板夹具', 'M', 'ZP1-U-1-1', 'L1,L2', 'A、B'], idxFlat);
-ok(pp.ok && pp.fixture.legacyFlat === true, '旧扁平模板被识别为兼容模式');
-ok(pp.fixture.linePairs.length === 2 && pp.fixture.linePairs.every((x) => x.stationNames.length === 2),
-  '旧模板按「每条产线 × 全部工位」展开（行为不变）', pp.fixture.linePairs);
-
-/* ---------- 5.2 分类校验（v4.2.0） ---------- */
-section('[分类校验]');
-ok(M.CATEGORY_PRESETS.indexOf('金属') >= 0 && M.CATEGORY_PRESETS.indexOf('PVC') >= 0,
-  '预设含金属 / PVC', M.CATEGORY_PRESETS);
-ok(M.isValidCategory('') === true, '空分类允许（= 未分类）');
-ok(M.isValidCategory('金属') === true, '常规分类通过');
-ok(M.isValidCategory('x'.repeat(M.MAX_CATEGORY)) === true, '达到上限长度通过');
-ok(M.isValidCategory('x'.repeat(M.MAX_CATEGORY + 1)) === false, '超过上限长度被拒');
-ok(M.isValidCategory('a|b') === false, '含竖线被拒');
-
-/* ---------- 6. buildImportPlan（夹具导入）· 端到端 ---------- */
-section('[夹具导入 buildImportPlan · 端到端]');
-const L1 = { id: 11, name: 'L1 总装线', type: 'linear' };
-const L2 = { id: 22, name: 'L2 U型线', type: 'u' };
-const S11 = { id: 111, lineId: 11, name: '上料工位', seq: 10 };
-const S12 = { id: 112, lineId: 11, name: '压装工位', seq: 20 };
-const S21 = { id: 221, lineId: 22, name: '工位一', seq: 10 };
-
-const ctxFix = {
+/* ---------- 5. buildImportPlan ---------- */
+section('buildImportPlan（整表计划）');
+const L1 = { id: 11, name: 'L1 总装线' };
+const L2 = { id: 22, name: 'L2 U型线' };
+const ctxBase = {
   lines: [L1, L2],
-  stations: [S11, S12, S21],
   fixtures: [
-    { id: 1, code: '1001', serialNo: 'SN-OLD', name: '已有夹具', lines: [11], stations: [111] },
-    { id: 2, code: '1002', serialNo: 'SN-DUP', name: '重号甲', status: 'stocked', lines: [11], stations: [111] },
-    { id: 3, code: '1003', serialNo: 'SN-DUP', name: '重号乙', status: 'checked_out', lines: [11], stations: [112] }
+    { id: 1, code: '1001', serialNo: 'SN-OLD', name: '已有夹具', lineModels: ['MODEL-X'], category: '冲压', location: 'ZP1-U-9-9', remark: '', lines: [11] }
   ]
 };
-const fixRows = [
-  ['实物编号', '名称', '机种名称1', '分类', '库位', '产线', '工位', '备注'],
-  ['SN-OLD', '追加另一条产线', 'MODEL-A', '冲压', 'ZP1-U-1-1', 'L2 U型线', '工位一', 'ok'],
-  ['SN-NEW', '全新夹具', 'MODEL-B', '焊接', 'ZP1-U-2-1', 'L1 总装线', '上料工位', 'ok'],
-  ['SN-OLD', '产线未建档', 'MODEL-C', '装配', 'ZP1-U-3-1', 'LX 未知线', '工位X', '产线未建档→自动补建'],
-  ['', '实物编号为空', 'MODEL-D', '装配', 'ZP1-U-4-1', 'L1 总装线', '上料工位', '必填缺失'],
-  ['SN-OLD', '工位不属该产线', 'MODEL-E', '装配', 'ZP1-U-5-1', 'L1 总装线', '工位一', '工位未在该产线下→自动补建'],
-  ['SN-DUP', '重号记录', 'MODEL-F', '冲压', 'ZP1-U-6-1', 'L1 总装线', '压装工位', '重号提示'],
-  ['SN-OLD', '', 'MODEL-G', '冲压', 'ZP1-U-7-1', 'L1 总装线', '上料工位', '名称为空']
+const rowsMain = [
+  ['实物编号', '名称', '机种名称1', '分类', '库位', '产线', '备注'],
+  ['SN-OLD', '追加另一条产线', 'MODEL-A', '冲压', 'ZP1-U-1-1', 'L2 U型线', 'ok'],
+  ['SN-NEW', '全新夹具', 'MODEL-B', '焊接', 'ZP1-U-2-1', 'L1 总装线', 'ok'],
+  ['SN-OLD', '产线未建档', 'MODEL-C', '装配', 'ZP1-U-3-1', 'LX 未知线', '产线未建档→自动补建'],
+  ['', '实物编号为空', 'MODEL-D', '装配', 'ZP1-U-4-1', 'L1 总装线', '必填缺失'],
+  ['SN-OLD', '', 'MODEL-G', '冲压', 'ZP1-U-7-1', 'L1 总装线', '名称为空'],
+  ['SN-OLD', '库位非法', 'MODEL-H', '冲压', 'A-1', 'L1 总装线', '库位不合规'],
+  ['SN-OLD', '产线为空', 'MODEL-I', '冲压', 'ZP1-U-8-1', '', '产线缺失']
 ];
-const fxPlan = M.buildImportPlan(fixRows, ctxFix);
-ok(fxPlan.ok, '生成夹具导入计划成功', fxPlan.error);
-ok(fxPlan.plan.length === 5, '5 条有效数据（未建档产线/工位改为自动补建，不再整行跳过）', fxPlan.plan.length);
-ok(fxPlan.skipped.length === 2, '2 条被跳过（仅必填缺失 / 名称为空）', fxPlan.skipped.length);
-const fxSkip = fxPlan.skipped.map((s) => s.reason).join(' | ');
-ok(/夹具编号为空或格式不合法/.test(fxSkip), '夹具编号缺失被跳过', fxSkip);
-ok(/名称为空/.test(fxSkip), '名称为空被跳过', fxSkip);
-ok(fxPlan.plan._autoLines.indexOf('LX 未知线') >= 0, '未建档产线被登记为待自动补建', fxPlan.plan._autoLines);
-ok(fxPlan.plan._autoStations.some((s) => s.lineName === 'LX 未知线' && s.name === '工位X'), '未建档产线下的工位被登记为待自动补建', fxPlan.plan._autoStations);
-ok(fxPlan.plan._autoStations.some((s) => s.lineName === 'L1 总装线' && s.name === '工位一'), '跨产线重名工位自动补建到本行产线', fxPlan.plan._autoStations);
+const rMain = M.buildImportPlan(rowsMain, ctxBase);
+ok(rMain.ok, '整表可导入', rMain.error);
+ok(rMain.plan.length === 3, '3 条有效数据（未建档产线自动补建，不再整行跳过）', rMain.plan.length);
+ok(rMain.skipped.length === 4, '4 条被跳过', rMain.skipped.length);
+ok(rMain.skipped.some((s) => /编号/.test(s.reason)), '「夹具编号为空」计入跳过',
+  rMain.skipped.map((s) => s.reason).join(' / '));
+ok(rMain.skipped.some((s) => /名称/.test(s.reason)), '「名称为空」计入跳过');
+ok(rMain.skipped.some((s) => /库位/.test(s.reason)), '「库位不合规」计入跳过');
+ok(rMain.skipped.some((s) => /产线为空/.test(s.reason)), '「产线为空」计入跳过');
+ok(rMain.plan._autoLines.indexOf('LX 未知线') >= 0, '未建档产线被登记为待自动补建', JSON.stringify(rMain.plan._autoLines));
+ok(rMain.plan._autoLines.indexOf('L1 总装线') < 0, '已建档产线不进入补建清单', JSON.stringify(rMain.plan._autoLines));
+const byName = {};
+rMain.plan.forEach((x) => { byName[x.fixture.name] = x; });
+ok(byName['追加另一条产线'].fixture.lineNames.join('|') === 'L2 U型线',
+  '产线名称原样保留供落库时解析', JSON.stringify(byName['追加另一条产线'].fixture));
+ok(byName['追加另一条产线'].fixture.stations === undefined, '计划里不再有 stations', JSON.stringify(byName['追加另一条产线'].fixture));
+ok(rMain.plan._missing.some((m) => m.some((x) => x.key === 'LX 未知线' && x.kind === 'line')),
+  '_missing 标出未建档产线（kind=line）', JSON.stringify(rMain.plan._missing));
+ok(rMain.plan._missing.every((m) => m.every((x) => x.kind === 'line')),
+  '_missing 中不再有工位项（kind 只有 line）', JSON.stringify(rMain.plan._missing));
 
-const fxByName = {};
-fxPlan.plan.forEach((p) => { fxByName[p.fixture.name] = p; });
-ok(fxByName['追加另一条产线'].fixture.lineNames.join(',') === 'L2 U型线'
-  && fxByName['追加另一条产线'].fixture.stationNames.join(',') === '工位一',
-  '产线 / 工位名称原样保留供落库时解析', fxByName['追加另一条产线'].fixture);
-ok(fxByName['全新夹具'].fixture.serialNo === 'SN-NEW', '实物编号原样保留');
-ok(typeof fxByName['重号记录'].dupHint === 'string' && /已有 2 套/.test(fxByName['重号记录'].dupHint),
-  '重号给出持有量提示', fxByName['重号记录'].dupHint);
-ok(fxByName['重号记录'].fixture.code === undefined, '序号不由表格提供（系统分配）',
-  fxByName['重号记录'].fixture.code);
+ok(M.buildImportPlan([['名称'], ['x']], ctxBase).ok === false, '缺夹具编号列 → 报错',
+  M.buildImportPlan([['名称'], ['x']], ctxBase).error);
+ok(M.buildImportPlan([['夹具编号'], ['x']], ctxBase).ok === false, '缺名称列 → 报错',
+  M.buildImportPlan([['夹具编号'], ['x']], ctxBase).error);
+ok(M.buildImportPlan([['夹具编号', '名称'], ['a', 'b']], ctxBase).ok === false, '缺库位列 → 报错',
+  M.buildImportPlan([['夹具编号', '名称'], ['a', 'b']], ctxBase).error);
+ok(M.buildImportPlan([['夹具编号', '名称', '库位'], ['a', 'b', 'ZP1-U-1-1']], ctxBase).ok === false,
+  '缺产线列 → 报错',
+  M.buildImportPlan([['夹具编号', '名称', '库位'], ['a', 'b', 'ZP1-U-1-1']], ctxBase).error);
+ok(M.buildImportPlan([['夹具编号', '名称', '库位', '产线1']], ctxBase).ok === false, '只有表头无数据行 → 报错');
+const emptyRow = M.buildImportPlan([['夹具编号', '名称', '库位', '产线1'], ['  ', '　', '', '']], ctxBase);
+ok(emptyRow.ok === false, '全空行 → 报错', emptyRow.error);
+const allBad = M.buildImportPlan([['夹具编号', '名称', '库位', '产线1'], ['SN-X', '', 'ZP1-U-1-1', 'L1']], ctxBase);
+ok(allBad.ok === false && Array.isArray(allBad.skipped) && allBad.skipped.length === 1,
+  '整表被拒时返回 skipped 明细（BUG-007）', JSON.stringify(allBad.skipped));
 
-/* ---------- 6.1 成对列 · 层级不串线（v4.2.0 核心回归） ---------- */
-section('[成对列 · 层级不串线]');
-const pairRows = [
-  ['夹具编号', '名称', '机种名称1', '库位', '产线1', '工位1', '产线2', '工位2'],
-  ['SN-PA', '两条线各一个工位', 'M1', 'ZP1-U-9-1', 'L1 总装线', '上料工位', 'L2 U型线', '工位一']
+/* ---------- 6. 产线名归并（BUG-010） ---------- */
+section('产线名归并（1# → 1）');
+ok(M.normalizeLineName('1#') === '1', '归一化去掉 #（1# → 1）', M.normalizeLineName('1#'));
+ok(M.normalizeLineName('１') === '1', '全角转半角', M.normalizeLineName('１'));
+ok(M.normalizeLineName(' 1 ') === '1', '去空白', '[' + M.normalizeLineName(' 1 ') + ']');
+ok(M.normalizeLineName('3号线') !== M.normalizeLineName('3'), '「3号线」与「3」不同名（不会被误并）');
+const mergeRows = [
+  ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '备注'],
+  ['SN-M1', '归并测试A', 'M1', '金属', 'ZP1-U-1-1', '1#', ''],
+  ['SN-M2', '归并测试B', 'M1', '金属', 'ZP1-U-1-2', '1', ''],
+  ['SN-M3', '归并测试C', 'M1', '金属', 'ZP1-U-1-3', '1#', '']
 ];
-const pairPlan = M.buildImportPlan(pairRows, ctxFix);
-ok(pairPlan.ok && pairPlan.plan.length === 1, '成对列生成导入计划', pairPlan.error);
-const pf = pairPlan.plan[0].fixture;
-ok(pf.linePairs.length === 2
-  && pf.linePairs[0].lineName === 'L1 总装线' && pf.linePairs[0].stationNames.join(',') === '上料工位'
-  && pf.linePairs[1].lineName === 'L2 U型线' && pf.linePairs[1].stationNames.join(',') === '工位一',
-  '层级原样保留（每条产线只带自己的工位）', pf.linePairs);
-ok(!pairPlan.plan._autoStations.some((s) => s.lineName === 'L1 总装线' && s.name === '工位一'),
-  '不把「工位一」错误补建到 L1 下（旧笛卡尔积缺陷已修复）', pairPlan.plan._autoStations);
-ok(!pairPlan.plan._autoStations.some((s) => s.lineName === 'L2 U型线' && s.name === '上料工位'),
-  '不把「上料工位」错误补建到 L2 下（旧笛卡尔积缺陷已修复）', pairPlan.plan._autoStations);
+const mergePlan = M.buildImportPlan(mergeRows, { fixtures: [], lines: [{ id: 1, name: '1' }] });
+ok(mergePlan.ok, '归并场景可导入', mergePlan.error);
+ok(mergePlan.plan.every((x) => x.fixture.lineNames[0] === '1'),
+  '「1#」全部归并到库内已有的「1」', JSON.stringify(mergePlan.plan.map((x) => x.fixture.lineNames)));
+ok(mergePlan.plan._lineHints.length === 1 && mergePlan.plan._lineHints[0].from === '1#',
+  '归并提示记录来源写法（1# → 1）', JSON.stringify(mergePlan.plan._lineHints));
+ok(mergePlan.plan._lineHints[0].rows === 2, '归并提示统计涉及行数', mergePlan.plan._lineHints[0].rows);
+ok(mergePlan.plan._autoLines.length === 0, '归并后不再补建同义产线', JSON.stringify(mergePlan.plan._autoLines));
+const firstWins = M.buildImportPlan([
+  ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '备注'],
+  ['SN-M5', '首现为准A', 'M1', '金属', 'ZP1-U-2-1', 'A#', ''],
+  ['SN-M6', '首现为准B', 'M1', '金属', 'ZP1-U-2-2', 'A', '']
+], { fixtures: [], lines: [] });
+ok(firstWins.plan.every((x) => x.fixture.lineNames[0] === 'A#'),
+  '库内无同名时以文件内首个写法为准（A#）', JSON.stringify(firstWins.plan.map((x) => x.fixture.lineNames)));
 
-const pairNew = M.buildImportPlan([
-  ['夹具编号', '名称', '机种名称1', '库位', '产线1', '工位1', '产线2', '工位2'],
-  ['SN-PB', '新工位夹具', 'M2', 'ZP1-U-9-2', 'L2 U型线', '上料工位', '', '']
-], ctxFix);
-ok(pairNew.ok && pairNew.plan._autoStations.length === 1
-  && pairNew.plan._autoStations[0].lineName === 'L2 U型线'
-  && pairNew.plan._autoStations[0].name === '上料工位',
-  '未建档工位只补建到所在产线下', pairNew.plan._autoStations);
-
-const pairZero = M.buildImportPlan([
-  ['夹具编号', '名称', '机种名称1', '库位', '产线1', '工位1', '产线2', '工位2'],
-  ['SN-PC', '某线工位待定', 'M3', 'ZP1-U-9-3', 'L1 总装线', '', 'L2 U型线', '工位一']
-], ctxFix);
-ok(pairZero.ok && pairZero.plan.length === 1,
-  '单条产线允许 0 工位（全记录工位 ≥1 即可）', pairZero.error);
-
-/* ---------- 6.2 导出 → 导入 往返一致 ---------- */
-section('[导出 → 导入 往返]');
-sandbox.state.lines = [L1, L2];
-sandbox.state.stations = [S11, S12, S21];
-const f0 = { lines: [11, 22], stations: [111, 221] };
-const pairs0 = M.fixtureLinePairsForExport(f0);
-ok(pairs0.length === 2
-  && pairs0[0].lineName === 'L1 总装线' && pairs0[0].stationNames.join(',') === '上料工位'
-  && pairs0[1].lineName === 'L2 U型线' && pairs0[1].stationNames.join(',') === '工位一',
-  '导出：扁平 id 还原为「产线 → 工位」层级', pairs0);
-
-/* 按导出的成对列拼一行（严格按 22 列模板定位），再当成导入模板解析回来 */
-const rowOut = new Array(M.FIX_IMPORT_HEADERS.length).fill('');
-rowOut[0] = 'SN-RT';
-rowOut[1] = '往返夹具';
-rowOut[2] = 'MODEL-R';
-rowOut[9] = '金属';
-rowOut[10] = 'ZP1-U-1-1';
-for (let i = 0; i < 5; i++) {
-  const pr = pairs0[i];
-  rowOut[11 + i * 2] = pr ? pr.lineName : '';
-  rowOut[12 + i * 2] = pr ? pr.stationNames.join(' / ') : '';
-}
-rowOut[21] = '往返测试';
-const rt = M.parseImportRow(rowOut, M.mapImportHeader(M.FIX_IMPORT_HEADERS));
-ok(rt.ok, '导出行可被导入模板解析', rt.reason);
-ok(JSON.stringify(rt.fixture.linePairs) === JSON.stringify(pairs0),
-  '往返后层级完全一致（导出文件可直接回灌）', rt.fixture.linePairs);
-
-/* ---------- 6.3 下载模板：示例行列数与表头一致 ---------- */
-section('[下载模板 · 列对齐]');
-M.__export_downloadFixtureTemplate();
-const dl = sandbox.__downloaded || {};
-const csvLines = String(dl.content || '').replace(/^\uFEFF/, '').split('\r\n').filter((x) => x !== '');
-ok(/夹具导入模板\.csv$/.test(dl.name || ''), '模板文件名为「夹具导入模板.csv」', dl.name);
-ok(csvLines.length === 4, '模板含 1 行表头 + 3 行示例', csvLines.length);
-ok(csvLines[0].split(',').length === M.FIX_IMPORT_HEADERS.length,
-  '表头列数 = FIX_IMPORT_HEADERS', csvLines[0].split(',').length);
-ok(csvLines.slice(1).every((ln) => ln.split(',').length === M.FIX_IMPORT_HEADERS.length),
-  '每行示例的列数与表头一致（字段不会错位）',
-  csvLines.slice(1).map((ln) => ln.split(',').length));
-
-/* ---------- 7. buildLineImportPlan（产线导入）· 端到端 ---------- */
-section('[产线导入 buildLineImportPlan · 端到端]');
-ok(M.LINE_IMPORT_HEADERS.length === 6, '产线导入模板为 6 列', M.LINE_IMPORT_HEADERS.length);
-ok(M.LINE_IMPORT_HEADERS.join('|') === '线体|线体形态|工位|工位顺序|夹具编号|备注',
-  '产线导入模板删掉产品两列', M.LINE_IMPORT_HEADERS.join('|'));
-
-const lineRows = [
-  ['线体', '线体形态', '工位', '工位顺序', '夹具编号', '备注'],
-  ['L2 U型线', 'U型', '工位一', '10', 'SN-OLD', '给已有夹具追加另一条产线'],
-  ['L1 总装线', '直线形', '压装工位', '20', 'SN-OLD', '同一套夹具再加一个工位'],
-  ['L1 总装线', '直线形', '上料工位', '10', 'SN-NOTEXIST', '夹具未建档应跳过'],
-  ['L1 总装线', '直线形', '上料工位', '10', '', '夹具编号为空应跳过'],
-  ['L2 U型线', 'U型', '工位一', '10', 'SN-OLD', '文件内重复行应去重'],
-  ['L1 总装线', '直线形', '上料工位', '10', 'SN-OLD', '既有产线 + 既有工位应忽略'],
-  ['L9 新线', '直线形', '新工位', '35', 'SN-OLD', '线体 / 工位未建档则自动补建'],
-  ['L1 总装线', '直线形', '', '10', 'SN-OLD', '工位为空应跳过']
-];
-const lnPlan = M.buildLineImportPlan(lineRows, ctxFix);
-ok(lnPlan.ok, '生成产线导入计划成功', lnPlan.error);
-ok(lnPlan.appends.length === 3, '3 行有效追加', lnPlan.appends.length);
-ok(lnPlan.skipped.length === 5, '5 行被跳过', lnPlan.skipped.length);
-
-const lnSkip = lnPlan.skipped.map((s) => s.reason).join(' | ');
-ok(/未建档/.test(lnSkip), '夹具未建档的行被跳过', lnSkip);
-ok(/重复行/.test(lnSkip), '文件内重复行被跳过', lnSkip);
-ok(/已关联/.test(lnSkip), '已存在关联的行被忽略', lnSkip);
-ok(/空缺/.test(lnSkip), '工位空缺的行被跳过', lnSkip);
-
-const bySerial = {};
-lnPlan.appends.forEach((a) => {
-  bySerial[a.serialNo] = bySerial[a.serialNo] || [];
-  bySerial[a.serialNo].push(a);
-});
-ok(bySerial['SN-OLD'].length === 3, 'SN-OLD 命中 3 条追加', bySerial['SN-OLD'].length);
-const addL2 = bySerial['SN-OLD'].find((a) => a.lineName === 'L2 U型线');
-ok(addL2 && addL2.addLine === true && addL2.addStation === true, '新产线 + 新工位都标记为新增', addL2);
-const addS12 = bySerial['SN-OLD'].find((a) => a.stationName === '压装工位');
-ok(addS12 && addS12.addLine === false && addS12.addStation === true, '已有产线只新增工位', addS12);
-
-ok(lnPlan.newLines.length === 1 && lnPlan.newLines[0].name === 'L9 新线',
-  '未建档的线体被登记为待新建', lnPlan.newLines);
-ok(lnPlan.newStations.length === 1 && lnPlan.newStations[0].name === '新工位'
-  && lnPlan.newStations[0].lineName === 'L9 新线', '未建档的工位被登记为待新建', lnPlan.newStations);
-ok(lnPlan.newStations[0].seq === 35, '工位顺序被解析为数字', lnPlan.newStations[0]);
-
-/* ---------- 8. buildLineImportPlan · 异常 ---------- */
-section('[产线导入 buildLineImportPlan · 异常]');
-ok(M.buildLineImportPlan([['实物编号'], ['SN-1']], {}).ok === false, '缺线体列 → 报错',
-  M.buildLineImportPlan([['实物编号'], ['SN-1']], {}).error);
-ok(M.buildLineImportPlan([['线体'], ['L1']], {}).ok === false, '缺工位列 → 报错',
-  M.buildLineImportPlan([['线体'], ['L1']], {}).error);
-ok(M.buildLineImportPlan([['线体', '工位'], ['L1', '上料工位']], {}).ok === false, '缺夹具编号列 → 报错',
-  M.buildLineImportPlan([['线体', '工位'], ['L1', '上料工位']], {}).error);
-ok(M.buildLineImportPlan([['线体', '工位', '夹具编号']], {}).ok === false, '只有表头无数据行 → 报错',
-  M.buildLineImportPlan([['线体', '工位', '夹具编号']], {}).error);
-ok(M.buildLineImportPlan([], {}).ok === false, '空数组 → 报错', M.buildLineImportPlan([], {}).error);
-ok(M.buildLineImportPlan([['线体', '工位', '夹具编号'], ['  ', '　', '']], {}).ok === false,
-  '数据行全为空白 → 报错（无有效行）',
-  M.buildLineImportPlan([['线体', '工位', '夹具编号'], ['  ', '　', '']], {}).error);
-const noFix = M.buildLineImportPlan(
-  [['线体', '工位', '夹具编号'], ['L1 总装线', '上料工位', 'SN-NOTEXIST']],
-  { lines: [L1], stations: [S11], fixtures: [] });
-ok(noFix.ok === false, '夹具编号在库中不存在 → 无有效行', noFix.error);
-ok(/未建档/.test((noFix.skipped || []).map((s) => s.reason).join('|')), '失败时仍返回逐行原因', noFix.skipped);
-
-const dupFix = M.buildLineImportPlan(
-  [['线体', '工位', '夹具编号'], ['L1 总装线', '上料工位', 'SN-DUP']],
-  { lines: [L1], stations: [S11], fixtures: ctxFix.fixtures });
-ok(dupFix.ok === false, '实物编号对应多套 → 无法唯一定位 → 无有效行', dupFix.error);
-ok(/对应 2 套/.test((dupFix.skipped || []).map((s) => s.reason).join('|')),
-  '重号无法定位给出明确原因', (dupFix.skipped || []).map((s) => s.reason).join('|'));
-
-/* ---------- 9. buildLineImportPlan · 上限 ---------- */
-section('[产线导入 buildLineImportPlan · 上限]');
-/* L0（id 100）下挂 10 个工位 S0..S9；L1..L5（101..105）各挂 1 个工位 */
-const manyLines = [{ id: 100, name: 'L0', type: 'linear' }];
-const manyStations = [];
-for (let i = 0; i < 10; i++) manyStations.push({ id: 1000 + i, lineId: 100, name: 'S' + i, seq: i });
-for (let i = 1; i <= 5; i++) {
-  manyLines.push({ id: 100 + i, name: 'L' + i, type: 'linear' });
-  manyStations.push({ id: 1100 + i, lineId: 100 + i, name: 'S' + i, seq: 10 });
-}
-/* 供「未达上限」用：L0 下的第 11 个工位（id 1010 占位 → 用 1011 避免与 S10 冲突） */
-manyStations.push({ id: 1011, lineId: 100, name: 'S10B', seq: 100 });
-manyStations.push({ id: 1012, lineId: 100, name: 'S10C', seq: 101 });
-
-/* ① 产线已达 5 条上限 */
-const limFix = [
-  { id: 9, code: '1009', serialNo: 'SN-LIM', name: '满产线夹具',
-    lines: [100, 101, 102, 103, 104], stations: [1000] }
-];
-const limPlan = M.buildLineImportPlan(
-  [['线体', '工位', '夹具编号'], ['L5', 'S5', 'SN-LIM']],
-  { lines: manyLines, stations: manyStations, fixtures: limFix });
-ok(limPlan.ok === false, '产线已达上限 5 条 → 整表无有效行', limPlan.error);
-ok(/上限 5/.test((limPlan.skipped || []).map((s) => s.reason).join('|')), '提示中给出产线上限',
-  (limPlan.skipped || []).map((s) => s.reason).join('|'));
-
-/* ② 工位已达 10 个上限 */
-const stFix = [
-  { id: 8, code: '1008', serialNo: 'SN-STFULL', name: '满工位夹具',
-    lines: [100], stations: [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009] }
-];
-const stLimitPlan = M.buildLineImportPlan(
-  [['线体', '工位', '夹具编号'], ['L0', 'S10B', 'SN-STFULL']],
-  { lines: manyLines, stations: manyStations, fixtures: stFix });
-ok(stLimitPlan.ok === false, '工位已达上限 10 个 → 无有效行', stLimitPlan.error);
-ok(/上限 10/.test((stLimitPlan.skipped || []).map((s) => s.reason).join('|')),
-  '提示中给出工位上限', (stLimitPlan.skipped || []).map((s) => s.reason).join('|'));
-
-/* ③ 未达上限 → 只追加工位、不重复加产线 */
-const st9 = [{ id: 7, code: '1007', serialNo: 'SN-ST9', name: '第 9 个工位',
-  lines: [100], stations: [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008] }];
-const okPlan = M.buildLineImportPlan(
-  [['线体', '工位', '夹具编号'], ['L0', 'S10C', 'SN-ST9']],
-  { lines: manyLines, stations: manyStations, fixtures: st9 });
-ok(okPlan.ok === true, '未达工位上限时可追加', okPlan.error);
-ok(okPlan.appends[0].addStation === true && okPlan.appends[0].addLine === false,
-  '已有产线只追加工位', okPlan.appends[0]);
-ok(okPlan.newLines.length === 0 && okPlan.newStations.length === 0, '无需新建线体 / 工位',
-  [okPlan.newLines, okPlan.newStations]);
-
-/* ---------- 9. 导入幂等：同一份表导两次不能翻倍（v4.4.0） ---------- */
-section('[导入幂等 · 重复识别]');
-
-function mkFixRow(o) {
-  const row = new Array(M.FIX_IMPORT_HEADERS.length).fill('');
-  const put = (h, v) => { const i = M.FIX_IMPORT_HEADERS.indexOf(h); if (i >= 0) row[i] = v; };
-  put('夹具编号', o.serialNo); put('名称', o.name);
-  put('机种名称1', o.model || 'MODEL-A');
-  put('分类', o.cat || '金属'); put('库位', o.loc);
-  put('产线1', o.line1 == null ? 'L1 总装线' : o.line1);
-  put('工位1', o.st1 == null ? 'S1 上料工位' : o.st1);
-  put('备注', o.remark || '');
-  return row;
-}
+/* ---------- 7. 导入查重（多重集 1:1 配对） ---------- */
+section('导入查重（与库内多重集 1:1 配对）');
+const dupLines = [{ id: 101, name: 'L1 线' }];
+const dupExisting = [{
+  id: 9, code: '1009', serialNo: 'SN-DUP', name: '同号夹具', location: 'ZP1-U-1-1',
+  category: '金属', remark: '', lineModels: ['M1'], lines: [101]
+}];
 const HDR = M.FIX_IMPORT_HEADERS.slice();
+const mkRow = (o) => {
+  const r = new Array(HDR.length).fill('');
+  const put = (key, v) => { const i = HDR.indexOf(key); if (i >= 0) r[i] = v; };
+  put('夹具编号', o.serialNo || '');
+  put('名称', o.name || '');
+  put('机种名称1', o.lm1 || '');
+  put('分类', o.category || '');
+  put('库位', o.location || '');
+  put('产线1', o.line1 || '');
+  put('备注', o.remark || '');
+  return r;
+};
+const exact = mkRow({ serialNo: 'SN-DUP', name: '同号夹具', lm1: 'M1', category: '金属', location: 'ZP1-U-1-1', line1: 'L1 线' });
+const pDup = M.buildImportPlan([HDR, exact], { fixtures: dupExisting, lines: dupLines });
+ok(pDup.ok && pDup.plan[0].isDup === true, '与库内完全一致 → 判为重复', JSON.stringify(pDup.plan[0] && pDup.plan[0].isDup));
+ok(pDup.plan._dupCount === 1, '_dupCount 统计重复行数', pDup.plan._dupCount);
+const pNew = M.buildImportPlan([HDR, mkRow({ serialNo: 'SN-FRESH', name: '全新', lm1: 'M2', category: '金属', location: 'ZP1-U-1-2', line1: 'L1 线' })],
+  { fixtures: dupExisting, lines: dupLines });
+ok(pNew.ok && pNew.plan[0].isDup === false, '内容不同 → 判为新增', JSON.stringify(pNew.plan[0] && pNew.plan[0].isDup));
+const diffLine = M.buildImportPlan([HDR, mkRow({ serialNo: 'SN-DUP', name: '同号夹具', lm1: 'M1', category: '金属', location: 'ZP1-U-1-1', line1: 'L2 线' })],
+  { fixtures: dupExisting, lines: dupLines });
+ok(diffLine.plan[0].isDup === false, '产线不同 → 不算重复（签名含产线集合）', JSON.stringify(diffLine.plan[0].isDup));
+ok(M._sigOfNames('S', 'N', 'ZP1-U-1-1', 'C', ['b', 'a'], ['L2', 'L1'], 'R')
+  === M._sigOfNames('S', 'N', 'ZP1-U-1-1', 'C', ['a', 'b'], ['L1', 'L2'], 'R'),
+  '签名对机种/产线集合顺序不敏感');
+ok(M._sigOfNames('S', 'N', 'ZP1-U-1-1', 'C', ['a'], ['L1'], 'R')
+  !== M._sigOfNames('S', 'N', 'ZP1-U-1-1', 'C', ['a'], ['L2'], 'R'),
+  '签名对产线集合敏感');
+const sigFix = M._sigOfFixture(dupExisting[0], dupLines);
+ok(sigFix === M._sigOfNames('SN-DUP', '同号夹具', 'ZP1-U-1-1', '金属', ['M1'], ['L1 线'], ''),
+  '_sigOfFixture 用 lines 反查产线名，与表格签名同构', sigFix);
+const twoSame = M.buildImportPlan([HDR, exact, exact], { fixtures: dupExisting, lines: dupLines });
+ok(twoSame.plan.length === 2 && twoSame.plan._dupCount === 1,
+  '库内 1 套 + 本次 2 行同内容 → 1 重复 + 1 新增（不做批次内去重）',
+  JSON.stringify(twoSame.plan.map((x) => x.isDup)));
 
-/* 9.1 库内为空：表内两行完全相同也必须都进计划（同库位放 2 套同号是合法业务） */
-const rowsDupInFile = [HDR,
-  mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1' }),
-  mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1' })];
-const p1 = M.buildImportPlan(rowsDupInFile, { fixtures: [], lines: [], stations: [] });
-ok(p1.ok && p1.plan.length === 2, '批次内两行完全相同的记录都能进计划', p1.error);
-ok(p1.plan._dupCount === 0 && p1.plan.every((p) => p.isDup === false),
-  '库内为空时不做批次内去重（保护同库位多套同号）', p1.plan._dupCount);
-
-const fakeLines = [{ id: 101, name: 'L1 总装线', type: 'linear' }];
-const fakeStations = [{ id: 201, lineId: 101, name: 'S1 上料工位' }];
-const mkFix = (id, o) => ({
-  id, code: 1000 + id, serialNo: o.serialNo, name: o.name, lineModels: [o.model || 'MODEL-A'],
-  category: o.cat || '金属', location: o.loc, remark: o.remark || '',
-  lines: [101], stations: [201], status: 'stocked'
-});
-const existing2 = [mkFix(1, { serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1' }),
-  mkFix(2, { serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1' })];
-
-/* 9.2 同一份表再导一次（库内已有 2 套）→ 两行都判重复 */
-const p2 = M.buildImportPlan(rowsDupInFile, { fixtures: existing2, lines: fakeLines, stations: fakeStations });
-ok(p2.plan._dupCount === 2, '整份表重复导入 → 2 行全判重复', p2.plan._dupCount);
-ok(p2.plan.every((p) => p.isDup === true), '两行 isDup 都为 true', p2.plan.map((p) => p.isDup));
-
-/* 9.3 多重集 1:1 配对：库内只有 1 套、本次带来 2 行 → 1 重复 + 1 新增 */
-const p3 = M.buildImportPlan(rowsDupInFile, { fixtures: [existing2[0]], lines: fakeLines, stations: fakeStations });
-ok(p3.plan._dupCount === 1 && p3.plan[0].isDup === true && p3.plan[1].isDup === false,
-  '库内 1 套 + 本次 2 行 → 1 重复 1 新增（不重复计数）', p3.plan.map((p) => p.isDup));
-
-/* 9.4 任一字段不同即不算重复 */
-[
-  { label: '库位不同', row: mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-2' }) },
-  { label: '名称不同', row: mkFixRow({ serialNo: 'SN-D1', name: '另一个名字', loc: 'ZP1-U-1-1' }) },
-  { label: '分类不同', row: mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1', cat: 'PVC' }) },
-  { label: '机种不同', row: mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1', model: 'MODEL-B' }) },
-  { label: '备注不同', row: mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1', remark: '补录' }) },
-  { label: '工位不同', row: mkFixRow({ serialNo: 'SN-D1', name: '同号夹具', loc: 'ZP1-U-1-1', st1: 'S2 压装工位' }) }
-].forEach((v) => {
-  const r = M.buildImportPlan([HDR, v.row], { fixtures: existing2, lines: fakeLines, stations: fakeStations });
-  ok(r.plan._dupCount === 0, v.label + ' → 不判重复', r.plan._dupCount);
-});
-
-/* 9.5 整份表都不可导入时必须带回 skipped 明细（BUG-007） */
-const badRows = [HDR,
-  mkFixRow({ serialNo: 'SN-X1', name: '无产线', loc: 'ZP1-U-1-1', line1: '', st1: '' }),
-  mkFixRow({ serialNo: 'SN-X2', name: '无产线2', loc: 'ZP1-U-1-1', line1: '', st1: '' })];
-const p5 = M.buildImportPlan(badRows, { fixtures: [], lines: [], stations: [] });
-ok(p5.ok === false, '产线 / 工位全空 → 整份不可导入', p5.error);
-ok(Array.isArray(p5.skipped) && p5.skipped.length === 2, '失败结果里带回 skipped 明细',
-  p5.skipped && p5.skipped.length);
-ok((p5.skipped || []).every((s) => /产线/.test(s.reason)), '原因指向「产线为空」',
-  (p5.skipped || []).map((s) => s.reason));
-
-/* ---------- 10. 端到端：落库 / 幂等 / 撤销 ---------- */
-(async () => {
-  section('[导入幂等 · 落库与撤销]');
-  /* 上面几节把 state.lines 设成了 L1/L2，这里必须清空，否则产线会命中旧的 id、db.lines 为空 → 签名反查不到产线名 */
-  sandbox.state.fixtures = [];
-  sandbox.state.lines = [];
-  sandbox.state.stations = [];
-  const db = { fixtures: [], lines: [], stations: [], seq: 1 };
-  sandbox.DB.fixtureAdd = async (f) => {
-    const id = db.seq++;
-    db.fixtures.push(Object.assign({ id, code: 1000 + id, status: 'stocked' }, f));
-    return id;
-  };
-  sandbox.DB.add = async (coll, obj) => {
-    const id = db.seq++;
-    if (coll === 'lines') db.lines.push(Object.assign({ id }, obj));
-    else db.stations.push(Object.assign({ id }, obj));
-    return id;
-  };
-  sandbox.DB.fixtureDel = async (id) => { db.fixtures = db.fixtures.filter((f) => f.id !== id); };
-  sandbox.reloadAll = async () => {
-    sandbox.state.fixtures = db.fixtures;
-    sandbox.state.lines = db.lines;
-    sandbox.state.stations = db.stations;
-  };
-
-  const rowsOnce = [HDR, mkFixRow({ serialNo: 'SN-E2E', name: '端到端夹具', loc: 'ZP1-U-2-2' })];
-  const planA = M.buildImportPlan(rowsOnce, { fixtures: [], lines: [], stations: [] });
-  sandbox.__importPlan = planA.plan;
-  await M.__export_confirmImportPlan('all');
-  ok(db.fixtures.length === 1, '首次导入落库 1 条', db.fixtures.length);
-  const batch1 = db.fixtures[0] && db.fixtures[0].importBatch;
-  ok(!!batch1, '落库记录带 importBatch 批次号', batch1);
-
-  const planB = M.buildImportPlan(rowsOnce, { fixtures: db.fixtures, lines: db.lines, stations: db.stations });
-  ok(planB.plan._dupCount === 1, '再导同一份表 → 判为重复', planB.plan._dupCount);
-  sandbox.__importPlan = planB.plan;
-  await M.__export_confirmImportPlan();          // 不传参 = 默认「跳过重复」
-  ok(db.fixtures.length === 1, '默认「跳过重复」→ 记录数不变（不再是 2 条）', db.fixtures.length);
-
-  const planC = M.buildImportPlan(rowsOnce, { fixtures: db.fixtures, lines: db.lines, stations: db.stations });
-  sandbox.__importPlan = planC.plan;
-  await M.__export_confirmImportPlan('all');     // 用户明确「全部导入」
-  ok(db.fixtures.length === 2, '选「全部导入」→ 确实新增第 2 条', db.fixtures.length);
-  const batch2 = db.fixtures[1].importBatch;
-  ok(batch1 !== batch2, '两次导入批次号不同', [batch1, batch2]);
-
-  await M.undoFixtureImport(batch2);
-  ok(db.fixtures.length === 1 && db.fixtures[0].importBatch === batch1,
-    '撤销本次导入只删这一批，上一批保留', db.fixtures.length);
-
-  /* ---------- 6. 导出清单 与 导入模板 同构（v4.5.0 / BUG-009） ---------- */
-  section('[导出清单 与 导入模板 同构]');
-  /* 真 CSV 解析（带引号状态机）：验证「导出的文件能被 Excel/导入器正确还原」 */
-  function parseCsvLine(line) {
-    const out = []; let cur = '', q = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (q) {
-        if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
-        else cur += ch;
-      } else if (ch === '"') q = true;
-      else if (ch === ',') { out.push(cur); cur = ''; }
+/* ---------- 8-12：导出 / 模板 / 产线导入 / 回收 / 幂等 ---------- */
+function splitCsvLine(line) {
+  const out = []; let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') inQ = false;
       else cur += ch;
-    }
-    out.push(cur);
-    return out;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
   }
+  out.push(cur);
+  return out;
+}
+
+(async function run() {
   sandbox.state.lines = [{ id: 1, name: 'L1 线' }, { id: 2, name: 'L2 线' }];
-  sandbox.state.stations = [
-    { id: 11, lineId: 1, name: '上料工位' },
-    { id: 12, lineId: 1, name: '压装工位' },
-    { id: 21, lineId: 2, name: '焊接工位' }
-  ];
   sandbox.state.fixtures = [
-    { id: 1, code: '1001', serialNo: 'SN-A', name: '夹具A', lineModels: ['M1', 'M2'], category: '金属',
-      location: 'ZP1-U-1-1', lines: [1, 2], stations: [11, 12, 21], remark: '备注,含逗号' },
-    { id: 2, code: '1002', serialNo: 'SN-B', name: '夹具B', lineModels: [], category: '',
-      location: '', lines: [], stations: [], remark: '' }
+    { id: 1, code: '1001', serialNo: 'SN-E1', name: '导出甲', lineModels: ['A', 'B'],
+      category: '金属', location: 'ZP1-U-1-1', lines: [1, 2], remark: '含"引号"' },
+    { id: 2, code: '1002', serialNo: 'SN-E2', name: '导出乙', lineModels: [],
+      category: '', location: '', lines: [], remark: '' }
   ];
+
+  section('夹具清单导出 CSV');
   await M.__export_fixtureExportCSV();
-  const dl = sandbox.__downloaded || {};
-  const csv = String(dl.content || '').replace(/^\uFEFF/, '');
-  const csvRows = csv.split('\r\n');
-  ok(dl.name && /^夹具清单_\d{4}-\d{2}-\d{2}\.csv$/.test(dl.name), '导出文件名为 夹具清单_YYYY-MM-DD.csv', dl.name);
-  ok(csvRows[0] === M.FIX_IMPORT_HEADERS.join(','), '导出表头与导入模板逐列一致（22 列同序）',
-    csvRows[0]);
-  ok(csvRows[0].indexOf('序号') < 0 && csvRows[0].indexOf('状态') < 0 && csvRows[0].indexOf('累计出库') < 0,
-    '导出不再带模板外列（序号 / 状态 / 累计出库）', csvRows[0]);
-  const rowA = parseCsvLine(csvRows[1]);
-  const unq = (v) => String(v);
-  ok(rowA.length === 22, '数据行 22 列（与模板列数一致）', rowA.length);
-  ok(unq(rowA[0]) === 'SN-A' && unq(rowA[1]) === '夹具A', '第 1/2 列 = 夹具编号 / 名称', [unq(rowA[0]), unq(rowA[1])]);
-  ok(unq(rowA[2]) === 'M1' && unq(rowA[3]) === 'M2' && unq(rowA[4]) === '', '机种拆成 机种名称1~7 独立列',
-    rowA.slice(2, 9).map(unq));
-  ok(unq(rowA[9]) === '金属' && unq(rowA[10]) === 'ZP1-U-1-1', '分类 / 库位列位正确', [unq(rowA[9]), unq(rowA[10])]);
-  ok(unq(rowA[11]) === 'L1 线' && unq(rowA[12]) === '上料工位 / 压装工位', '产线1 / 工位1 成对（多工位用 / 分隔）',
-    [unq(rowA[11]), unq(rowA[12])]);
-  ok(unq(rowA[13]) === 'L2 线' && unq(rowA[14]) === '焊接工位', '产线2 / 工位2 成对', [unq(rowA[13]), unq(rowA[14])]);
-  ok(unq(rowA[21]) === '备注,含逗号', '备注列含逗号时正确加引号（可逆）', unq(rowA[21]));
+  const csv = (sandbox.__downloaded || {}).content || '';
+  ok(csv.charCodeAt(0) === 0xFEFF, '导出带 UTF-8 BOM（Excel 打开不乱码）', csv.charCodeAt(0));
+  const csvLines = csv.replace(/^\uFEFF/, '').split('\r\n');
+  ok(csvLines[0] === M.FIX_IMPORT_HEADERS.join(','), '导出表头与导入模板逐列一致（17 列同序）', csvLines[0]);
+  ok(csvLines.length === 3, '导出 2 条数据行', csvLines.length - 1);
+  const rowA = splitCsvLine(csvLines[1]);
+  const rowB = splitCsvLine(csvLines[2]);
+  ok(rowA.length === 17, '数据行 17 列（与模板列数一致）', rowA.length);
+  ok(rowB.length === 17, '第二行同样 17 列', rowB.length);
+  ok(rowA[0] === 'SN-E1' && rowA[1] === '导出甲', '夹具编号 / 名称 就位', [rowA[0], rowA[1]]);
+  ok(rowA[2] === 'A' && rowA[3] === 'B' && rowA[4] === '', '机种展开成 机种名称1~7 七列', rowA.slice(2, 9));
+  ok(rowA[9] === '金属' && rowA[10] === 'ZP1-U-1-1', '分类 / 库位就位', [rowA[9], rowA[10]]);
+  ok(rowA[11] === 'L1 线' && rowA[12] === 'L2 线' && rowA[13] === '', '产线1 / 产线2 填了名称，其余空', rowA.slice(11, 16));
+  ok(rowA[16] === '含"引号"', '备注含双引号正确转义（可被标准 CSV 解析）', rowA[16]);
+  ok(rowB.slice(11, 16).every((v) => v === ''), '无关联产线的夹具产线列全空', JSON.stringify(rowB.slice(11, 16)));
+  ok(!csv.includes('累计出库') && !csv.includes('维修次数'), '导出不再带 累计出库/维修次数 等派生列');
+  ok(rowA.every((v) => !/工位/.test(v)), '导出内容不含任何「工位」字样');
 
-  /* 导出 → 直接回灌：解析结果必须与原记录一致 */
-  const idxExp = M.mapImportHeader(parseCsvLine(csvRows[0]));
-  const back = M.parseImportRow(parseCsvLine(csvRows[1]), idxExp);
-  ok(back.ok === true, '导出的数据行可直接被导入器解析', back.error);
-  ok(back.fixture.serialNo === 'SN-A' && back.fixture.name === '夹具A', '回灌后 夹具编号/名称 一致',
-    [back.fixture.serialNo, back.fixture.name]);
-  ok(back.fixture.lineModels.join('|') === 'M1|M2', '回灌后 机种 一致', back.fixture.lineModels);
-  ok(back.fixture.category === '金属' && back.fixture.location === 'ZP1-U-1-1', '回灌后 分类/库位 一致',
-    [back.fixture.category, back.fixture.location]);
-  ok(back.fixture.linePairs.length === 2
-    && back.fixture.linePairs[0].lineName === 'L1 线'
-    && back.fixture.linePairs[0].stationNames.join('|') === '上料工位|压装工位'
-    && back.fixture.linePairs[1].lineName === 'L2 线',
-    '回灌后 产线/工位层级 一致（不串线、不笛卡尔积）', back.fixture.linePairs);
-  ok(back.fixture.remark === '备注,含逗号', '回灌后 备注 一致（引号转义可逆）', back.fixture.remark);
+  const backRows = [splitCsvLine(csvLines[0]), rowA];
+  const back = M.buildImportPlan(backRows, { fixtures: [], lines: sandbox.state.lines });
+  ok(back.ok && back.plan.length === 1, '导出文件可直接回灌（导入侧能解析）', back.error);
+  ok(back.plan[0].fixture.lineNames.join('|') === 'L1 线|L2 线',
+    '回灌后产线集合一致（导出→导入不丢关联）', JSON.stringify(back.plan[0].fixture.lineNames));
 
-  /* ---------- 9. 产线名归并（v4.5.1 BUG-010） ---------- */
-  section('[产线名归并 · BUG-010]');
-  ok(M.normalizeLineName('1#') === '1', '「1#」归一化为「1」', M.normalizeLineName('1#'));
-  ok(M.normalizeLineName(' 1 ') === '1', '去空格后归一化为「1」', M.normalizeLineName(' 1 '));
-  ok(M.normalizeLineName('１') === '1', '全角「１」归一化为「1」', M.normalizeLineName('１'));
-  ok(M.normalizeLineName('３号线') === '3号线', '全角数字转半角、「号线」后缀保留', M.normalizeLineName('３号线'));
-  ok(M.normalizeLineName('3号线') !== M.normalizeLineName('3'), '「3号线」与「3」不归并（后缀是真实命名差异）');
+  section('下载夹具模板');
+  M.__export_downloadFixtureTemplate();
+  const tmpl = (sandbox.__downloaded || {}).content || '';
+  const tl = tmpl.replace(/^\uFEFF/, '').split('\r\n');
+  ok(tl[0] === M.FIX_IMPORT_HEADERS.join(','), '模板表头与导出一致（同一份列定义）', tl[0]);
+  ok(tl.length > 1, '模板含示例行', tl.length - 1);
+  ok(tl.slice(1).every((ln) => splitCsvLine(ln).length === 17), '每行示例都是 17 列',
+    JSON.stringify(tl.slice(1).map((ln) => splitCsvLine(ln).length)));
+  ok(tl.slice(1).every((ln) => !/工位/.test(ln)), '模板示例行不含工位字样');
 
-  const mergeRows = [
-    ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '工位1', '备注'],
-    ['SN-M1', '归并测试A', 'M1', '金属', 'ZP1-U-1-1', '1#', '2号工位', ''],
-    ['SN-M2', '归并测试B', 'M1', '金属', 'ZP1-U-1-2', '1', '3号工位', ''],
-    ['SN-M3', '归并测试C', 'M1', '金属', 'ZP1-U-1-3', '1#', '4号工位', '']
+  section('产线配置导入（线体 | 线体形态 | 夹具编号 | 备注）');
+  ok(M.LINE_IMPORT_HEADERS.join('|') === '线体|线体形态|夹具编号|备注',
+    '产线导入表头为 4 列（v5.0.0 去工位）', M.LINE_IMPORT_HEADERS.join('|'));
+  ok(!M.LINE_IMPORT_HEADERS.some((h) => /工位/.test(h)), '产线导入表头无工位列');
+  const li = M.mapLineImportHeader(['线体', '线体形态', '工位', '工位顺序', '夹具编号', '备注']);
+  ok(li.line === 0 && li.lineType === 1 && li.fixtureSerial === 4 && li.remark === 5,
+    '旧 6 列模板仍能定位线体/形态/夹具编号/备注', JSON.stringify(li));
+  ok(li.station === undefined && li.seq === undefined, '旧模板「工位 / 工位顺序」不再映射（静默忽略）', JSON.stringify(li));
+
+  const lnCtx = {
+    lines: [{ id: 11, name: 'L1 总装线' }, { id: 22, name: 'L2 U型线' }],
+    fixtures: [{ id: 1, code: '1001', serialNo: 'SN-OLD', name: '已有夹具', lines: [22], lineModels: ['M'] }]
+  };
+  const lnRows = [
+    ['线体', '线体形态', '夹具编号', '备注'],
+    ['L2 U型线', 'U型', 'SN-OLD', '已关联该产线→忽略'],
+    ['L1 总装线', '直线形', 'SN-OLD', '追加一条产线'],
+    ['L1 总装线', '直线形', 'SN-NOTEXIST', '夹具未建档→跳过'],
+    ['L1 总装线', '直线形', '', '夹具编号为空→跳过'],
+    ['L2 U型线', 'U型', 'SN-OLD', '文件内重复行'],
+    ['L9 新线', '直线形', 'SN-OLD', '线体未建档→自动补建'],
+    ['', '直线形', 'SN-OLD', '线体为空→跳过']
   ];
-  const mergePlan = M.buildImportPlan(mergeRows, { fixtures: [], lines: [{ id: 1, name: '1' }], stations: [] });
-  ok(mergePlan.ok === true, '归并场景能正常生成计划', mergePlan.error);
-  ok(mergePlan.plan.length === 3, '3 行全部进入计划', mergePlan.plan.length);
-  ok(mergePlan.plan.every((p) => p.fixture.lineNames.length === 1 && p.fixture.lineNames[0] === '1'),
-    '「1#」与「1」都归并到库内已有的「1」', mergePlan.plan.map((p) => p.fixture.lineNames));
-  ok(mergePlan.plan._lineHints.length === 1 && mergePlan.plan._lineHints[0].from === '1#'
-    && mergePlan.plan._lineHints[0].to === '1', '预览能拿到归并提示 1# → 1', mergePlan.plan._lineHints);
-  ok(mergePlan.plan._lineHints[0].rows === 2, '归并提示统计到 2 行', mergePlan.plan._lineHints[0].rows);
-  ok(mergePlan.plan._autoLines.length === 0, '归并后不再重复补建产线', mergePlan.plan._autoLines);
+  const lnPlan = M.buildLineImportPlan(lnRows, lnCtx);
+  ok(lnPlan.ok, '产线导入计划生成成功', lnPlan.error);
+  ok(lnPlan.appends.length === 2, '2 行可追加（L1 总装线 / L9 新线）', lnPlan.appends.length);
+  ok(lnPlan.newLines.length === 1 && lnPlan.newLines[0].name === 'L9 新线',
+    '未建档线体登记为待新建', JSON.stringify(lnPlan.newLines));
+  ok(lnPlan.newLines[0].type === 'linear', '线体形态被解析（直线形）', lnPlan.newLines[0].type);
+  const skTxt = lnPlan.skipped.map((s) => s.reason).join(' | ');
+  ok(lnPlan.skipped.length === 5, '5 行被跳过', lnPlan.skipped.length + '：' + skTxt);
+  ok(/已关联产线/.test(skTxt), '已关联该产线的行被跳过并说明原因', skTxt);
+  ok(/未建档/.test(skTxt), '夹具未建档的行被跳过', skTxt);
+  ok(/夹具编号为空/.test(skTxt), '夹具编号为空的行被跳过', skTxt);
+  ok(/文件中重复行/.test(skTxt), '文件内重复行被识别', skTxt);
+  ok(/线体为空/.test(skTxt), '线体为空的行被跳过', skTxt);
+  ok(lnPlan.appends.every((a) => a.stationName === undefined), '追加项里已无 stationName 字段',
+    JSON.stringify(lnPlan.appends[0]));
+  ok(lnPlan.appends.every((a) => typeof a.lineName === 'string' && a.fixtureId === 1),
+    '追加项按夹具 id + 产线名登记', JSON.stringify(lnPlan.appends));
 
-  const oneRow = [
-    ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '工位1', '产线2', '工位2', '备注'],
-    ['SN-M4', '同行两条同义产线', 'M1', '金属', 'ZP1-U-1-4', '1', '1号工位', '1#', '1号工位 / 2号工位', '']
+  ok(M.buildLineImportPlan([['线体'], ['L1']], {}).ok === false, '缺夹具编号列 → 报错',
+    M.buildLineImportPlan([['线体'], ['L1']], {}).error);
+  ok(M.buildLineImportPlan([['夹具编号'], ['SN-1']], {}).ok === false, '缺线体列 → 报错',
+    M.buildLineImportPlan([['夹具编号'], ['SN-1']], {}).error);
+  ok(M.buildLineImportPlan([['线体', '夹具编号']], {}).ok === false, '只有表头 → 报错');
+  ok(M.buildLineImportPlan([['线体', '夹具编号'], ['L1', 'SN-NOTEXIST']],
+    { lines: [], fixtures: [] }).ok === false, '全部行都无有效匹配 → 报错',
+    M.buildLineImportPlan([['线体', '夹具编号'], ['L1', 'SN-NOTEXIST']], { lines: [], fixtures: [] }).error);
+  const dupSerialCtx = {
+    lines: [],
+    fixtures: [
+      { id: 1, code: '1001', serialNo: 'SN-DUP', name: '甲', lines: [] },
+      { id: 2, code: '1002', serialNo: 'SN-DUP', name: '乙', lines: [] }
+    ]
+  };
+  const dupSerial = M.buildLineImportPlan([['线体', '夹具编号'], ['L1', 'SN-DUP']], dupSerialCtx);
+  ok(dupSerial.ok === false && /无法唯一定位/.test(dupSerial.skipped.map((s) => s.reason).join('')),
+    '同编号对应多套夹具 → 无法唯一定位（跳过）', JSON.stringify(dupSerial.skipped));
+
+  const manyLines = [];
+  for (let i = 0; i < 6; i++) manyLines.push({ id: 100 + i, name: 'L' + i });
+  const fullFix = [{ id: 7, code: '1007', serialNo: 'SN-FULL', name: '满线夹具', lines: [100, 101, 102, 103, 104] }];
+  const limPlan = M.buildLineImportPlan([['线体', '夹具编号'], ['L5', 'SN-FULL']],
+    { lines: manyLines, fixtures: fullFix });
+  ok(limPlan.ok === false, '产线已达上限 5 条 → 无有效行', limPlan.error);
+  ok(limPlan.skipped.some((s) => /上限 5 条/.test(s.reason)), '跳过原因写明产线上限',
+    lnPlan.skipped.map((s) => s.reason).join(' | '));
+  const notFullFix = [{ id: 8, code: '1008', serialNo: 'SN-ROOM', name: '还有余量', lines: [100, 101, 102, 103] }];
+  const roomPlan = M.buildLineImportPlan([['线体', '夹具编号'], ['L5', 'SN-ROOM']],
+    { lines: manyLines, fixtures: notFullFix });
+  ok(roomPlan.ok && roomPlan.appends.length === 1, '未达上限时可追加', roomPlan.error);
+
+  ok(M.parseLineType('U型') === 'u' && M.parseLineType('u') === 'u' && M.parseLineType('环形') === 'u',
+    'U型 / u / 环形 都识别为 u', [M.parseLineType('U型'), M.parseLineType('u'), M.parseLineType('环形')]);
+  ok(M.parseLineType('Unit line') === 'linear', '「Unit line」不被误判为 U 型', M.parseLineType('Unit line'));
+  ok(M.parseLineType('') === 'linear' && M.parseLineType(null) === 'linear', '空值按直线形处理');
+
+  section('撤销导入的结构回收（planStructureRecycle，只回收产线）');
+  const created = { lineIds: [90, 91] };
+  const rp0 = M.planStructureRecycle(created, []);
+  ok(Array.isArray(rp0) && rp0.join('|') === '90|91', '无夹具引用 → 两条产线全部回收', JSON.stringify(rp0));
+  ok(M.planStructureRecycle(created, [{ id: 1, lines: [90] }]).join('|') === '91',
+    '仍被夹具引用的产线不回收', JSON.stringify(M.planStructureRecycle(created, [{ id: 1, lines: [90] }])));
+  ok(M.planStructureRecycle(created, [{ id: 1, lines: [90, 91] }]).length === 0,
+    '两条都被引用 → 不回收', JSON.stringify(M.planStructureRecycle(created, [{ id: 1, lines: [90, 91] }])));
+  ok(M.planStructureRecycle(null, []).length === 0, '没有批次记录时安全返回空');
+  ok(M.planStructureRecycle({ lineIds: [] }, [{ id: 1, lines: [1] }]).length === 0, '空 lineIds 安全');
+  ok(M.planStructureRecycle({ lineIds: ['90'] }, []).join('|') === '90', '字符串 id 也能回收');
+
+  section('整表落库幂等（导入两次不翻倍）');
+  const db = { fixtures: [], lines: [{ id: 11, name: 'L1 线' }], seq: 100 };
+  sandbox.state.lines = db.lines;
+  sandbox.state.fixtures = db.fixtures;
+  sandbox.DB.add = async (name, obj) => {
+    const id = db.seq++;
+    if (name === 'lines') db.lines.push(Object.assign({ id }, obj));
+    if (name === 'fixtures') db.fixtures.push(Object.assign({ id }, obj));
+    return id;
+  };
+  sandbox.DB.fixtureAdd = async (obj) => {
+    const id = db.seq++;
+    db.fixtures.push(Object.assign({
+      id, code: String(1000 + id), status: 'stocked', totalOutCount: 0, totalReturnCount: 0, repairCount: 0
+    }, obj));
+    return id;
+  };
+  const rowsOnce = [HDR,
+    mkRow({ serialNo: 'SN-I1', name: '幂等甲', lm1: 'M1', category: '金属', location: 'ZP1-U-3-1', line1: 'L1 线' }),
+    mkRow({ serialNo: 'SN-I2', name: '幂等乙', lm1: 'M1', category: '金属', location: 'ZP1-U-3-2', line1: 'L1 线' })
   ];
-  const onePlan = M.buildImportPlan(oneRow, { fixtures: [], lines: [{ id: 1, name: '1' }], stations: [] });
-  ok(onePlan.ok === true && onePlan.plan[0].fixture.lineNames.length === 1,
-    '同一行里的 1 与 1# 合并成 1 条产线', onePlan.ok ? onePlan.plan[0].fixture.lineNames : onePlan.error);
-  ok(onePlan.plan[0].fixture.linePairs[0].stationNames.join('|') === '1号工位|2号工位',
-    '归并后工位合并去重', onePlan.plan[0].fixture.linePairs);
+  const plan1 = M.buildImportPlan(rowsOnce, { fixtures: db.fixtures, lines: db.lines });
+  ok(plan1.ok && plan1.plan.length === 2 && plan1.plan._dupCount === 0, '首次导入：2 行全部新增',
+    JSON.stringify(plan1.plan.map((x) => x.isDup)));
 
-  const firstWins = [
-    ['夹具编号', '名称', '机种名称1', '分类', '库位', '产线1', '工位1', '备注'],
-    ['SN-M5', '首现为准A', 'M1', '金属', 'ZP1-U-2-1', 'A#', '1号工位', ''],
-    ['SN-M6', '首现为准B', 'M1', '金属', 'ZP1-U-2-2', 'A', '2号工位', '']
-  ];
-  const fwPlan = M.buildImportPlan(firstWins, { fixtures: [], lines: [], stations: [] });
-  ok(fwPlan.plan.every((p) => p.fixture.lineNames[0] === 'A#'),
-    '库内无同名时按文件内首个写法「A#」统一', fwPlan.plan.map((p) => p.fixture.lineNames));
-  ok(fwPlan.plan._autoLines.length === 1 && fwPlan.plan._autoLines[0] === 'A#',
-    '只补建 1 条产线（不再同时建 A 与 A#）', fwPlan.plan._autoLines);
+  sandbox.__importPlan = plan1.plan;
+  await M.__export_confirmImportPlan('all');
+  ok(db.fixtures.length === 2, '首次落库后库内 2 套', db.fixtures.length);
 
-  /* ---------- 10. 撤销导入的结构回收（v4.5.1 BUG-011） ---------- */
-  section('[撤销导入回收结构项 · BUG-011]');
-  const created = { lineIds: [90], stationIds: [901, 902] };
-  const allSt = [{ id: 901, lineId: 90, name: '1号工位' }, { id: 902, lineId: 90, name: '2号工位' }];
-  const rp0 = M.planStructureRecycle(created, [], allSt);
-  ok(rp0.stationIds.length === 2 && rp0.lineIds.length === 1,
-    '夹具全删后：2 个工位 + 1 条产线全部回收', rp0);
-  const rp1 = M.planStructureRecycle(created, [{ id: 1, stations: [901], lines: [90] }], allSt);
-  ok(rp1.stationIds.join('|') === '902', '仍被夹具引用的工位不回收', rp1.stationIds);
-  ok(rp1.lineIds.length === 0, '产线仍被夹具/工位引用时不回收', rp1.lineIds);
-  const rp2 = M.planStructureRecycle({ lineIds: [90], stationIds: [901] }, [],
-    [{ id: 901, lineId: 90 }, { id: 999, lineId: 90 }]);
-  ok(rp2.stationIds.join('|') === '901' && rp2.lineIds.length === 0,
-    '产线上还剩其它工位时不回收产线（避免造出孤儿工位）', rp2);
-  const rp3 = M.planStructureRecycle(null, [], []);
-  ok(rp3.stationIds.length === 0 && rp3.lineIds.length === 0, '没有批次记录时安全返回空', rp3);
+  const planAfter = M.buildImportPlan(rowsOnce, { fixtures: db.fixtures, lines: db.lines });
+  ok(planAfter.plan.length === 2 && planAfter.plan._dupCount === 2,
+    '同表再导：2 行全部判为重复（不会翻倍）', JSON.stringify(planAfter.plan.map((x) => x.isDup)));
+  sandbox.__importPlan = planAfter.plan;
+  await M.__export_confirmImportPlan('skip');
+  ok(db.fixtures.length === 2, '默认「跳过重复」后库内仍 2 套（未翻倍）', db.fixtures.length);
 
-  console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
-  process.exit(fail ? 1 : 0);
+  /* ---------- 汇总 ---------- */
+  console.log('\n' + '='.repeat(50));
+  console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);
+  if (fail > 0) { console.log('\n失败项：'); failures.forEach((f) => console.log('  - ' + f)); }
+  console.log('='.repeat(50));
+  process.exit(fail > 0 ? 1 : 0);
 })();

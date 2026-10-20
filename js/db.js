@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v4.5.1 — 工装夹具管理程序数据层
+ * db.js v5.3.0 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,22 +7,26 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '4.5.1';
+  const APP_VERSION = '5.3.0';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
   const MAX_LINE_MODELS = 7;
   const MAX_LINES = 5;
-  const MAX_STATIONS = 10;
   const MAX_SERIAL_NO = 64;
   const MAX_LOCATION = 20;
   const MAX_CATEGORY = 30;
   const LOCATION_RE = /^[A-Za-z0-9]+(-[A-Za-z0-9]+){3}$/;
+  /* 人员卡库（v5.1.0）：与 store.js 同源 */
+  const MAX_CARD_NO = 64;
+  const MAX_STAFF_NAME = 30;
+  const MAX_STAFF_DEPT = 30;
+  const STAFF_ROLES = ['borrower', 'operator', 'both'];
 
   if (electronApi) {
     const invoke = (channel, payload) => electronApi.invoke(channel, payload);
     return {
-      APP_VERSION, MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, MAX_CATEGORY, LOCATION_RE,
+      APP_VERSION, MAX_LINE_MODELS, MAX_LINES, MAX_SERIAL_NO, MAX_LOCATION, MAX_CATEGORY, LOCATION_RE,
       open: () => invoke('db-open'),
       getAll: (name) => invoke('db-getAll', name),
       get: (name, id) => invoke('db-get', { name, id }),
@@ -43,12 +47,15 @@ const DB = (function () {
       nextFreeCode: () => invoke('next-free-code'),
       // 关联维护（v4.0.0）
       lineDel: (id) => invoke('line-del', id),
-      stationDel: (id) => invoke('station-del', id),
       productionDel: (id) => invoke('production-del', id),
       productionRename: (payload) => invoke('production-rename', payload),
       removeFixtureLine: (payload) => invoke('fixture-line-remove', payload),
-      removeFixtureStation: (payload) => invoke('fixture-station-remove', payload),
       removeFixtureLinesByBatch: (payload) => invoke('fixture-lines-removeBatch', payload),
+      // 人员卡库（v5.1.0）
+      staffAdd: (staff) => invoke('staff-add', staff),
+      staffUpdate: (staff) => invoke('staff-update', staff),
+      staffDel: (id) => invoke('staff-del', id),
+      staffGetAll: () => invoke('db-getAll', 'staffs'),
       /* 纯函数（不依赖后端，两侧行为一致，渲染层也直接调用） */
       normalizeCode: normalizeCode,
       codeEq: codeEq,
@@ -56,6 +63,10 @@ const DB = (function () {
       isValidSerialNo: isValidSerialNo,
       isValidLocation: isValidLocation,
       isValidProductionName: isValidProductionName,
+      normalizeCardNo: normalizeCardNo,
+      isValidCardNo: isValidCardNo,
+      isValidStaffName: isValidStaffName,
+      isValidStaffRole: isValidStaffRole,
       currentBackend: () => 'electron-file'
     };
   }
@@ -65,6 +76,7 @@ const DB = (function () {
   const LS_FIX_TX = 'fixture_tx';
   const LS_SEQ = 'fixture_seq';
   const LS_META = 'fixture_meta';
+  const LS_STAFFS = 'fixture_staffs';
 
   function lsRead(k, def) {
     try { const v = localStorage.getItem(k); return v == null ? def : JSON.parse(v); }
@@ -100,6 +112,25 @@ const DB = (function () {
     const t = s.trim();
     return !!t && t.length <= 30 && !/[|\r\n]/.test(t);
   }
+  /* ---- 人员卡库校验（v5.1.0，口径与 store.js 完全一致） ---- */
+  function normalizeCardNo(str) {
+    return String(str == null ? '' : str)
+      .replace(/[\s\u3000\-_]/g, '')
+      .toUpperCase();
+  }
+  function isValidCardNo(s) {
+    if (typeof s !== 'string') return false;
+    const t = s.trim();
+    if (!t || t.length > MAX_CARD_NO) return false;
+    if (/[|,\r\n]/.test(t)) return false;
+    return normalizeCardNo(t).length > 0;
+  }
+  function isValidStaffName(s) {
+    if (typeof s !== 'string') return false;
+    const t = s.trim();
+    return !!t && t.length <= MAX_STAFF_NAME && !/[|\r\n]/.test(t);
+  }
+  function isValidStaffRole(r) { return STAFF_ROLES.indexOf(r) >= 0; }
   function dedupeStrings(arr) {
     const out = [];
     (Array.isArray(arr) ? arr : []).forEach((v) => {
@@ -131,9 +162,10 @@ const DB = (function () {
     if (name === 'meta') return Promise.resolve(getMeta(id));
     return Promise.resolve(lsRead(name, []).find((x) => x.id === id) || null);
   }
-  /* 通用 CRUD（与主进程 store.js 同名同语义，供产线/工位/机种等集合复用） */
+  /* 通用 CRUD（与主进程 store.js 同名同语义，供产线/机种等集合复用） */
   function add(name, item) {
     if (name === 'fixtures') return fixtureAdd(item);
+    if (name === 'staffs') return staffAdd(item);   // 卡号唯一校验必须走专用实现
     const arr = lsRead(name, []);
     item.id = lsSeq();
     arr.push(item);
@@ -142,6 +174,7 @@ const DB = (function () {
   }
   function put(name, item) {
     if (name === 'fixtures') return fixtureUpdate(item);
+    if (name === 'staffs') return staffUpdate(item);
     const arr = lsRead(name, []);
     const i = arr.findIndex((x) => x.id === item.id);
     if (i >= 0) arr[i] = item; else arr.push(item);
@@ -150,12 +183,60 @@ const DB = (function () {
   }
   function del(name, id) {
     if (name === 'lines') return lineDel(id);
-    if (name === 'stations') return stationDel(id);
     if (name === 'productions') return productionDel(id);
+    if (name === 'staffs') return staffDel(id);
     lsWrite(name, lsRead(name, []).filter((x) => x.id !== id));
     return Promise.resolve();
   }
   function clearColl(name) { lsWrite(name, []); return Promise.resolve(); }
+
+  /* ---- 人员卡库（v5.1.0，浏览器模式实现，语义同 store.js） ---- */
+  function normalizeStaff(input, existing) {
+    const s = input || {};
+    const cardNo = String(s.cardNo == null ? '' : s.cardNo).trim();
+    const name = String(s.name == null ? '' : s.name).trim();
+    const dept = String(s.dept == null ? '' : s.dept).trim();
+    const role = String(s.role == null || s.role === '' ? 'both' : s.role).trim();
+    const remark = String(s.remark == null ? '' : s.remark).trim();
+
+    if (!isValidCardNo(cardNo)) bad('卡号不能为空，且不能含竖线/逗号，最长 ' + MAX_CARD_NO + ' 字符');
+    if (!isValidStaffName(name)) bad('姓名不能为空，且不能含竖线/换行，最长 ' + MAX_STAFF_NAME + ' 字符');
+    if (dept.length > MAX_STAFF_DEPT) bad('部门名称最长 ' + MAX_STAFF_DEPT + ' 字符');
+    if (!isValidStaffRole(role)) bad('角色只能是「领用人」「经办人」或「两者皆可」');
+
+    const norm = normalizeCardNo(cardNo);
+    const selfId = (s.id != null) ? s.id : (existing ? existing.id : null);
+    const dup = lsRead(LS_STAFFS, []).find((x) => x.id !== selfId && normalizeCardNo(x.cardNo) === norm);
+    if (dup) bad('卡号 ' + cardNo + ' 已登记给「' + (dup.name || '未命名') + '」，一张卡只能对应一个人');
+
+    return { cardNo, name, dept, role, active: s.active === false ? false : true, remark };
+  }
+
+  async function staffAdd(staff) {
+    const st = normalizeStaff(staff, null);
+    const arr = lsRead(LS_STAFFS, []);
+    const rec = Object.assign({ id: lsSeq() }, st, { createdAt: Date.now(), updatedAt: Date.now() });
+    arr.push(rec);
+    lsWrite(LS_STAFFS, arr);
+    return rec.id;
+  }
+  async function staffUpdate(staff) {
+    const arr = lsRead(LS_STAFFS, []);
+    const i = arr.findIndex((x) => x.id === (staff || {}).id);
+    if (i < 0) bad('人员不存在', 'NotFoundError');
+    const st = normalizeStaff(staff, arr[i]);
+    Object.assign(arr[i], st, { updatedAt: Date.now() });
+    lsWrite(LS_STAFFS, arr);
+    return arr[i].id;
+  }
+  async function staffDel(id) {
+    lsWrite(LS_STAFFS, lsRead(LS_STAFFS, []).filter((x) => x.id !== id));
+  }
+  async function findStaffByCard(cardNo) {
+    const n = normalizeCardNo(cardNo);
+    if (!n) return null;
+    return lsRead(LS_STAFFS, []).find((x) => normalizeCardNo(x.cardNo) === n) || null;
+  }
 
   function validateFixture(f) {
     if (!isBridgeCode(f.code)) bad('序号必须是 4 位纯数字');
@@ -164,8 +245,6 @@ const DB = (function () {
     if (f.lineModels.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
     if (!f.lines.length) bad('请至少选择 1 条产线');
     if (f.lines.length > MAX_LINES) bad('一件夹具最多关联 ' + MAX_LINES + ' 条产线');
-    if (!f.stations.length) bad('请至少选择 1 个工位');
-    if (f.stations.length > MAX_STATIONS) bad('一件夹具最多安装 ' + MAX_STATIONS + ' 个工位');
     if (!isValidLocation(f.location)) bad('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符');
     const cat = String(f.category == null ? '' : f.category).trim();
     if (cat.length > MAX_CATEGORY || /[|\r\n]/.test(cat)) bad('分类名称最多 ' + MAX_CATEGORY + ' 字符，且不能含 | 或换行');
@@ -182,7 +261,7 @@ const DB = (function () {
     if (rawLms.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
     f.lineModels = rawLms.slice(0, MAX_LINE_MODELS);
     f.lines = dedupeNumbers(f.lines);
-    f.stations = dedupeNumbers(f.stations);
+    if (f.stations !== undefined) delete f.stations;
     f.location = String(f.location == null ? '' : f.location).trim();
     f.category = String(f.category == null ? '' : f.category).trim();
     f.remark = String(f.remark == null ? '' : f.remark).trim();
@@ -212,7 +291,7 @@ const DB = (function () {
     if (rawLms.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
     f.lineModels = rawLms.slice(0, MAX_LINE_MODELS);
     f.lines = dedupeNumbers(f.lines);
-    f.stations = dedupeNumbers(f.stations);
+    if (f.stations !== undefined) delete f.stations;
     f.location = String(f.location == null ? '' : f.location).trim();
     f.category = String(f.category == null ? '' : f.category).trim();
     validateFixture(f);
@@ -290,6 +369,8 @@ const DB = (function () {
       type: tx.type,
       operator: tx.operator || '',
       counterparty: tx.counterparty || '',
+      operatorCard: tx.operatorCard || '',
+      partyCard: tx.partyCard || '',
       outReason: tx.type === 'out' ? (tx.outReason || 'use') : '',
       outReasonText: tx.type === 'out' ? (tx.outReasonText || '') : '',
       time: tx.time,
@@ -307,7 +388,7 @@ const DB = (function () {
     return record.id;
   }
 
-  /* ---- 关联维护（v4.0.0）：与主进程 store.js 语义保持一致 ---- */
+  /* ---- 关联维护：与主进程 store.js 语义保持一致（v5.0.0 起无工位） ---- */
   function findFixtureSync(code) {
     return lsRead(LS_FIXTURES, []).find((f) => codeEq(f.code, code)) || null;
   }
@@ -319,24 +400,10 @@ const DB = (function () {
     const f = fixtures.find((x) => codeEq(x.code, code));
     if (!f) bad('夹具不存在', 'NotFoundError');
     const lid = Number(lineId);
-    const stIds = new Set(lsRead('stations', []).filter((s) => s.lineId === lid).map((s) => s.id));
     f.lines = (f.lines || []).filter((x) => Number(x) !== lid);
-    f.stations = (f.stations || []).filter((x) => !stIds.has(Number(x)));
     f.updatedAt = Date.now();
     writeFixtures(fixtures);
-    return { lines: f.lines.length, stations: f.stations.length };
-  }
-
-  async function removeFixtureStation(payload) {
-    const { code, stationId } = payload;
-    const fixtures = lsRead(LS_FIXTURES, []);
-    const f = fixtures.find((x) => codeEq(x.code, code));
-    if (!f) bad('夹具不存在', 'NotFoundError');
-    const sid = Number(stationId);
-    f.stations = (f.stations || []).filter((x) => Number(x) !== sid);
-    f.updatedAt = Date.now();
-    writeFixtures(fixtures);
-    return { lines: (f.lines || []).length, stations: f.stations.length };
+    return { lines: f.lines.length };
   }
 
   async function removeFixtureLinesByBatch(payload) {
@@ -355,23 +422,12 @@ const DB = (function () {
 
   async function lineDel(id) {
     const lid = Number(id);
-    const stSet = new Set(lsRead('stations', []).filter((s) => s.lineId === lid).map((s) => s.id));
     const fixtures = lsRead(LS_FIXTURES, []);
     fixtures.forEach((f) => {
       f.lines = (f.lines || []).filter((x) => Number(x) !== lid);
-      f.stations = (f.stations || []).filter((x) => !stSet.has(Number(x)));
     });
     writeFixtures(fixtures);
-    lsWrite('stations', lsRead('stations', []).filter((s) => s.lineId !== lid));
     lsWrite('lines', lsRead('lines', []).filter((l) => l.id !== lid));
-  }
-
-  async function stationDel(id) {
-    const sid = Number(id);
-    const fixtures = lsRead(LS_FIXTURES, []);
-    fixtures.forEach((f) => { f.stations = (f.stations || []).filter((x) => Number(x) !== sid); });
-    writeFixtures(fixtures);
-    lsWrite('stations', lsRead('stations', []).filter((s) => s.id !== sid));
   }
 
   async function productionDel(id) {
@@ -411,16 +467,20 @@ const DB = (function () {
   async function nextFreeCode() { return nextFreeCodeSync(); }
 
   return {
-    APP_VERSION, MAX_LINE_MODELS, MAX_LINES, MAX_STATIONS, MAX_SERIAL_NO, MAX_LOCATION, LOCATION_RE,
+    APP_VERSION, MAX_LINE_MODELS, MAX_LINES, MAX_SERIAL_NO, MAX_LOCATION, LOCATION_RE,
+    MAX_CARD_NO, MAX_STAFF_NAME, MAX_STAFF_DEPT, STAFF_ROLES,
     open, getAll, get, add, put, del, getMeta, setMeta,
     clear: clearColl,
     fixtureAdd, fixtureUpdate, fixtureDel,
     fixtureGetAll, fixtureGetTransactions, fixtureAddTransaction,
     nextFreeCode,
-    lineDel, stationDel, productionDel, productionRename,
-    removeFixtureLine, removeFixtureStation, removeFixtureLinesByBatch,
+    lineDel, productionDel, productionRename,
+    removeFixtureLine, removeFixtureLinesByBatch,
+    // 人员卡库（v5.1.0）
+    staffAdd, staffUpdate, staffDel, findStaffByCard, staffGetAll: () => getAll('staffs'),
     // 浏览器模式下的纯函数（供测试复用）
     normalizeCode, codeEq, isValidSerialNo, isValidLocation, isValidProductionName, isBridgeCode,
+    normalizeCardNo, isValidCardNo, isValidStaffName, isValidStaffRole,
     currentBackend: () => 'browser'
   };
 })();

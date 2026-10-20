@@ -1,13 +1,15 @@
 /* ============================================================
- * app.js — 工装夹具管理程序主逻辑（v4.0.6）
+ * app.js — 工装夹具管理程序主逻辑（v5.0.0）
  *
- * v4.0.0 数据模型要点（详见工作区根《夹具管理系统_五项决策实施方案.md》）：
+ * 数据模型要点（详见工作区根《夹具管理系统_五项决策实施方案.md》）：
  *   · 追踪单元 = 每套一条 fixtures 记录；数量是派生值，不落库
  *   · code        4 位纯数字，唯一、自动分配，是各环节的「桥梁」+ 二维码内容，不参与模糊搜索
  *   · serialNo    实物夹具编号，手动输入、可重复（同机种多套共用一个编号），主搜索键
- *   · lines[]     涉及的产线 id（≥1、≤5）；单条产线允许 0 工位
- *   · stations[]  安装的工位 id（≥1、≤10）；必须 ⊆ ∪(lines 各自的工位集合)
+ *   · lines[]     涉及的产线 id（≥1、≤5）
  *   · 出库只改 status（location 冻结保留）；回库预填原库位、允许改（改则写回 location）
+ *
+ * ⚠️ v5.0.0：**工位（stations）模型已整体移除** —— 不再有工位集合、fixtures.stations、
+ *    工位图（产线示意图）、工位筛选/展示，以及导入模板里的工位列。夹具只关联到产线。
  * ============================================================ */
 (function () {
   'use strict';
@@ -63,7 +65,6 @@
   /* ---------------- 业务上限与格式约束（与 store.js / db.js 同源） ---------------- */
   const MAX_LINE_MODELS = 7;    // 一件夹具最多关联机种数（原 4）
   const MAX_LINES = 5;          // 一件夹具最多涉及产线数
-  const MAX_STATIONS = 10;      // 一件夹具最多安装工位数
   const MAX_SERIAL_NO = 64;
   const MAX_LOCATION = 20;
   const LOCATION_RE = /^[A-Za-z0-9]+(-[A-Za-z0-9]+){3}$/;
@@ -103,9 +104,28 @@
     const arr = (Array.isArray(f.lineModels) ? f.lineModels : []).filter((x) => String(x).trim() !== '');
     return arr.length ? arr.join(' / ') : emptyMark;
   }
+  /* 机种名比对归一：去首尾空白 + 转小写。**只用于比对，不改写落库原值。**
+   * ⚠️ BUG-012（v5.2.1）：入参归一必须做在这里，不能指望调用方先转小写。
+   *   产线使用页的下拉直接把原始值（大写 DH40MC）传进来，而库里经 toLowerCase 变成
+   *   'dh40mc'，'dh40mc'.includes('DH40MC') === false ⇒ 任何含字母的机种筛选恒为 0 条。 */
+  function normModelName(v) {
+    return String(v == null ? '' : v).trim().toLowerCase();
+  }
+  /* 模糊匹配：任一机种名**包含**关键字即命中（顶栏搜索 / 出库页机种搜索框用） */
   function lineModelsMatch(f, q) {
+    const s = normModelName(q);
+    if (!s) return true;                       // 空关键字 = 不过滤（与原 includes('') 等价）
     const arr = Array.isArray(f.lineModels) ? f.lineModels : [];
-    return arr.some((lm) => String(lm).toLowerCase().includes(q));
+    return arr.some((lm) => normModelName(lm).includes(s));
+  }
+  /* 精确匹配：任一机种名与 name **完全相同**（大小写 / 首尾空格不敏感）。
+   * 下拉框是枚举值，必须用等值而非包含 —— 否则选「DH40」会连带命中「DH40MC」，
+   * 筛选结果多于用户所选的那一项。 */
+  function lineModelsExact(f, name) {
+    const s = normModelName(name);
+    if (!s) return true;
+    const arr = Array.isArray(f.lineModels) ? f.lineModels : [];
+    return arr.some((lm) => normModelName(lm) === s);
   }
   /* 一件夹具关联的机种数（去重后） */
   function lineModelCount(f) {
@@ -133,76 +153,13 @@
     const names = lineNamesOf(f);
     return names.length ? names.join(' / ') : emptyMark;
   }
-  /* 工位名列表：fixtures.stations([stationId]) → stations.name（跨产线重名时补产线前缀） */
-  function stationNamesOf(f) {
-    const ids = Array.isArray(f && f.stations) ? f.stations.map(Number) : [];
-    return ids.map((id) => state.stations.find((s) => s.id === id)).filter(Boolean);
-  }
-  function stationNamesLabel(f, emptyMark = '—') {
-    const sts = stationNamesOf(f);
-    if (!sts.length) return emptyMark;
-    const dup = (name) => state.stations.filter((s) => s.name === name).length > 1;
-    const labelOf = (s) => {
-      if (!dup(s.name)) return s.name;
-      const ln = (state.lines.find((l) => l.id === s.lineId) || {}).name || '';
-      return ln ? ln + '·' + s.name : s.name;
-    };
-    return sts.map(labelOf).join(' / ');
-  }
-  /* 「产线 / 工位」合并显示（v4.0.2）：按工位所属产线分组，
-   * 同一产线的工位收进一段，段内用 / 连接，段间用 ；连接。
-   *   单产线单工位  → 1 号线 · 4号工位
-   *   单产线多工位  → 1 号线 · 4号工位 / 7号工位
-   *   跨产线        → 1 号线 · 4号工位；2 号线 · 1号工位
-   * 产线名已在行内出现，故这里不再给工位名补「线号·」前缀（避免重复）。 */
-  function lineStationPairsOf(f) {
-    const sts = stationNamesOf(f);
-    if (!sts.length) return [];
-    const order = Array.isArray(f && f.lines) ? f.lines.map(Number) : [];
-    const groups = new Map();
-    sts.forEach((s) => {
-      const lid = Number(s.lineId);
-      if (!groups.has(lid)) groups.set(lid, []);
-      groups.get(lid).push(s.name || '');
-    });
-    const rank = (lid) => { const i = order.indexOf(lid); return i < 0 ? 9999 : i; };
-    return Array.from(groups.keys()).sort((a, b) => rank(a) - rank(b)).map((lid) => ({
-      line: (state.lines.find((l) => l.id === lid) || {}).name || '',
-      stations: groups.get(lid)
-    }));
-  }
-  function lineStationLabel(f, emptyMark = '—') {
-    const pairs = lineStationPairsOf(f);
-    if (!pairs.length) return emptyMark;
-    return pairs.map((p) => {
-      const st = p.stations.join(' / ');
-      return p.line ? p.line + ' · ' + st : st;
-    }).join('；');
-  }
-  /* 导出 / 下载模板用：以 fixtures.lines 为基准，输出「产线 → 该产线下已选工位」的层级。
-   * ⚠️ 与 lineStationPairsOf 的差别：这里**保留「已关联但未选工位」的产线**（单条产线允许 0 工位），
-   *    否则「导出 → 再导入」会丢掉这条产线。 */
-  function fixtureLinePairsForExport(f) {
+  /* 导出 / 下载模板用：以 fixtures.lines 为基准，输出产线名数组（v5.0.0 起无工位）。 */
+  function fixtureLineNamesForExport(f) {
     const lineIds = Array.isArray(f && f.lines) ? f.lines.map(Number) : [];
-    const sts = stationNamesOf(f);
     return lineIds.map((lid) => {
       const line = state.lines.find((l) => l.id === lid);
-      const names = sts.filter((s) => Number(s.lineId) === lid).map((s) => s.name || '');
-      return { lineName: line ? line.name : `#${lid}`, stationNames: names };
+      return line ? line.name : `#${lid}`;
     });
-  }
-  /* 某产线下已选的工位（用于扇区头部「已选 N 个工位」与撤销确认） */
-  function stationsOfLineInForm(lineId, stationIds) {
-    const set = new Set((stationIds || []).map(Number));
-    return state.stations.filter((s) => s.lineId === Number(lineId) && set.has(s.id));
-  }
-  /* 产线/工位 id 是否越界（校验规则 5）：stations 必须 ⊆ ∪(lines 各自工位集合) */
-  function outOfScopeStations(lineIds, stationIds) {
-    const allow = new Set();
-    (lineIds || []).forEach((lid) => {
-      state.stations.filter((s) => s.lineId === Number(lid)).forEach((s) => allow.add(s.id));
-    });
-    return (stationIds || []).map(Number).filter((sid) => !allow.has(sid));
   }
 
   /* ---------------- 数量：派生值（不落库） ---------------- */
@@ -257,7 +214,7 @@
     return String(f.serialNo || '').toLowerCase().includes(String(q).toLowerCase());
   }
 
-  /* 统一夹具检索谓词：serialNo/名称/库位/机种/分类/产线/工位 模糊；
+  /* 统一夹具检索谓词：serialNo/名称/库位/机种/分类/产线 模糊；
    * code 只在「完全相等（归一化）」时命中 —— 桥梁编号不参与模糊搜索。 */
   function matchFixture(f, q) {
     if (!q) return true;
@@ -270,7 +227,6 @@
     if ((f.category || '').toLowerCase().includes(s)) return true;
     if (lineModelsMatch(f, s)) return true;
     if (lineNamesOf(f).some((n) => n.toLowerCase().includes(s))) return true;
-    if (stationNamesOf(f).some((n) => n.name.toLowerCase().includes(s))) return true;
     return false;
   }
 
@@ -348,28 +304,37 @@
     returnForm: { operator: '', remark: '', time: '' },
     // 夹具查询：筛选/排序状态（切换视图后保留，便于连续检索）
     query: { keyword: '', code: '', name: '', location: '', lineModel: '', borrower: '', category: '', statuses: [], sortBy: 'code', sortDir: 'asc', outReason: '' },
-    serialQuery: '',          // 夹具查询页：按夹具编号聚合（数量与合计）的输入值
-    // 关联配置数据（v4.0.0）
+    // 关联配置数据
     lines: [],
-    stations: [],
     productions: [],
+    staffs: [],                                  // v5.1.0 人员卡库（刷卡反查姓名/角色）
+    staffQuery: '',                              // 人员卡库页：搜索关键字
+    // 刷卡位已识别的人员（存 staff.id；0 = 未识别）
+    swipePick: { out: { party: 0, operator: 0 }, ret: { party: 0, operator: 0 }, dlg: { party: 0, operator: 0 }, rdlg: { party: 0, operator: 0 } },
     lineCfg: { lineId: 0 },                          // 产线配置页：当前选中的线体
     lineQuery: { lineId: 0, lineModel: '' },                    // 产线使用页：当前选中的线体 + 机种（为空=全部）
     prodPick: '',            // 机种管理页：当前展开明细的机种名称（'' = 未展开）
-    // 建档 / 编辑夹具表单的暂存（产线工位选择用，退出表单即清空）
-    fixForm: { editId: 0, lineModels: [], lines: [], stations: [] }
+    // 建档 / 编辑夹具表单的暂存（产线选择用，退出表单即清空）
+    fixForm: { editId: 0, lineModels: [], lines: [] }
   };
 
   /* ---------------- 数据加载 ---------------- */
   async function reloadAll() {
     state.fixtures = await DB.fixtureGetAll();
     state.fixTransactions = await DB.fixtureGetTransactions();
+    // 人员卡库随主数据一起加载：刷卡位需要即时反查姓名，避免每次刷卡走一次 IPC
+    try { await reloadStaff(); } catch (e) { state.staffs = []; }
+  }
+
+  /* 人员卡库数据加载（独立函数：人员页改动后单独刷新，不动夹具） */
+  async function reloadStaff() {
+    state.staffs = (await DB.staffGetAll()) || [];
+    return state.staffs;
   }
 
   /* 产线配置数据加载（独立于夹具数据，按需刷新） */
   async function reloadLineConfig() {
     state.lines = await DB.getAll('lines');
-    state.stations = await DB.getAll('stations');
     state.productions = await DB.getAll('productions');
   }
 
@@ -392,6 +357,47 @@
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
+    {
+      version: '5.3.0', date: '2026-10-20', items: [
+        '【新增】「关于 / About」面板底部增加 <b>鸣谢</b> 区，致谢提供宝贵意见的同事：<b>薛添才、朱近、林长平、林捷、林详杰、陈旭</b>。名单集中在 app.js 顶部的 <code>THANKS_NAMES</code> 常量，以后增减只改这一处',
+      ]
+    },
+    {
+      version: '5.2.1', date: '2026-10-20', items: [
+        '<b>【修复】产线使用页按机种筛选恒为 0 条</b>：机种名含字母时（如 DH40MC）无论选哪个机种都查不到夹具，选「全部机种」却正常。根因是机种比对只把<b>库里的值</b>转成小写、没处理<b>传入的关键字</b>，于是 <code>\'dh40mc\'.includes(\'DH40MC\')</code> 恒为 false。现改为函数内部统一归一（去首尾空格 + 转小写），不再依赖调用方自觉',
+        '<b>【修复】下拉筛选由「模糊包含」改为「精确等值」</b>：机种下拉是枚举值，用包含匹配会出现「选 DH40 连带命中 DH40MC」这类超出所选范围的结果',
+        '<b>【修复】筛选显示与结果脱节</b>：若所选机种因夹具改删而从全库机种集合中消失，下拉会回落显示「全部机种」但仍在按旧值过滤；现在自动复位为「全部机种」',
+      ]
+    },
+    {
+      version: '5.2.0', date: '2026-10-20', items: [
+        '【新增】「⚙ 产线配置」线体表新增 <b>机种名称</b> 列：汇总该线体上全部夹具的「适用机种」（去重、自然排序），多个机种用 <code>/</code> 分隔；该线体还没有带机种的夹具时显示「—」',
+        '【新增】「🏷 机种管理」机种表新增 <b>线体</b> 列：汇总使用该机种的全部夹具所关联的产线（去重、自然排序），多条线体用 <code>/</code> 分隔；一条线体都没关联时显示「—」',
+        '【说明】这两列都是<b>派生值</b>，由夹具记录里的 <code>lines</code>（关联产线）与 <code>lineModels</code>（适用机种）现算，<b>不新增任何存储字段</b>，也不改数据文件结构；机种与线体之间依旧<b>没有直接绑定</b>，在夹具上改机种或改关联产线，两列立刻跟着变'
+      ]
+    },
+    {
+      version: '5.1.0', date: '2026-10-20', items: [
+        '【新增】<b>进出库刷卡</b>：新增侧边栏「👤 人员卡库」，登记<b>卡号 / 姓名 / 部门 / 角色 / 启用状态</b>；卡号归一化后<b>唯一</b>（一张卡只对应一个人），支持 Excel/CSV 批量导入与导出，模板 6 列',
+        '【新增】出库的「领用人 + 经办人」、回库的「退库人 + 经办人」改为<b>刷卡录入</b>：光标停在刷卡框，USB 读卡器刷卡后自动带出姓名与部门；刷完一位自动跳到另一位。角色为「领用人」的卡只能刷领用位，「经办人」只能刷经办位，「两者皆可」两边都能刷',
+        '【校验】提交时<b>严格校验</b>：两位都必须刷卡（不允许留空手填）、卡必须已登记、必须处于启用状态、角色必须匹配、且<b>不能是同一张卡</b>；任一条不满足直接拦下并说明原因。未登记的卡会提示去「人员卡库」登记',
+        '【数据】流水新增 <code>operatorCard</code> / <code>partyCard</code> 两个卡号快照字段（姓名仍存 <code>operator</code> / <code>counterparty</code>），因此<b>删人或改名都不影响历史流水</b>；旧流水无卡号字段时显示为空，不影响查询与导出',
+        '【新增】「🔗 产线使用」增加 <b>🖨 打印清单</b>：按<b>当前线体 + 当前机种</b>筛选结果打印 A4 横向表，含线体/机种/套数/打印时间表头、6 列表格（序号 / 夹具编号 / 名称 / 机种名称 / 库位 / 状态）、合计与签字栏；表头每页重复，行不被跨页截断',
+        '【保障】打印与屏幕<b>共用同一份筛选结果计算</b>（<code>lineQueryRows()</code>），套数与排序完全一致；标签打印与清单打印互斥清场，不会互相混页'
+      ]
+    },
+    {
+      version: '5.0.0', date: '2026-10-20', items: [
+        '【重构·不兼容】<b>工位（station）模型整体移除</b>：不再有 stations 集合、<code>fixtures.stations</code>、工位 CRUD、工位筛选/展示、以及夹具导入模板里的「工位1~工位5」列。夹具只关联到<b>产线</b>（1~5 条），数据结构更简单',
+        '【移除】<b>产线示意图（工位图）</b>整块删除：SVG 绘图函数群、布局常量、节点计算与相关样式全部移除，「产线使用」页改为纯表格展示该产线上的夹具清单',
+        '【移除】「🔎 夹具查询」页顶部的<b>「按夹具编号查询（数量与合计）」</b>面板整体删除（含按「编号 × 库位」分组统计、在库/在外/维修/报废分列与合计行），页面只保留多条件组合检索',
+        '【调整】「⚙ 产线配置」页去掉「② 工位与夹具」面板，线体表去掉「工位数」列；线体删除只从夹具的 <code>lines</code> 中摘除，不再有工位级联',
+        '【调整】产线配置导入模板由 6 列改为 <b>4 列</b>：<code>线体 | 线体形态 | 夹具编号 | 备注</code>。语义仍是「把某套夹具关联到某条产线」（追加 + 去重）；<b>旧模板里的「工位 / 工位顺序」列会被静默忽略</b>，老表格仍可导入',
+        '【调整】「🏷 机种管理」的机种明细由「线体 → 工位 → 夹具」改为<b>按线体分组的夹具表</b>，去掉工位列与「工位 N 个」汇总',
+        '【数据】启动时<b>自动清理旧数据</b>：<code>migrate()</code> 幂等删除 <code>data.stations</code> 与每条夹具的 <code>stations</code> 字段，旧 fixture-data.json 打开即升级，不报错、不丢其它字段',
+        '【移除】夹具导入导出模板由 22 列改为 <b>17 列</b>（夹具编号 / 名称 / 机种名称1~7 / 分类 / 库位 / 产线1~5 / 备注）；旧模板的工位列不参与映射，导出→导入仍逐列同构'
+      ]
+    },
     {
       version: '4.5.1', date: '2026-10-19', items: [
         '【修复】导入时<b>产线名只按字面比对</b>，「1#」与「1」被补建成两条线，夹具被拆到两条同义产线上 —— 用户在「产线使用」里选哪条都看不到全部（BUG-010）。现在导入按「去 # / 去空格 / 全角转半角」归一化比对：<b>库内已有名称优先，其次文件内首个写法</b>，「1#」「1 」「１」都落到同一条线，预览顶部会明示「已自动归并：1# → 1（N 行）」',
@@ -612,6 +618,9 @@
     { version: '1.0', date: '2026-09-04', items: ['夹具管理系统初始版本：建档、出库、回库、送修、报废、流水记录、数据备份'] }
   ];
 
+  /* 鸣谢名单（贡献宝贵意见的同事）。放在常量区，改名单只改这一处。 */
+  const THANKS_NAMES = ['薛添才', '朱近', '林长平', '林捷', '林详杰', '陈旭'];
+
   window.openAbout = function () {
     const html = `
       <div class="about-panel">
@@ -624,6 +633,8 @@
             </ul>
           `).join('')}
         </div>
+        <h3 class="about-h">鸣谢</h3>
+        <p class="about-thanks">感谢以下同事提供的宝贵意见：<br><strong>${esc(THANKS_NAMES.join('、'))}</strong></p>
         <p class="about-version muted">当前版本：v${DB.APP_VERSION} · 数据文件：程序所在目录 fixture-data.json · 本地存储 · 无需联网</p>
       </div>
     `;
@@ -644,6 +655,7 @@
     prod: '机种管理',
     linequery: '产线使用',
     linecfg: '产线配置',
+    staff: '人员卡库',
     data: '数据备份'
   };
   const RENDERERS = {
@@ -657,6 +669,7 @@
     prod: renderProduction,
     linequery: renderLineQuery,
     linecfg: renderLineConfig,
+    staff: renderStaff,
     data: renderData
   };
 
@@ -670,7 +683,14 @@
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     $('#content').scrollTop = 0;
     renderTopStats();
-    (RENDERERS[name] || renderDashboard)();
+    const r = RENDERERS[name] || renderDashboard;
+    /* 出库 / 回库要按卡号反查姓名，切换前先刷新人员卡库；
+       若用户已切走则丢弃本次渲染，避免覆盖新页面。 */
+    if (name === 'outbound' || name === 'return') {
+      reloadStaff().catch(() => {}).then(() => { if (state.view === name) r(); });
+    } else {
+      r();
+    }
   }
   window.showView = showView;
 
@@ -687,7 +707,7 @@
    * 仪表盘
    * ============================================================ */
   async function renderDashboard() {
-    // 仪表盘要展示机种/产线/工位数量，需按需补拉一次结构数据
+    // 仪表盘要展示机种/产线数量，需按需补拉一次结构数据
     try { await reloadLineConfig(); } catch (e) { /* 读不到按空处理 */ }
     if (state.view !== 'dashboard') return;
     const stocked = state.fixtures.filter((f) => f.status === 'stocked').length;
@@ -718,16 +738,15 @@
           <div class="stat-item"><span class="stat-label">流水记录</span><span class="stat-value">${state.fixTransactions.length}</span></div>
           <div class="stat-item"><span class="stat-label">机种</span><span class="stat-value">${(state.productions || []).length}</span></div>
           <div class="stat-item"><span class="stat-label">产线</span><span class="stat-value">${(state.lines || []).length}</span></div>
-          <div class="stat-item"><span class="stat-label">工位</span><span class="stat-value">${(state.stations || []).length}</span></div>
         </div>
       </div>
       <div class="panel">
-        <div class="panel-title">🧮 数据模型说明（v4.0.0）</div>
+        <div class="panel-title">🧮 数据模型说明（v5.0.0）</div>
         <div style="padding:16px; line-height:2;">
           <p>📦 <b>一套一条记录</b>：同一夹具编号可以有多套，分布在不同库位；<b>数量不存储</b>，一律按「夹具编号 + 库位」分组实时统计。</p>
           <p>🔗 <b>序号</b>：系统自动分配的 4 位数字，唯一标识每一套，也是二维码内容；<b>不参与模糊搜索</b>。</p>
           <p>📝 <b>夹具编号</b>：手工录入、允许重复（同机种多套共用），是日常检索的主键。</p>
-          <p>🏭 <b>产线与工位</b>：在夹具建档时选择（1~5 条产线、1~10 个工位）；机种是独立字典，<b>不隶属产线</b>。</p>
+          <p>🏭 <b>产线</b>：在夹具建档时选择（1~5 条产线）；机种是独立字典，<b>不隶属产线</b>。v5.0.0 起<b>不再有工位</b>，夹具只关联到产线。</p>
           <p>🗄 <b>库位</b>：4 段式编号（如 ZP1-U-1-1），出库时冻结保留，回库时可修改。</p>
         </div>
       </div>
@@ -741,6 +760,132 @@
         </div>
       </div>
     `;
+  }
+
+  /* ============================================================
+   * 刷卡录入组件（v5.1.0）
+   *
+   * 硬件约定：USB / IC 读卡器工作在「键盘模拟（HID）」模式 —— 刷卡后逐字符
+   *   输入卡号，并以一个 Enter 结尾。因此不需要任何驱动或额外接口，只要在输入框
+   *   上监听 keydown 的 Enter 就能拿到完整卡号。
+   *   ⚠️ 页面级 handleKeyDown 会把 out_ / return_ 前缀输入框的回车当成「提交」，
+   *      刷卡框若沿用这些前缀，刷一下卡就会直接出库。因此刷卡框统一用 swipe_ 前缀，
+   *      并在这里 preventDefault + stopPropagation 双重拦截。
+   *
+   * 三处使用：出库页（out）、回库页（ret）、单件出库弹窗（dlg）。
+   * ============================================================ */
+  const SWIPE_CTX = {
+    out: { partyLabel: '领用人', operatorLabel: '经办人', partyId: '#swipe_out_party', operatorId: '#swipe_out_operator' },
+    ret: { partyLabel: '退库人', operatorLabel: '经办人', partyId: '#swipe_ret_party', operatorId: '#swipe_ret_operator' },
+    dlg: { partyLabel: '领用人', operatorLabel: '经办人', partyId: '#swipe_dlg_party', operatorId: '#swipe_dlg_operator' },
+    rdlg: { partyLabel: '退库人', operatorLabel: '经办人', partyId: '#swipe_rdlg_party', operatorId: '#swipe_rdlg_operator' }
+  };
+
+  function swipeHintText(role) {
+    return role === 'party'
+      ? '刷卡后自动带出姓名与部门（角色需为「领用人」或「两者皆可」）'
+      : '刷卡后自动带出姓名与部门（角色需为「经办人」或「两者皆可」）';
+  }
+
+  /* 生成一个刷卡输入位（HTML 片段） */
+  function swipeFieldHtml(ctx, role) {
+    const c = SWIPE_CTX[ctx];
+    const isParty = role === 'party';
+    const id = (isParty ? c.partyId : c.operatorId).slice(1);
+    const label = isParty ? c.partyLabel : c.operatorLabel;
+    return `
+      <div class="form-group">
+        <label>${label} *</label>
+        <div class="swipe-box">
+          <input type="text" id="${id}" data-swipe="${ctx}:${role}" autocomplete="off"
+            placeholder="💳 刷${label}工牌，或手工输入卡号后回车">
+          <span class="swipe-state" id="${id}_state">未刷卡</span>
+        </div>
+        <small class="hint" id="${id}_tip">${swipeHintText(role)}</small>
+      </div>`;
+  }
+
+  function bindSwipe(ctx, role) {
+    const c = SWIPE_CTX[ctx];
+    const sel = role === 'party' ? c.partyId : c.operatorId;
+    const el = $(sel);
+    if (!el || el.dataset.swipeBound) return;
+    el.dataset.swipeBound = '1';
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      // 刷卡器以回车收尾：拦死，绝不能冒泡到页面级「回车提交」
+      e.preventDefault(); e.stopPropagation();
+      const r = resolveSwipe(ctx, role);
+      if (r.ok) {
+        // 刷完领用人自动跳到经办人，反之亦然（连续刷两张卡即可完成录入）
+        const nextSel = role === 'party' ? c.operatorId : c.partyId;
+        const next = $(nextSel);
+        if (next && !String(next.value || '').trim()) next.focus();
+      }
+    });
+    // 手工输入后离开输入框也复验一次，避免「填了但没按回车」导致提交时才报错
+    el.addEventListener('change', () => resolveSwipe(ctx, role));
+  }
+
+  /* 解析一个刷卡位：查库 → 角色/状态校验 → 渲染状态徽标 → 记录到 state */
+  function resolveSwipe(ctx, role) {
+    const c = SWIPE_CTX[ctx];
+    const sel = role === 'party' ? c.partyId : c.operatorId;
+    const el = $(sel);
+    if (!el) return { ok: false, empty: true };
+    const raw = String(el.value || '').trim();
+    const stEl = $('#' + el.id + '_state');
+    const tipEl = $('#' + el.id + '_tip');
+    const label = role === 'party' ? c.partyLabel : c.operatorLabel;
+    const needRoles = role === 'party' ? ['borrower', 'both'] : ['operator', 'both'];
+
+    const setState = (cls, txt, tip) => {
+      if (stEl) { stEl.className = 'swipe-state' + (cls ? ' ' + cls : ''); stEl.textContent = txt; }
+      if (tipEl) { tipEl.className = 'hint' + (cls === 'err' ? ' err' : ''); tipEl.textContent = tip; }
+    };
+
+    if (!raw) {
+      state.swipePick[ctx][role] = 0;
+      setState('', '未刷卡', swipeHintText(role));
+      return { ok: false, empty: true };
+    }
+
+    const s = findStaffLocal(raw);
+    if (!s) {
+      state.swipePick[ctx][role] = 0;
+      setState('err', '未登记', `卡号 ${raw} 未在人员卡库登记 —— 请到「👤 人员卡库」新增该卡（角色与姓名登记一次即可复用）`);
+      return { ok: false, msg: `${label}卡号 ${raw} 未登记，请先到「👤 人员卡库」登记` };
+    }
+    if (s.active === false) {
+      state.swipePick[ctx][role] = 0;
+      setState('err', '已停用', `「${s.name}」的卡已停用，不能用于出入库；如确需使用请到「👤 人员卡库」重新启用`);
+      return { ok: false, msg: `${label}「${s.name}」的卡已停用` };
+    }
+    if (needRoles.indexOf(s.role) < 0) {
+      state.swipePick[ctx][role] = 0;
+      const other = role === 'party' ? '经办人' : c.partyLabel;
+      setState('err', '角色不符', `「${s.name}」的角色是「${STAFF_ROLE_LABEL[s.role] || s.role}」，不能作为${label}；请换成${other}的卡`);
+      return { ok: false, msg: `「${s.name}」的角色是「${STAFF_ROLE_LABEL[s.role] || s.role}」，不能作为${label}` };
+    }
+
+    state.swipePick[ctx][role] = s.id;
+    setState('ok', `${s.name}${s.dept ? ' · ' + s.dept : ''}`, `✓ 卡号 ${normCard(s.cardNo)} ｜ 角色：${STAFF_ROLE_LABEL[s.role] || s.role}`);
+    return { ok: true, staff: s };
+  }
+
+  /* 提交前的成对校验：两个位都必须刷、都必须过、且不能是同一张卡 */
+  function validateSwipePair(ctx) {
+    const c = SWIPE_CTX[ctx];
+    const rp = resolveSwipe(ctx, 'party');
+    const ro = resolveSwipe(ctx, 'operator');
+    if (!rp.ok && rp.empty) return { ok: false, msg: `请刷${c.partyLabel}的工牌（卡号不能为空）` };
+    if (!rp.ok) return { ok: false, msg: rp.msg || `${c.partyLabel}刷卡未通过` };
+    if (!ro.ok && ro.empty) return { ok: false, msg: `请刷${c.operatorLabel}的工牌（卡号不能为空）` };
+    if (!ro.ok) return { ok: false, msg: ro.msg || `${c.operatorLabel}刷卡未通过` };
+    if (normCard(rp.staff.cardNo) === normCard(ro.staff.cardNo)) {
+      return { ok: false, msg: `${c.partyLabel}与${c.operatorLabel}不能是同一个人（同一张卡）` };
+    }
+    return { ok: true, party: rp.staff, operator: ro.staff };
   }
 
   /* ============================================================
@@ -768,8 +913,8 @@
              <datalist id="fix_out_loc_list">${locList}</datalist>`
           : `<input type="text" value="${esc(f.location)}" disabled><small class="hint">出库不改动库位，回库时默认预填该值</small>`}
       </div>
-      <div class="form-group"><label>经办人</label><input type="text" id="fix_out_op" placeholder="经办人（拼音联想）"></div>
-      <div class="form-group"><label>领用人</label><input type="text" id="fix_out_party" placeholder="领用人/使用部门"></div>
+      ${swipeFieldHtml('dlg', 'party')}
+      ${swipeFieldHtml('dlg', 'operator')}
       <div class="form-group"><label>出库原因 <span class="req">*</span></label>
         <select id="fix_out_reason" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
           <option value="use">使用</option>
@@ -785,21 +930,30 @@
       </div>
     `;
     openModal(`出库 — ${f.serialNo || f.code} ${f.name}`, html);
+    /* 弹窗渲染完再绑刷卡：openModal 会整体替换 modalBody，提前绑会绑到游离节点上 */
+    state.swipePick.dlg = { party: 0, operator: 0 };
+    bindSwipe('dlg', 'party');
+    bindSwipe('dlg', 'operator');
+    const partyEl = $('#swipe_dlg_party');
+    if (partyEl) partyEl.focus();
   };
 
   window.submitFixtureOut = async function (id) {
-    const operator = ($('#fix_out_op') || {}).value.trim();
-    const counterparty = ($('#fix_out_party') || {}).value.trim();
+    const v = validateSwipePair('dlg');
+    if (!v.ok) { toast(v.msg, 'err'); return; }
+    const operator = v.operator.name;
+    const counterparty = v.party.name;
+    const operatorCard = normCard(v.operator.cardNo);
+    const partyCard = normCard(v.party.cardNo);
     const time = inputToMs($('#fix_out_time').value);
     const remark = ($('#fix_out_remark') || {}).value.trim();
     const locEl = $('#fix_out_loc');
     const location = locEl ? locEl.value.trim() : '';
     const reasonEl = $('#fix_out_reason');
     const outReason = reasonEl && reasonEl.value === 'repair' ? 'repair' : 'use';
-    if (!operator) { toast('请填写经办人', 'err'); return; }
     if (locEl && !isValidLocation(location)) { toast('库位号需为 4 段式（如 ZP1-U-1-1）', 'err'); return; }
     try {
-      await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark, location: location || undefined, outReason });
+      await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, operatorCard, partyCard, time, remark, location: location || undefined, outReason });
       closeModal();
       await reloadAll();
       renderFixtures();
@@ -812,14 +966,14 @@
    *
    * 三段式：① 基本信息（夹具编号 / 名称 / 库位 / 分类 / 备注）
    *         ② 机种名称（≤7，输入框 +「添加」→ 标签区，多个用 / 分隔）
-   *         ③ 产线工位（产线/工位两级下拉 +「添加」→ 标签区；≥1 产线 ≥1 工位，≤5 产线 ≤10 工位）
+   *         ③ 关联产线（下拉 +「添加」→ 标签区；≥1 条、≤5 条）
    *
-   * ⚠️ 表单内的「产线 / 工位 / 机种」暂存在 state.fixForm，重绘只重写
+   * ⚠️ 表单内的「产线 / 机种」暂存在 state.fixForm，重绘只重写
    *    #fix_ls_box / #fix_lm_chips 两个容器，其余输入框不受影响（不丢已填内容）。
    * ⚠️ 桥梁编号 code 由系统自动分配（4 位纯数字），用户不可填、编辑时不可改。
    * ============================================================ */
   function resetFixForm() {
-    state.fixForm = { editId: 0, lineModels: [], lines: [], stations: [] };
+    state.fixForm = { editId: 0, lineModels: [], lines: [] };
     lsResetPick();
   }
   window.resetFixForm = resetFixForm;   // 表单「取消」按钮为内联 onclick，必须挂到 window
@@ -913,63 +1067,24 @@
     if (inp) { try { inp.focus(); } catch (e) { /* 忽略 */ } }
   };
 
-  /* ---- 产线工位：两级下拉（产线 / 工位）+「添加」→ 下方标签区 ----
-   * 为节省表单纵向空间，不再为每条产线铺开整片工位复选框，改为：
-   *   [选择产线 ▾] [选择工位 ▾] [+ 添加]      已选 1/5 条产线 · 1/10 个工位
-   *   1号线 · 4号工位 ×    1号线 · 7号工位 ×
-   * 工位下拉只列「当前产线中尚未选入」的工位；添加后保留产线选择，便于连续
-   * 加入同产线的多个工位。标签区（state.fixForm.stations）是唯一数据源，
-   * lines 由其派生（有工位才有产线），移除某产线最后一个工位即连带移除该产线。 */
-  let lsPick = { lineId: 0 };   // 工具区「选择产线」的当前选择（工位选择不做记忆）
+  /* ---- 关联产线：下拉 +「添加」→ 下方标签区（1~5 条） ----
+   * v5.0.0 起工位模型整体移除，这里只选产线：下拉 →「+ 添加」→ 标签区（可逐个 × 移除）。
+   * 标签区（state.fixForm.lines）是唯一数据源。 */
+  let lsPick = { lineId: 0 };   // 工具区「选择产线」的当前选择
   let lsHintMsg = { text: '', warn: false };   // 提示文案（随重绘一起输出，避免被 innerHTML 冲掉）
 
   function lsResetPick() { lsPick = { lineId: 0 }; lsHintMsg = { text: '', warn: false }; }
 
-  /* 工位 → 所属产线 id（找不到按 0） */
-  function lsLineOfStation(sid) {
-    const s = state.stations.find((x) => x.id === Number(sid));
-    return s ? Number(s.lineId) : 0;
-  }
-
-  /* 由工位集合派生关联产线（去重、保序） */
-  function lsLinesOfStations(sids) {
-    const out = [];
-    (sids || []).forEach((sid) => {
-      const lid = lsLineOfStation(sid);
-      if (lid && !out.includes(lid)) out.push(lid);
-    });
-    return out;
-  }
-
-  /* 某产线在表单中已选的工位 id 列表 */
-  function lsChosenOfLine(lid) {
-    return stationsOfLineInForm(lid, state.fixForm.stations).map((s) => Number(s.id));
-  }
-
-  /* 工位显示名：未填名称时退化为「工位 + 顺序号/id」 */
-  function lsStationLabel(s) {
-    const nm = String((s && s.name) || '').trim();
-    if (nm) return nm;
-    const seq = (s && s.seq != null && s.seq !== '') ? s.seq : (s ? s.id : '');
-    return '工位 ' + seq;
-  }
-
-  /* 取工位名称里的工位号（"X号工位" 的 X）用于下拉排序：
-   * 让下拉按用户可识别的 1、2、3… 顺序呈现，而不是按内部 seq。
-   * 名称里没有数字时回退 seq，再回退 id，保证总有可比值（无数字的排末尾）。 */
-  function lsStNameNum(s) {
-    const nm = String((s && s.name) || '');
-    const m = nm.match(/(\d+)/);
-    if (m) return parseInt(m[1], 10);
-    const sq = (s && s.seq != null && s.seq !== '') ? Number(s.seq) : null;
-    if (sq != null && Number.isFinite(sq)) return sq;
-    return s ? Number(s.id) : Infinity;
-  }
-
   /* 提示只记录到 lsHintMsg，由 renderLineSectors 随重绘一起输出 */
   function lsHint(msg, warn) { lsHintMsg = { text: msg || '', warn: !!warn }; }
 
-  /* 产线下拉：已关联的产线恒列出；未达产线上限时附上其余产线 */
+  /* 产线名（找不到时退化为 #id，保证不丢信息） */
+  function lsLineName(lid) {
+    const l = (state.lines || []).find((x) => Number(x.id) === Number(lid));
+    return l ? l.name : '#' + lid;
+  }
+
+  /* 产线下拉：已关联的恒列出；未达上限时附上其余产线 */
   function lsLineOptions() {
     const sel = state.fixForm.lines.map(Number);
     const allowNew = sel.length < MAX_LINES;
@@ -983,43 +1098,17 @@
     })).join('');
   }
 
-  /* 工位下拉：只列「当前产线」中尚未选入的工位 */
-  function lsStOptions() {
-    const lid = Number(lsPick.lineId);
-    if (!lid || !(state.lines || []).some((l) => Number(l.id) === lid)) {
-      return '<option value="">— 请先选择产线 —</option>';
-    }
-    const all = (state.stations || [])
-      .filter((s) => Number(s.lineId) === lid)
-      .slice()
-      .sort((a, b) => {
-        const na = lsStNameNum(a), nb = lsStNameNum(b);
-        if (na !== nb) return na - nb;
-        return natCompare((a && a.name) || '', (b && b.name) || '');
-      });
-    if (!all.length) return '<option value="">— 该产线尚未配置工位 —</option>';
-    const chosen = new Set(lsChosenOfLine(lid));
-    const rest = all.filter((s) => !chosen.has(Number(s.id)));
-    if (!rest.length) return '<option value="">— 该产线工位已全部选入 —</option>';
-    return ['<option value="">— 选择工位 —</option>']
-      .concat(rest.map((s) => `<option value="${s.id}">${esc(lsStationLabel(s))}</option>`)).join('');
-  }
-
-  /* 「+ 添加」按钮可用态：产线/工位都已选，且未触及产线/工位上限 */
+  /* 「+ 添加」按钮可用态：已选产线且未触及上限、未重复 */
   function syncLsAddBtn() {
     const btn = $('#fix_ls_addbtn');
     if (!btn) return;
     const lp = $('#fix_line_pick');
-    const sp = $('#fix_st_pick');
     const lid = lp && lp.value ? Number(lp.value) : 0;
-    const sid = sp && sp.value ? Number(sp.value) : 0;
-    const fullSts = state.fixForm.stations.length >= MAX_STATIONS;
-    const newLine = !!lid && !state.fixForm.lines.map(Number).includes(lid);
-    const fullLines = newLine && state.fixForm.lines.length >= MAX_LINES;
-    btn.disabled = !(lid && sid) || fullSts || fullLines;
-    btn.title = fullSts ? ('已达工位上限（' + MAX_STATIONS + ' 个）')
-      : (fullLines ? ('已达产线上限（' + MAX_LINES + ' 条）')
-        : (!sid ? '请先选择工位' : '加入下方标签区'));
+    const full = state.fixForm.lines.length >= MAX_LINES;
+    const dup = !!lid && state.fixForm.lines.map(Number).includes(lid);
+    btn.disabled = !lid || full || dup;
+    btn.title = full ? ('已达产线上限（' + MAX_LINES + ' 条）')
+      : (dup ? '该产线已在下方标签区' : '加入下方标签区');
   }
 
   /* 整块重绘 #fix_ls_box（工具区 + 标签区 + 提示），其余输入框不受影响 */
@@ -1036,79 +1125,50 @@
     if (lsPick.lineId && !(state.lines || []).some((l) => Number(l.id) === Number(lsPick.lineId))) lsPick.lineId = 0;
 
     const selLines = state.fixForm.lines.map(Number);
-    const selSts = state.fixForm.stations.map(Number);
     const fullLines = selLines.length >= MAX_LINES;
-    const fullSts = selSts.length >= MAX_STATIONS;
 
-    const chips = selSts.length
-      ? selSts.map((sid, i) => {
-        const s = state.stations.find((x) => x.id === sid);
-        if (!s) return '';
-        const l = (state.lines || []).find((x) => Number(x.id) === Number(s.lineId));
-        return `<span class="chip-tag chip-ls">${l ? '<b>' + esc(l.name) + '</b> · ' : ''}${esc(lsStationLabel(s))}`
-          + `<button type="button" class="chip-x" title="移除" onclick="fixFormRemoveStation(${i})">×</button></span>`;
-      }).join('')
-      : '<span class="chip-ls-empty muted">尚未选择工位</span>';
+    const chips = selLines.length
+      ? selLines.map((lid, i) => `<span class="chip-tag chip-ls"><b>${esc(lsLineName(lid))}</b>`
+        + `<button type="button" class="chip-x" title="移除" onclick="fixFormRemoveLine(${i})">×</button></span>`).join('')
+      : '<span class="chip-ls-empty muted">尚未选择产线</span>';
 
     box.innerHTML = `
       <div class="ls-toolbar">
         <select id="fix_line_pick" class="query-select" onchange="fixFormLinePicked()">${lsLineOptions()}</select>
-        <select id="fix_st_pick" class="query-select" onchange="fixFormStationPicked()"${lsPick.lineId ? '' : ' disabled'}>${lsStOptions()}</select>
-        <button type="button" class="btn sm" id="fix_ls_addbtn" onclick="fixFormAddStation()" disabled>+ 添加</button>
-        <span class="muted" id="fix_ls_count">已选 ${selLines.length} / ${MAX_LINES} 条产线 · ${selSts.length} / ${MAX_STATIONS} 个工位</span>
+        <button type="button" class="btn sm" id="fix_ls_addbtn" onclick="fixFormAddLine()" disabled>+ 添加</button>
+        <span class="muted" id="fix_ls_count">已选 ${selLines.length} / ${MAX_LINES} 条产线</span>
       </div>
-      <div id="fix_ls_chips" class="chip-box${selSts.length ? '' : ' chip-box-empty'}">${chips}</div>
+      <div id="fix_ls_chips" class="chip-box${selLines.length ? '' : ' chip-box-empty'}">${chips}</div>
       <small class="hint${lsHintMsg.text && lsHintMsg.warn ? ' hint-warn' : ''}" id="fix_ls_hint">${esc(lsHintMsg.text)}</small>
-      ${fullSts ? '<div class="tip">已达工位上限（' + MAX_STATIONS + ' 个）。</div>' : ''}
       ${fullLines ? '<div class="tip">已达产线上限（' + MAX_LINES + ' 条）。</div>' : ''}`;
 
     syncLsAddBtn();
   }
 
-  /* 选了产线 → 重算工位下拉 */
+  /* 选了产线 → 记住选择并刷新「+ 添加」可用态（不重绘，保住下拉选择） */
   window.fixFormLinePicked = function () {
-    const sel = $('#fix_line_pick');
-    lsPick.lineId = sel && sel.value ? Number(sel.value) : 0;
-    lsHint('', false);
-    renderLineSectors();
-  };
-
-  /* 选了工位 → 只刷新「+ 添加」可用态（不重绘，保住下拉选择） */
-  window.fixFormStationPicked = function () { syncLsAddBtn(); };
-
-  /* 添加：把「产线 + 工位」并入标签区；保留产线选择，便于连续添加工位 */
-  window.fixFormAddStation = function () {
     const lp = $('#fix_line_pick');
-    const sp = $('#fix_st_pick');
+    lsPick.lineId = lp && lp.value ? Number(lp.value) : 0;
+    syncLsAddBtn();
+  };
+
+  /* 添加：把产线并入标签区；保留下拉选择，便于连续添加 */
+  window.fixFormAddLine = function () {
+    const lp = $('#fix_line_pick');
     const lid = lp && lp.value ? Number(lp.value) : 0;
-    const sid = sp && sp.value ? Number(sp.value) : 0;
-    if (!lid) { lsHint('请先选择产线', true); return; }
-    if (!sid) { lsHint('请选择要加入的工位', true); return; }
-    const s = state.stations.find((x) => x.id === sid);
-    if (!s || Number(s.lineId) !== lid) { lsHint('该工位不属于所选产线，请重新选择', true); renderLineSectors(); return; }
-    if (state.fixForm.stations.map(Number).includes(sid)) { lsHint('该工位已在下方标签区中', true); renderLineSectors(); return; }
-    if (state.fixForm.stations.length >= MAX_STATIONS) { lsHint('一件夹具最多安装 ' + MAX_STATIONS + ' 个工位', true); renderLineSectors(); return; }
-    if (!state.fixForm.lines.map(Number).includes(lid) && state.fixForm.lines.length >= MAX_LINES) {
-      lsHint('一件夹具最多关联 ' + MAX_LINES + ' 条产线', true); renderLineSectors(); return;
-    }
-    state.fixForm.stations.push(sid);
-    if (!state.fixForm.lines.map(Number).includes(lid)) state.fixForm.lines.push(lid);
+    if (!lid) { lsHint('请先选择产线', true); renderLineSectors(); return; }
+    if (state.fixForm.lines.map(Number).includes(lid)) { lsHint('该产线已在下方标签区中', true); renderLineSectors(); return; }
+    if (state.fixForm.lines.length >= MAX_LINES) { lsHint('一件夹具最多关联 ' + MAX_LINES + ' 条产线', true); renderLineSectors(); return; }
+    state.fixForm.lines.push(lid);
     lsHint('', false);
     renderLineSectors();
   };
 
-  /* 移除一个工位标签；该产线已无工位时连带移除产线（规则 7 的新形态） */
-  window.fixFormRemoveStation = function (i) {
+  /* 移除一个产线标签 */
+  window.fixFormRemoveLine = function (i) {
     const idx = Number(i);
-    if (!(idx >= 0 && idx < state.fixForm.stations.length)) return;
-    const sid = Number(state.fixForm.stations[idx]);
-    const lid = lsLineOfStation(sid);
-    state.fixForm.stations.splice(idx, 1);
-    if (lid && !lsChosenOfLine(lid).length) {
-      state.fixForm.lines = state.fixForm.lines.map(Number).filter((x) => x !== lid);
-      if (Number(lsPick.lineId) === lid) lsPick.lineId = 0;
-      toast('已移除该产线下的最后一个工位，产线一并移除', 'warn');
-    }
+    if (!(idx >= 0 && idx < state.fixForm.lines.length)) return;
+    state.fixForm.lines.splice(idx, 1);
     lsHint('', false);
     renderLineSectors();
   };
@@ -1130,14 +1190,9 @@
       state.fixForm.editId = f.id;
       state.fixForm.lineModels = (Array.isArray(f.lineModels) ? f.lineModels : []).slice();
       state.fixForm.lines = (Array.isArray(f.lines) ? f.lines : []).map(Number).filter((lid) => state.lines.some((l) => l.id === lid));
-      const allow = new Set(state.fixForm.lines.flatMap((lid) => state.stations.filter((s) => s.lineId === lid).map((s) => s.id)));
-      state.fixForm.stations = (Array.isArray(f.stations) ? f.stations : []).map(Number).filter((sid) => allow.has(sid));
-      /* 表单内 lines 与工位保持一致（新 UI 下产线由工位派生，避免出现「看不见的空产线」） */
-      state.fixForm.lines = lsLinesOfStations(state.fixForm.stations);
     }
-    /* 默认把「选择产线」停在第一条已关联产线，便于继续增补同线工位 */
-    const pickedLines = lsLinesOfStations(state.fixForm.stations);
-    lsPick.lineId = pickedLines.length ? pickedLines[0] : 0;
+    /* 默认把「选择产线」停在第一条已关联产线，便于继续增补 */
+    lsPick.lineId = state.fixForm.lines.length ? state.fixForm.lines[0] : 0;
     const locList = locationCandidates().map((v) => `<option value="${esc(v)}"></option>`).join('');
     /* 分类下拉：预设 ∪ 已用分类；当前值即使不在候选里（历史脏值）也要保留可显示 */
     const curCat = f ? String(f.category || '').trim() : '';
@@ -1178,9 +1233,9 @@
           <button type="button" class="btn sm ghost" style="margin-left:6px;" onclick="fixFormCancelCategory()">取消</button>
         </div>
         <small class="hint">预设常用材质，也可自行新增；新增的分类保存后会出现在后续下拉中。</small></div>
-      <div class="form-group form-group-row"><label>产线工位 <span class="req">*</span>（≥1 产线 ≥1 工位 · ≤${MAX_LINES} 产线 ≤${MAX_STATIONS} 工位）</label>
+      <div class="form-group form-group-row"><label>关联产线 <span class="req">*</span>（≥1 条 · ≤${MAX_LINES} 条）</label>
         <div id="fix_ls_box" class="ls-box"></div>
-        <small class="hint">先选产线，再选该产线下的工位，点「+ 添加」加入；同一产线可连续添加多个工位。</small></div>
+        <small class="hint">从下拉选择产线，点「+ 添加」加入标签区；一条夹具可关联多条产线。</small></div>
       <div class="form-group"><label>备注</label>
         <input type="text" id="fix_remark" placeholder="可选备注" value="${esc(f ? f.remark || '' : '')}"></div>
       ${f ? `<div class="tip">序号 <b>${esc(f.code)}</b> 由系统分配，不可修改（改则断流水与产线绑定）。</div>` : ''}
@@ -1262,30 +1317,21 @@
     if ($('#fix_lm_text')) window.fixFormModelsInput();   // 兜底：从输入框重新解析，防止有未触发的 input 事件
     const lineModels = state.fixForm.lineModels.slice();
     const lines = state.fixForm.lines.map(Number);
-    const stations = state.fixForm.stations.map(Number);
 
     if (!isValidSerialNo(serialNo)) { toast('请填写夹具编号（≤' + MAX_SERIAL_NO + ' 字符，不能含 | 或换行）', 'err'); return; }
     if (!name) { toast('请填写夹具名称', 'err'); return; }
     if (!lineModels.length) { toast('请至少选择 1 个机种名称', 'err'); return; }
     if (lineModels.length > MAX_LINE_MODELS) { toast('机种名称最多 ' + MAX_LINE_MODELS + ' 个', 'err'); return; }
     if (!lines.length) { toast('请至少选择 1 条产线', 'err'); return; }
-    if (!stations.length) { toast('请至少选择 1 个工位', 'err'); return; }
     if (lines.length > MAX_LINES) { toast('一件夹具最多关联 ' + MAX_LINES + ' 条产线', 'err'); return; }
-    if (stations.length > MAX_STATIONS) { toast('一件夹具最多安装 ' + MAX_STATIONS + ' 个工位', 'err'); return; }
-    const outScope = outOfScopeStations(lines, stations);
-    if (outScope.length) {
-      const names = outScope.map((sid) => (state.stations.find((s) => s.id === sid) || {}).name || ('#' + sid));
-      toast('以下工位不属于已选产线：' + names.join('、'), 'err');
-      return;
-    }
     if (!isValidLocation(location)) { toast('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符', 'err'); return; }
     if (!isValidCategory(category)) { toast('分类名称最多 ' + MAX_CATEGORY + ' 字符，且不能含 | 或换行', 'err'); return; }
 
     try {
       if (editId) {
-        await DB.fixtureUpdate({ id: editId, serialNo, name, location, category, remark, lineModels, lines, stations });
+        await DB.fixtureUpdate({ id: editId, serialNo, name, location, category, remark, lineModels, lines });
       } else {
-        await DB.fixtureAdd({ serialNo, name, location, category, remark, lineModels, lines, stations });
+        await DB.fixtureAdd({ serialNo, name, location, category, remark, lineModels, lines });
       }
       closeModal();
       resetFixForm();
@@ -1304,13 +1350,13 @@
     renderFixtureArea(list, filtered, state.fixSelectedId || 0);
   };
 
-  /* 夹具清单导出（v4.5.0 修正）：
-   * 列定义与「下载模板」**完全同一份** FIX_IMPORT_HEADERS（22 列、同顺序、同 CSV 编码/换行），
-   * 只是模板多几行示例数据 ⇒ 导出的文件改完可直接用「⬆ 导入Excel/CSV」回灌，不会再出现
-   * 「模板和导出表列对不上、导入时整列被忽略」的问题（BUG-009）。
+  /* 夹具清单导出：
+   * 列定义与「下载模板」**完全同一份** FIX_IMPORT_HEADERS（17 列、同顺序、同 CSV 编码/换行），
+   * 只是模板多几行示例数据 ⇒ 导出的文件改完可直接用「⬆ 导入Excel/CSV」回灌（BUG-009）。
    * ⚠️ 机种必须拆成「机种名称1~7」七列，不能合成一格，否则导出→导入会改变行结构；
    *    序号 / 状态 / 累计出库 / 累计回库 / 维修次数都是系统内部派生值，模板里没有，
-   *    导出也不带（要看状态请到「夹具查询」或「流水记录」）。 */
+   *    导出也不带（要看状态请到「夹具查询」或「流水记录」）。
+   * ⚠️ v5.0.0 起模板与导出**不再有工位列**，只保留「产线1~产线5」。 */
   window.fixtureExportCSV = async function () {
     try { await reloadLineConfig(); } catch (e) { /* 读不到按空配置处理，产线名退化为 #id */ }
     const headers = FIX_IMPORT_HEADERS.slice();
@@ -1318,16 +1364,11 @@
       const models = [];
       const lms = Array.isArray(f.lineModels) ? f.lineModels : [];
       for (let i = 0; i < MAX_LINE_MODELS; i++) models.push(lms[i] == null ? '' : String(lms[i]));
-      const pairs = fixtureLinePairsForExport(f);
-      const pairCols = [];
-      for (let i = 0; i < MAX_LINES; i++) {
-        const p = pairs[i];
-        pairCols.push(p ? p.lineName : '');
-        pairCols.push(p ? p.stationNames.join(' / ') : '');
-      }
+      const lineCols = [];
+      for (let i = 0; i < MAX_LINES; i++) lineCols.push(fixtureLineNamesForExport(f)[i] || '');
       return [
         f.serialNo || '', f.name, ...models, f.category || '', f.location || '',
-        ...pairCols, f.remark || ''
+        ...lineCols, f.remark || ''
       ];
     });
     const csv = buildCsvText(headers, rows);
@@ -1341,19 +1382,19 @@
    * 设计要点（v4.0.0）：
    *   - 桥梁编号 code 不由表格提供，一律由系统自动分配（1001 起顺延填补空洞）
    *   - 实物编号 serialNo 为必填，允许重复（同机种多套）
-   *   - 产线 / 工位按「名称」引用；若未建档则**导入时自动补建**（同名复用，不重复创建），
-   *     不再因产线/工位未建档而整行跳过，确保符合其它条件的表格可正常导入
+   *   - 产线按「名称」引用；若未建档则**导入时自动补建**（同名复用，不重复创建），
+   *     不再因产线未建档而整行跳过，确保符合其它条件的表格可正常导入
    *   - 机种名称支持 1~7 独立列，也可只给一列「机种名称」用分隔符写多个
    *   - 预览确认后才落库，避免误导入
    * ============================================================ */
-  /* 模板结构（v4.2.0）：产线 / 工位改为**成对列**，精确表达「哪条产线下装了哪些工位」。
-   *   产线1 | 工位1 | 产线2 | 工位2 … 产线5 | 工位5
-   *   每对 = 一条产线 + 该产线下选的工位（多个用 / 、 分隔）；一行 = 一套夹具，最多 5 对（= MAX_LINES）。
-   *   旧版扁平「产线 / 工位」两列仍兼容：会按「每条产线 × 全部工位」展开（见 parseImportRow）。 */
+  /* 模板结构（v5.0.0）：只保留产线列，工位列已随工位模型一并移除。
+   *   产线1 | 产线2 | 产线3 | 产线4 | 产线5      （一行 = 一套夹具，最多 5 条产线）
+   *   旧版扁平「产线」单列仍兼容（多个产线用分隔符写在同一格）。
+   *   ⚠️ 旧模板里的「工位1…工位5」「工位」列会被**静默忽略**（表头不在别名表内），不影响产线导入。 */
   const FIX_IMPORT_HEADERS = [
     '夹具编号', '名称', '机种名称1', '机种名称2', '机种名称3', '机种名称4', '机种名称5', '机种名称6', '机种名称7',
     '分类', '库位',
-    '产线1', '工位1', '产线2', '工位2', '产线3', '工位3', '产线4', '工位4', '产线5', '工位5',
+    '产线1', '产线2', '产线3', '产线4', '产线5',
     '备注'
   ];
 
@@ -1380,20 +1421,14 @@
     '机种名称': 'lms', '机种': 'lms', '适用机种': 'lms', '机型': 'lms',
     '分类': 'category', '类别': 'category', 'category': 'category',
     '库位': 'location', '库位号': 'location', '存放位置': 'location', '位置': 'location', '货位': 'location', 'location': 'location',
-    /* 成对列（v4.2.0）：产线N / 工位N，N=1..5，另兼容中文数字 */
+    /* 产线N，N=1..5，另兼容中文数字 */
     '产线1': 'line1', '产线一': 'line1', '线体1': 'line1',
     '产线2': 'line2', '产线二': 'line2', '线体2': 'line2',
     '产线3': 'line3', '产线三': 'line3', '线体3': 'line3',
     '产线4': 'line4', '产线四': 'line4', '线体4': 'line4',
     '产线5': 'line5', '产线五': 'line5', '线体5': 'line5',
-    '工位1': 'station1', '工位一': 'station1', '工位名称1': 'station1',
-    '工位2': 'station2', '工位二': 'station2', '工位名称2': 'station2',
-    '工位3': 'station3', '工位三': 'station3', '工位名称3': 'station3',
-    '工位4': 'station4', '工位四': 'station4', '工位名称4': 'station4',
-    '工位5': 'station5', '工位五': 'station5', '工位名称5': 'station5',
-    /* 旧版扁平列（兼容保留）：一对多展开 */
+    /* 旧版扁平列（兼容保留）：一格写多条，用分隔符隔开 */
     '产线': 'lines', '线体': 'lines', '产线名称': 'lines', '线体名称': 'lines',
-    '工位': 'stations', '工位名称': 'stations', '工位号': 'stations',
     '备注': 'remark', '备注或用途': 'remark', '说明': 'remark', 'remark': 'remark'
   };
 
@@ -1439,30 +1474,18 @@
     });
     if (!lms.length) return { ok: false, reason: '机种名称为空' };
 
-    /* 产线 / 工位两种列结构：
-     *   ① 新版成对列（产线1/工位1 … 产线5/工位5）—— 精确表达「该产线下装了哪些工位」
-     *   ② 旧版扁平列（产线 / 工位）—— 兼容保留，按「每条产线 × 全部工位」展开（与旧行为一致） */
-    const linePairs = [];
+    /* 产线两种列结构：
+     *   ① 分列（产线1 … 产线5）
+     *   ② 旧版扁平单列（产线）—— 一格可写多条，用分隔符隔开
+     * 工位相关列（工位N / 工位）自 v5.0.0 起不再映射，出现也只会被忽略。 */
+    const lineNames = [];
     for (let i = 1; i <= MAX_LINES; i++) {
       const ln = get('line' + i);
-      if (!ln) continue;
-      linePairs.push({ lineName: ln, stationNames: splitNames(get('station' + i)) });
+      if (ln && lineNames.indexOf(ln) < 0) lineNames.push(ln);
     }
-    let legacyFlat = false;
-    if (!linePairs.length) {
-      const flatLines = splitNames(get('lines'));
-      const flatStations = splitNames(get('stations'));
-      if (flatLines.length) {
-        legacyFlat = true;
-        flatLines.forEach((ln) => linePairs.push({ lineName: ln, stationNames: flatStations.slice() }));
-      }
+    if (!lineNames.length) {
+      splitNames(get('lines')).forEach((ln) => { if (lineNames.indexOf(ln) < 0) lineNames.push(ln); });
     }
-    const lineNames = [];
-    const stationNames = [];
-    linePairs.forEach((pair) => {
-      if (lineNames.indexOf(pair.lineName) < 0) lineNames.push(pair.lineName);
-      pair.stationNames.forEach((sn) => { if (stationNames.indexOf(sn) < 0) stationNames.push(sn); });
-    });
 
     return {
       ok: true,
@@ -1473,10 +1496,7 @@
         category: get('category'),
         location,
         remark: get('remark'),
-        linePairs,
-        lineNames,
-        stationNames,
-        legacyFlat
+        lineNames
       }
     };
   }
@@ -1490,61 +1510,49 @@
   }
 
   /* ---------------- 导入查重：一整条记录的「签名」 ----------------
-   * 签名 = 夹具编号 + 名称 + 库位 + 分类 + 机种集合 + 产线/工位层级 + 备注 全部一致。
+   * 签名 = 夹具编号 + 名称 + 库位 + 分类 + 机种集合 + 产线集合 + 备注 全部一致。
    * ⚠️ 只跟「库内已有记录」比对，**绝不做批次内去重**：
    *    同一个库位放 2 套同号夹具是合法业务（真实台账里有 236 组 / 578 行完全相同的行），
    *    批次内去重会把这 578 行真实数据直接吞掉。
    * ⚠️ 与库内比对必须用「多重集 1:1 配对」（命中一条就减 1）：库内有 1 套、本次带来 2 行时，
    *    应判定为「1 行重复 + 1 行新增」，而不是两行都算重复。 */
   const SIG_SEP = '\u0000';
-  function _sigOfNames(serialNo, name, location, category, lineModels, linePairs, remark) {
+  function _sigOfNames(serialNo, name, location, category, lineModels, lineNames, remark) {
     const models = (lineModels || []).map((s) => String(s).trim()).filter(Boolean).sort();
-    const pairs = (linePairs || []).map((p) => String(p.lineName || '').trim() + '='
-      + (p.stationNames || []).map((s) => String(s).trim()).filter(Boolean).sort().join(',')).sort();
+    const lns = (lineNames || []).map((n) => String(n == null ? '' : n).trim()).filter(Boolean).sort();
     return [
       String(serialNo == null ? '' : serialNo).trim(),
       String(name == null ? '' : name).trim(),
       String(location == null ? '' : location).trim(),
       String(category == null ? '' : category).trim(),
       models.join('|'),
-      pairs.join(';'),
+      lns.join(';'),
       String(remark == null ? '' : remark).trim()
     ].join(SIG_SEP);
   }
-  /* 把库内已有夹具还原成同一签名：fixtures 只存 lines/stations 的 id 数组，
-   * 工位归属由 stations 表的 lineId 决定，因此要逐条反查回「产线 → 其下工位」的层级。 */
-  function _sigOfFixture(f, lines, stations) {
+  /* 把库内已有夹具还原成同一签名：fixtures 只存 lines 的 id 数组，需反查成产线名。 */
+  function _sigOfFixture(f, lines) {
     const lineNameById = new Map((lines || []).map((l) => [l.id, l.name]));
-    const stById = new Map((stations || []).map((s) => [s.id, s]));
-    const lineNames = (f.lines || []).map((id) => lineNameById.get(id)).filter(Boolean);
-    const pairs = lineNames.map((ln) => {
-      const line = (lines || []).find((l) => l.name === ln);
-      const names = (f.stations || []).map((sid) => stById.get(sid)).filter((s) => s && line && s.lineId === line.id).map((s) => s.name);
-      return { lineName: ln, stationNames: names };
-    });
-    return _sigOfNames(f.serialNo, f.name, f.location, f.category, f.lineModels, pairs, f.remark);
+    const lineNames = (f.lines || []).map((id) => lineNameById.get(Number(id))).filter(Boolean);
+    return _sigOfNames(f.serialNo, f.name, f.location, f.category, f.lineModels, lineNames, f.remark);
   }
 
   /* 把二维数组解析为待导入列表。
-   * ctx = { fixtures, lines, stations }，用于编号占用判断与产线/工位名称反查。
-   * 返回 { ok, plan:[{row,fixture,dupHint}], skipped:[{row,reason}], hasSerialColumn, hasLineColumn, hasStationColumn } */
+   * ctx = { fixtures, lines }，用于编号占用判断与产线名反查。
+   * 返回 { ok, plan:[{row,fixture,dupHint}], skipped:[{row,reason}], hasSerialColumn, hasLineColumn } */
   function buildImportPlan(rows, ctx) {
     if (!rows || rows.length < 2) return { ok: false, error: '文件中没有数据行' };
-    const c = ctx || { fixtures: state.fixtures, lines: state.lines, stations: state.stations };
+    const c = ctx || { fixtures: state.fixtures, lines: state.lines };
     const idx = mapImportHeader(rows[0]);
     if (idx.name == null) {
-      return { ok: false, error: '模板缺少「名称」列（表头需含：夹具编号 / 名称 / 机种名称 / 库位 / 产线 / 工位）' };
+      return { ok: false, error: '模板缺少「名称」列（表头需含：夹具编号 / 名称 / 机种名称 / 库位 / 产线）' };
     }
     if (idx.serialNo == null) return { ok: false, error: '模板缺少「夹具编号」列' };
     if (idx.location == null) return { ok: false, error: '模板缺少「库位」列' };
-    /* 产线 / 工位：新版成对列（产线1..5 / 工位1..5）或旧版扁平列（产线 / 工位）任一存在即可 */
     const hasAnyLineCol = [idx.line1, idx.line2, idx.line3, idx.line4, idx.line5, idx.lines].some((v) => v != null);
-    const hasAnyStationCol = [idx.station1, idx.station2, idx.station3, idx.station4, idx.station5, idx.stations].some((v) => v != null);
     if (!hasAnyLineCol) return { ok: false, error: '模板缺少「产线」列（新版「产线1…产线5」或旧版「产线」）' };
-    if (!hasAnyStationCol) return { ok: false, error: '模板缺少「工位」列（新版「工位1…工位5」或旧版「工位」）' };
 
     const linesByName = new Map((c.lines || []).map((l) => [l.name, l]));
-    const lineIdToName = new Map((c.lines || []).map((l) => [l.id, l.name]));
     /* 产线名归并表（BUG-010）：归一化名 -> 正式名。库内已有名称优先，其次本次文件里首个出现的写法。
      * 只影响「落库用哪个名字」，不改动用户文件；归并结果会在预览顶部明示。 */
     const normToLine = new Map();
@@ -1564,18 +1572,12 @@
       lineHints.set(n, h);
       return target;
     };
-    // 工位键 = 产线名 + \u0000 + 工位名（工位从属于产线）
-    const stationByKey = new Map();
-    (c.stations || []).forEach((s) => {
-      stationByKey.set((lineIdToName.get(s.lineId) || '') + '\u0000' + s.name, s);
-    });
-    // 待自动补建的产线 / 工位（同名只登记一次，落库时复用）
+    // 待自动补建的产线（同名只登记一次，落库时复用）
     const autoLines = new Map();      // lineName -> true
-    const autoStations = new Map();   // lineName\u0000stationName -> { lineName, name }
     /* 库内已有记录的签名计数（多重集）。每命中一行就减 1，保证「库内 1 套 + 本次 2 行」判成 1 重复 + 1 新增。 */
     const existingSig = new Map();
     (c.fixtures || []).forEach((f) => {
-      const sig = _sigOfFixture(f, c.lines || [], c.stations || []);
+      const sig = _sigOfFixture(f, c.lines || []);
       existingSig.set(sig, (existingSig.get(sig) || 0) + 1);
     });
 
@@ -1588,42 +1590,23 @@
       if (!parsed.ok) { skipped.push({ row: r + 1, reason: parsed.reason }); continue; }
       const f = parsed.fixture;
 
-      /* 产线名归并（BUG-010）：把「1#」「1 」这类同义写法并到同一条产线上，
-       * 归并后同一产线的工位合并去重（原来 1#：2 号工位 + 1：3 号工位 ⇒ 1：2 号工位、3 号工位）。 */
+      /* 产线名归并（BUG-010）：把「1#」「1 」这类同义写法并到同一条产线上。 */
       {
-        const pairMap = new Map();   // 归并后产线名 -> Set(工位名)
+        const merged = [];
         (f.lineNames || []).forEach((n) => {
           const to = remapLineName(n, r + 1);
-          if (!pairMap.has(to)) pairMap.set(to, new Set());
+          if (merged.indexOf(to) < 0) merged.push(to);
         });
-        (f.linePairs || []).forEach((pair) => {
-          const to = remapLineName(pair.lineName, r + 1);
-          if (!pairMap.has(to)) pairMap.set(to, new Set());
-          pair.stationNames.forEach((sn) => pairMap.get(to).add(sn));
-        });
-        f.lineNames = Array.from(pairMap.keys());
-        f.linePairs = Array.from(pairMap.entries()).map(([lineName, set]) => ({ lineName, stationNames: Array.from(set) }));
-        f.stationNames = Array.from(new Set(f.linePairs.flatMap((p) => p.stationNames)));
+        f.lineNames = merged;
       }
 
-      // 产线 / 工位按名称引用：未建档的记入「待自动补建」，不再整行跳过
       if (!f.lineNames.length) { skipped.push({ row: r + 1, reason: '产线为空' }); continue; }
       if (f.lineNames.length > MAX_LINES) { skipped.push({ row: r + 1, reason: '产线超过 ' + MAX_LINES + ' 条' }); continue; }
-      if (!f.stationNames.length) { skipped.push({ row: r + 1, reason: '工位为空' }); continue; }
-      if (f.stationNames.length > MAX_STATIONS) { skipped.push({ row: r + 1, reason: '工位超过 ' + MAX_STATIONS + ' 个' }); continue; }
 
       // 登记需要新建的产线（同名只建一次）
       f.lineNames.forEach((n) => { if (!linesByName.has(n) && !autoLines.has(n)) autoLines.set(n, true); });
-      // 登记需要新建的工位：严格按「该产线下的该工位」（成对列不再跨产线做笛卡尔积）
-      f.linePairs.forEach((pair) => {
-        pair.stationNames.forEach((sn) => {
-          const key = pair.lineName + '\u0000' + sn;
-          if (!stationByKey.has(key) && !autoStations.has(key)) autoStations.set(key, { lineName: pair.lineName, name: sn });
-        });
-      });
 
-      /* 重号提示：夹具编号允许重复（v4「每套一条记录」），但要告知现有持有量。
-         ⚠️ v4 重构时该字段曾丢失，导入预览不再提示重号，此处补齐。 */
+      /* 重号提示：夹具编号允许重复（v4「每套一条记录」），但要告知现有持有量。 */
       const sameNo = (c.fixtures || []).filter((x) => x.serialNo === f.serialNo);
       const inBatch = plan.filter((p) => p.fixture.serialNo === f.serialNo).length;
       const dupTotal = sameNo.length + inBatch;
@@ -1633,7 +1616,7 @@
         : '';
 
       /* 与库内已有记录做 1:1 配对：命中即判「疑似重复导入」（只提示 + 默认跳过，绝不静默丢行） */
-      const sig = _sigOfNames(f.serialNo, f.name, f.location, f.category, f.lineModels, f.linePairs, f.remark);
+      const sig = _sigOfNames(f.serialNo, f.name, f.location, f.category, f.lineModels, f.lineNames, f.remark);
       const remain = existingSig.get(sig) || 0;
       const isDup = remain > 0;
       if (isDup) existingSig.set(sig, remain - 1);
@@ -1643,10 +1626,7 @@
         fixture: {
           serialNo: f.serialNo, name: f.name, lineModels: f.lineModels,
           category: f.category, location: f.location, remark: f.remark,
-          linePairs: f.linePairs,
-          lineNames: f.lineNames,
-          stationNames: f.stationNames,
-          legacyFlat: f.legacyFlat
+          lineNames: f.lineNames
         },
         dupHint,
         isDup,
@@ -1655,41 +1635,20 @@
     }
     // 把「待自动补建」清单挂在 plan 上，供预览展示与落库时使用
     plan._autoLines = Array.from(autoLines.keys());
-    plan._autoStations = Array.from(autoStations.values());
     // 归并了哪些写法（预览顶部明示，避免用户以为文件写错了）
     plan._lineHints = Array.from(lineHints.entries()).map(([from, v]) => ({ from, to: v.to, rows: v.rows.size }));
     plan._dupCount = plan.filter((p) => p.isDup).length;
-    // 每行逐条记录缺少的产线 / 工位（供跳过 / 新建对话框使用）
-    plan._missing = plan.map((p) => {
-      const missing = [];
-      (p.fixture.lineNames || []).forEach((n) => {
-        if (!linesByName.has(n)) {
-          missing.push({ key: n, label: n, kind: 'line', type: 'new' });
-        }
-      });
-      (p.fixture.linePairs || []).forEach((pair) => {
-        pair.stationNames.forEach((sn) => {
-          const key = pair.lineName + '\u0000' + sn;
-          if (!stationByKey.has(key)) {
-            const curLine = (c.lines || []).find((l) => l.name === pair.lineName);
-            if (curLine) {
-              missing.push({ key, label: sn, kind: 'station', type: 'old', lineId: curLine.id });
-            } else {
-              missing.push({ key, label: sn, kind: 'station', type: 'new', lineId: pair.lineName });
-            }
-          }
-        });
-      });
-      return missing;
-    });
+    // 每行缺哪些产线（供跳过 / 新建对话框使用）
+    plan._missing = plan.map((p) => (p.fixture.lineNames || [])
+      .filter((n) => !linesByName.has(n))
+      .map((n) => ({ key: n, label: n, kind: 'line', type: 'new' })));
     /* ⚠️ 全部被跳过时必须把 skipped 一起返回：否则前端只弹「没有可导入的有效数据行」，
      * 用户完全不知道是「产线为空」还是「库位不合规」，只能猜（BUG-007）。 */
     if (!plan.length) return { ok: false, error: '没有可导入的有效数据行', skipped };
     return {
       ok: true, plan, skipped,
       hasSerialColumn: idx.serialNo != null,
-      hasLineColumn: hasAnyLineCol,
-      hasStationColumn: hasAnyStationCol
+      hasLineColumn: hasAnyLineCol
     };
   }
 
@@ -1697,52 +1656,29 @@
    * 遍历 plan._missing 所有条目，逐行让用户决定。
    * 返回 Map<key, 'add'|'skip'>，供 confirmImportPlan 使用。
    * 全部跳过时返回 null。 */
-  window.showModalMissingLineStation = function (plan) {
+  window.showModalMissingLines = function (plan) {
     const allMissing = plan._missing || [];
     if (!allMissing.length) return Promise.resolve(new Map());
 
-    // 按产线归类（同名产线合并为一行）
-    const lineGroups = new Map();  // displayLineName -> Array<{key,label,kind,type,lineId,idx}>
-    allMissing.forEach((m) => {
-      let displayLine;
-      if (m.kind === 'line') {
-        displayLine = m.key;
-      } else {
-        // station: lineId may be string (new line) or numeric id (old line)
-        if (typeof m.lineId === 'string') {
-          displayLine = m.lineId;
-        } else {
-          const l = (state.lines || []).find((l) => l.id === m.lineId);
-          displayLine = l ? l.name : '未知';
-        }
-      }
-      if (!lineGroups.has(displayLine)) lineGroups.set(displayLine, []);
-      lineGroups.get(displayLine).push(m);
-    });
-
     const tableRows = [];
     let rowIdx = 0;
-    lineGroups.forEach((items, lineName) => {
-      if (items[0].kind === 'line') {
-        tableRows.push({ key: items[0].key, label: '【新建产线】' + esc(lineName), lineName, kind: 'line', type: 'new', idx: rowIdx++ });
-      }
+    allMissing.forEach((items) => {
       items.forEach((m) => {
-        if (m.kind === 'station') {
-          tableRows.push({ key: m.key, label: lineName + ' · ' + esc(m.label), lineName, kind: 'station', type: m.type, lineId: m.lineId, idx: rowIdx++ });
-        }
+        if (tableRows.some((x) => x.key === m.key)) return;
+        tableRows.push({ key: m.key, label: esc(m.label), kind: 'line', type: m.type, idx: rowIdx++ });
       });
     });
 
     const body = `
       <div class="tip" style="margin-bottom:10px;">
-        检测到 <b>${allMissing.length}</b> 条未建档产线/工位。请选择每条目：<b>「新建」</b> 或 <b>「跳过该行」</b>（跳过 = 整行不导入）。</div>
+        检测到 <b>${tableRows.length}</b> 条未建档产线。请选择每条目：<b>「新建」</b> 或 <b>「跳过该行」</b>（跳过 = 整行不导入）。</div>
       <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
         <table class="table" style="margin:0;">
           <thead><tr><th>编号</th><th>名称</th><th>操作</th></tr></thead>
           <tbody>
             ${tableRows.map((r) => `<tr>
               <td>${r.idx + 1}</td>
-              <td>${r.label}</td>
+              <td>【新建产线】${r.label}</td>
               <td>
                 <label><input type="radio" name="mls_${r.idx}" value="add" checked> 新建</label>
                 <label><input type="radio" name="mls_${r.idx}" value="skip"> 跳过该行</label>
@@ -1756,8 +1692,7 @@
         <button class="btn ghost" onclick="closeModal()">取消</button>
       </div>
     `;
-    openModal('未建档产线/工位处理', body);
-    // 返回 promise，收集选择结果
+    openModal('未建档产线处理', body);
     return new Promise((resolve) => {
       window.__collectMissingSelection = () => {
         const result = new Map();
@@ -1786,7 +1721,6 @@
     const skipped = Array.isArray(result.skipped) ? result.skipped : [];
     const rows = plan.slice(0, 60);
     const autoLines = Array.isArray(plan._autoLines) ? plan._autoLines : [];
-    const autoStations = Array.isArray(plan._autoStations) ? plan._autoStations : [];
     const dupCount = plan._dupCount || 0;
     const newCount = plan.length - dupCount;
     const lineHints = Array.isArray(plan._lineHints) ? plan._lineHints : [];
@@ -1799,18 +1733,18 @@
     const dupBanner = dupCount ? `
       <div class="tip" style="margin-bottom:10px;border-color:#e0b34d;background:#fff8e6;color:#8a5a00;">
         ⚠️ 本次 <b>${plan.length}</b> 行中，有 <b>${dupCount}</b> 行与库内已有记录<b>完全一致</b>
-        （同夹具编号 + 名称 + 库位 + 分类 + 机种 + 产线工位 + 备注）。<br>
+        （同夹具编号 + 名称 + 库位 + 分类 + 机种 + 产线 + 备注）。<br>
         若这是同一份表重复导入，请选「跳过重复」；若确实又增加了实物（同库位放多套同号），请选「全部导入」。
       </div>` : '';
     const body = `
       ${aliasBanner}
       ${dupBanner}
       <div class="tip" style="margin-bottom:10px;">
-        来源：<b>${esc(sourceName)}</b> ｜ 待导入 <b>${plan.length}</b> 条${skipped.length ? ` ｜ 跳过 <b>${skipped.length}</b> 条` : ''}${(autoLines.length || autoStations.length) ? ` ｜ 自动补建 <b>${autoLines.length}</b> 产线 / <b>${autoStations.length}</b> 工位` : ''}
+        来源：<b>${esc(sourceName)}</b> ｜ 待导入 <b>${plan.length}</b> 条${skipped.length ? ` ｜ 跳过 <b>${skipped.length}</b> 条` : ''}${autoLines.length ? ` ｜ 自动补建 <b>${autoLines.length}</b> 条产线` : ''}
       </div>
       <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
         <table class="table" style="margin:0;">
-          <thead><tr><th>行号</th><th>状态</th><th>夹具编号</th><th>名称</th><th>机种名称</th><th>分类</th><th>库位</th><th>产线 / 工位</th></tr></thead>
+          <thead><tr><th>行号</th><th>状态</th><th>夹具编号</th><th>名称</th><th>机种名称</th><th>分类</th><th>库位</th><th>产线</th></tr></thead>
           <tbody>
             ${rows.map((p) => `<tr>
               <td>${p.row}</td>
@@ -1820,14 +1754,14 @@
               <td>${esc((p.fixture.lineModels || []).join(' / ') || '—')}</td>
               <td>${esc(p.fixture.category || '—')}</td>
               <td>${esc(p.fixture.location || '—')}</td>
-              <td>${esc((p.fixture.linePairs || []).map((x) => x.lineName + (x.stationNames.length ? '：' + x.stationNames.join('、') : '：（未选工位）')).join('；') || '—')}</td>
+              <td>${esc((p.fixture.lineNames || []).join(' / ') || '—')}</td>
             </tr>`).join('')}
           </tbody>
         </table>
       </div>
       ${plan.length > rows.length ? `<p class="muted" style="margin:8px 0 0;">仅预览前 ${rows.length} 条，实际将导入全部 ${plan.length} 条。</p>` : ''}
       ${skipped.length ? `<div class="tip" style="margin-top:8px;">跳过 ${skipped.length} 行：${esc(skipped.slice(0, 10).map((s) => '第 ' + s.row + ' 行(' + s.reason + ')').join('、'))}${skipped.length > 10 ? ' 等' : ''}</div>` : ''}
-      <p class="muted" style="margin:8px 0 0;">序号由系统自动分配；夹具编号允许重复。引用的产线 / 工位若未建档，将自动补建（同名复用，不重复创建）。导入后可在结果窗口「撤销本次导入」。</p>
+      <p class="muted" style="margin:8px 0 0;">序号由系统自动分配；夹具编号允许重复。引用的产线若未建档，将自动补建（同名复用，不重复创建）。导入后可在结果窗口「撤销本次导入」。</p>
       <div class="form-actions">
         ${dupCount
           ? `<button class="btn primary" onclick="confirmImportPlan('skip')">跳过重复，导入 ${newCount} 条</button>
@@ -1840,11 +1774,10 @@
     openModal('导入预览', body);
   };
 
-  /* 某行是否被用户在「未建档产线/工位」对话框里选了「跳过该行」 */
+  /* 某行是否被用户在「未建档产线」对话框里选了「跳过该行」 */
   function _rowSkipByKeys(p, keys) {
     if (!keys || !keys.size) return false;
-    return (p.fixture.lineNames || []).some((n) => keys.has(n))
-      || (p.fixture.linePairs || []).some((pair) => pair.stationNames.some((sn) => keys.has(pair.lineName + '\u0000' + sn)));
+    return (p.fixture.lineNames || []).some((n) => keys.has(n));
   }
 
   /* 确认导入
@@ -1865,45 +1798,24 @@
       return;
     }
 
-    /* ① 只对「真正要落库」的行补建产线 / 工位：被跳过的不建，避免留下空壳字典项 */
+    /* ① 只对「真正要落库」的行补建产线：被跳过的不建，避免留下空壳字典项 */
     const lineIdByName = new Map((state.lines || []).map((l) => [l.name, l.id]));
     const createdLineIds = [];      // 本批新建的产线，撤销时回收（BUG-011）
-    const createdStationIds = [];   // 本批新建的工位，撤销时回收
     const needLines = [];
     effective.forEach((p) => (p.fixture.lineNames || []).forEach((n) => {
       if (!lineIdByName.has(n) && !needLines.includes(n)) needLines.push(n);
     }));
     for (const name of needLines) {
-      const id = await DB.add('lines', { name, type: 'linear', remark: '导入自动建档', createdAt: Date.now() });
+      const id = await DB.add('lines', { name, remark: '导入自动建档', createdAt: Date.now() });
       lineIdByName.set(name, id);
       createdLineIds.push(id);
-    }
-    const lineIdToName = new Map((state.lines || []).map((l) => [l.id, l.name]));
-    lineIdByName.forEach((id, name) => lineIdToName.set(id, name));
-    const stIdByKey = new Map();
-    (state.stations || []).forEach((s) => stIdByKey.set((lineIdToName.get(s.lineId) || '') + '\u0000' + s.name, s.id));
-    const needStations = [];
-    const seenStKey = new Set();
-    effective.forEach((p) => (p.fixture.linePairs || []).forEach((pair) => pair.stationNames.forEach((sn) => {
-      const key = pair.lineName + '\u0000' + sn;
-      if (!stIdByKey.has(key) && !seenStKey.has(key)) { seenStKey.add(key); needStations.push({ lineName: pair.lineName, name: sn }); }
-    })));
-    for (const s of needStations) {
-      const lineId = lineIdByName.get(s.lineName);
-      if (!lineId) continue;
-      const key = s.lineName + '\u0000' + s.name;
-      if (stIdByKey.has(key)) continue;
-      const id = await DB.add('stations', { lineId, name: s.name, seq: null, remark: '导入自动建档', createdAt: Date.now() });
-      stIdByKey.set(key, id);
-      createdStationIds.push(id);
     }
 
     /* ② 逐行落库夹具；打批次号 importBatch，供「撤销本次导入」精确回滚这一批 */
     const batchId = 'b' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-    /* 记录本批新建的结构项 —— 撤销时若已无人引用就一并回收（BUG-011：
-     * 以前只删夹具，每撤销一次就留下一整套「有工位、0 夹具」的空壳产线）。 */
+    /* 记录本批新建的结构项 —— 撤销时若已无人引用就一并回收（BUG-011）。 */
     window.__importCreatedByBatch = window.__importCreatedByBatch || {};
-    window.__importCreatedByBatch[batchId] = { lineIds: createdLineIds.slice(), stationIds: createdStationIds.slice() };
+    window.__importCreatedByBatch[batchId] = { lineIds: createdLineIds.slice() };
     let added = 0, failed = 0;
     for (const p of effective) {
       try {
@@ -1911,13 +1823,6 @@
         (p.fixture.lineNames || []).forEach((n) => {
           const id = lineIdByName.get(n);
           if (id != null && !lineIds.includes(id)) lineIds.push(id);
-        });
-        const stationIds = [];
-        (p.fixture.linePairs || []).forEach((pair) => {
-          pair.stationNames.forEach((sn) => {
-            const id = stIdByKey.get(pair.lineName + '\u0000' + sn);
-            if (id != null && !stationIds.includes(id)) stationIds.push(id);
-          });
         });
         await DB.fixtureAdd({
           serialNo: p.fixture.serialNo,
@@ -1927,7 +1832,6 @@
           location: p.fixture.location,
           remark: p.fixture.remark,
           lines: lineIds,
-          stations: stationIds,
           importBatch: batchId
         });
         added++;
@@ -1961,29 +1865,18 @@
     openModal('导入结果', body);
   }
 
-  /* 撤销导入时该回收哪些「本批自动补建」的结构项（纯函数，便于测试）。
-   * 规则：先工位（撤销后已无任何夹具引用），再产线（既无夹具、也无**剩余**工位引用）。
-   * 顺序不能颠倒 —— 若先判产线，它必然还被这批工位引用着，一条也回收不掉。
-   * created = { lineIds:[], stationIds:[] }，由 confirmImportPlan 记录（BUG-011）。 */
-  function planStructureRecycle(created, fixtures, stations) {
-    const usedSt = new Set();
-    (fixtures || []).forEach((f) => (f.stations || []).forEach((s) => usedSt.add(Number(s))));
-    const createdSt = ((created && created.stationIds) || []).map(Number);
-    const stationIds = createdSt.filter((sid) => !usedSt.has(sid));
-
-    const goneSt = new Set(stationIds);
-    const remainSt = (stations || []).filter((s) => !goneSt.has(Number(s.id)));
-    const remainLineIds = new Set(remainSt.map((s) => Number(s.lineId)));
-
+  /* 撤销导入时该回收哪些「本批自动补建」的产线（纯函数，便于测试）。
+   * 规则：只回收本批新建、且撤销后已没有任何夹具引用的产线。
+   * created = { lineIds:[] }，由 confirmImportPlan 记录（BUG-011）。 */
+  function planStructureRecycle(created, fixtures) {
     const usedLine = new Set();
     (fixtures || []).forEach((f) => (f.lines || []).forEach((l) => usedLine.add(Number(l))));
     const createdLine = ((created && created.lineIds) || []).map(Number);
-    const lineIds = createdLine.filter((lid) => !usedLine.has(lid) && !remainLineIds.has(lid));
-    return { stationIds, lineIds };
+    return createdLine.filter((lid) => !usedLine.has(lid));
   }
 
   /* 撤销本次导入：按批次号删除本批记录（连带清理其流水），
-   * 并回收本批「自动补建」且撤销后已无人引用的产线 / 工位（BUG-011）。 */
+   * 并回收本批「自动补建」且撤销后已无人引用的产线（BUG-011）。 */
   window.undoFixtureImport = async function (batchId) {
     if (!batchId) return;
     const list = state.fixtures.filter((f) => f.importBatch === batchId);
@@ -1995,30 +1888,24 @@
     }
     closeModal();
     await reloadAll();
-    /* ③ 回收结构项：先工位（无夹具引用即删），再产线（无夹具、无工位引用即删）。
-     * 顺序不能反 —— 先删产线会留下孤儿工位；也不能只看 lineIds，
-     * 因为同一产线可能同时被别的批次或手工建档的夹具使用。 */
+    /* ③ 回收结构项：只回收本批新建、且已无任何夹具引用的产线。
+     * 不能只看 lineIds —— 同一产线可能同时被别的批次或手工建档的夹具使用。 */
     const created = (window.__importCreatedByBatch || {})[batchId];
-    let recycledLine = 0, recycledStation = 0;
+    let recycledLine = 0;
     if (created) {
       try {
-        const rp = planStructureRecycle(created, state.fixtures || [], state.stations || []);
-        for (const sid of rp.stationIds) {
-          try { await DB.stationDel(sid); recycledStation++; } catch (e) { /* 已不存在则忽略 */ }
-        }
-        if (recycledStation) await reloadAll();
-        for (const lid of rp.lineIds) {
+        const lineIds = planStructureRecycle(created, state.fixtures || []);
+        for (const lid of lineIds) {
           try { await DB.lineDel(lid); recycledLine++; } catch (e) { /* 已不存在则忽略 */ }
         }
         if (recycledLine) await reloadAll();
       } catch (e) {
-        console.warn('回收本次导入新建的产线/工位失败', e);
+        console.warn('回收本次导入新建的产线失败', e);
       }
       delete window.__importCreatedByBatch[batchId];
     }
     renderFixtures();
-    const recycled = (recycledLine || recycledStation)
-      ? `，并回收自动补建的 ${recycledLine} 条产线 / ${recycledStation} 个工位` : '';
+    const recycled = recycledLine ? `，并回收自动补建的 ${recycledLine} 条产线` : '';
     toast(fail ? `已撤销 ${ok} 条，${fail} 条失败${recycled}` : `已撤销本次导入，删除 ${ok} 条${recycled}`, fail ? 'warn' : 'ok');
   };
 
@@ -2040,7 +1927,7 @@
         </tbody>
       </table>` : ''}
       ${sk.length ? `<p class="muted" style="margin:10px 0 0;">前 10 条明细：${esc(sk.slice(0, 10).map((s) => '第 ' + s.row + ' 行(' + s.reason + ')').join('、'))}${sk.length > 10 ? ' 等' : ''}</p>` : ''}
-      <p class="muted" style="margin:10px 0 0;">常见原因：<b>产线 / 工位为空</b>（建档要求至少 1 条产线 + 1 个工位）；<b>库位不是 4 段式</b>（如 ZP1-U-1-1）；名称为空；机种全部为空。</p>
+      <p class="muted" style="margin:10px 0 0;">常见原因：<b>产线为空</b>（建档要求至少 1 条产线）；<b>库位不是 4 段式</b>（如 ZP1-U-1-1）；名称为空；机种全部为空。</p>
       <div class="form-actions"><button class="btn primary" onclick="closeModal()">知道了</button></div>
     `;
     openModal('导入失败：没有可用的行', body);
@@ -2076,11 +1963,11 @@
       }
     } catch (e) { toast('解析失败：' + e.message, 'err'); return; }
 
-    const result = buildImportPlan(rows, { fixtures: state.fixtures, lines: state.lines, stations: state.stations });
+    const result = buildImportPlan(rows, { fixtures: state.fixtures, lines: state.lines });
     if (!result.ok) { showImportFailure(result, picked.name); return; }
 
-    // 先处理「产线 / 工位未建档」对话框，确认后再进预览
-    const missingMap = await window.showModalMissingLineStation(result.plan);
+    // 先处理「产线未建档」对话框，确认后再进预览
+    const missingMap = await window.showModalMissingLines(result.plan);
     if (missingMap === null) return; // 用户取消
 
     // 应用用户的选择（skip 的行写入 plan._skipKeys，不再补建）
@@ -2092,27 +1979,28 @@
   };
 
   /* 下载导入模板（CSV，含示例行，Excel 可直接打开另存为 xlsx）
-   * 列定义与「导出CSV」共用 FIX_IMPORT_HEADERS / buildCsvText ⇒ 两文件除示例行外完全一致。 */
+   * 列定义与「导出CSV」共用 FIX_IMPORT_HEADERS / buildCsvText ⇒ 两文件除示例行外完全一致。
+   * v5.0.0 起只填产线（产线1~产线5），没有工位列。 */
   window.downloadFixtureTemplate = function () {
     const sample = [
-      /* 一套夹具 = 一行；本例关联 2 条产线：3 号线装 1、2 号工位，L2 U型线装 1 号工位 */
+      /* 一套夹具 = 一行；本例关联 2 条产线 */
       ['DH40MC-921-001-001', '定位销压板', 'DH40MC', 'DH40MC-B', 'DH40MC-C', 'DH40MC-D', 'DH40MC-E', 'DH40MC-F', 'DH40MC-G',
         '金属', 'ZP1-U-1-1',
-        '3 号线', '1号工位 / 2号工位', 'L2 U型线', '1号工位', '', '', '', '', '', '',
-        '多产线示例：3 号线装两个工位，L2 只装一个'],
-      /* 同编号的第 2 套：单产线单工位 */
+        '3 号线', 'L2 U型线', '', '', '',
+        '多产线示例：一条夹具挂在两条线上'],
+      /* 同编号的第 2 套：单产线 */
       ['DH40MC-921-001-001', '定位销压板', 'DH40MC', '', '', '', '', '', '',
         '金属', 'ZP1-U-1-2',
-        '3 号线', '2号工位', '', '', '', '', '', '', '', '',
+        '3 号线', '', '', '', '',
         '同编号的第 2 套'],
       /* 分类可用预设值（金属 / PVC / 亚克力 / 橡胶…），也可自行填写新分类 */
       ['XXK-D10VG-002', '焊接夹具', 'XXK-D10VG', '', '', '', '', '', '',
         'PVC', 'ZP1-U-2-1',
-        'L2 U型线', '1号工位', '', '', '', '', '', '', '', '',
+        'L2 U型线', '', '', '', '',
         '']
     ];
     download('夹具导入模板.csv', buildCsvText(FIX_IMPORT_HEADERS, sample));
-    toast('模板已下载：列结构与「导出CSV」一致；产线/工位按「产线N + 工位N」成对填写，同一产线的多个工位用 / 分隔', 'ok');
+    toast('模板已下载：列结构与「导出CSV」一致；产线最多填 5 条（产线1~产线5），不再有工位列', 'ok');
   };
 
   window.fixtureRetire = function (id) {
@@ -2199,7 +2087,7 @@
           <div class="fixture-card-body">
             <div class="fixture-name">${esc(f.name)} <span class="bridge-code" title="序号（系统自动分配）">${esc(f.code)}</span></div>
             <div class="fixture-spec" title="${esc(fullLineModels(f, '—'))}">机种：${esc(formatLineModels(f, '—', { collapse: 2 }))}</div>
-            <div class="fixture-spec fixture-ls" title="产线 / 工位：${esc(lineStationLabel(f, '—'))}">产线/工位：${esc(lineStationLabel(f, '—'))}</div>
+            <div class="fixture-spec fixture-ls" title="产线：${esc(lineNamesLabel(f, '—'))}">产线：${esc(lineNamesLabel(f, '—'))}</div>
             <div class="fixture-meta"><span>库位 ${esc(f.location || '—')}</span><span>出库 ${f.totalOutCount || 0} 次</span><span>回库 ${f.totalReturnCount || 0} 次</span></div>
           </div>
           <div class="fixture-card-footer">
@@ -2225,7 +2113,7 @@
     if (!fixtures.length) { container.innerHTML = '<div class="empty-tip">暂无夹具记录</div>'; return; }
     const html = `
       <div class="table-wrap"><table>
-        <thead><tr><th style="width:64px">序号</th><th style="width:150px">夹具编号</th><th>名称</th><th>机种名称</th><th>产线 / 工位</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>累计回库</th><th style="width:190px">操作</th></tr></thead>
+        <thead><tr><th style="width:64px">序号</th><th style="width:150px">夹具编号</th><th>名称</th><th>机种名称</th><th>产线</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>累计回库</th><th style="width:190px">操作</th></tr></thead>
         <tbody>
           ${fixtures.map((f) => {
             const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
@@ -2233,7 +2121,7 @@
             return `<tr class="${isSelected ? 'selected' : ''}" data-id="${f.id}" onclick="fixtureSelect(${f.id})">
               <td class="muted">${esc(f.code)}</td><td>${esc(f.serialNo || '—')}</td><td>${esc(f.name)}</td>
               <td title="${esc(fullLineModels(f, '—'))}">${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
-              <td title="${esc(stationNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</td>
+              <td title="${esc(lineNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))}</td>
               <td>${esc(f.category || '—')}</td><td>${esc(f.location || '—')}</td>
               <td><span class="badge ${st.cls}">${st.label}</span></td>
               <td>${f.totalOutCount || 0}</td><td>${f.totalReturnCount || 0}</td>
@@ -2334,7 +2222,7 @@
             <button class="btn sm ${state.fixViewMode === 'list' ? 'primary' : 'ghost'}" onclick="setFixViewMode('list')">☰ 列表</button>
           </span>
         </div>
-        <div class="search-bar"><input type="text" id="fix_search" placeholder="搜索夹具编号 / 名称 / 机种 / 库位 / 产线 / 工位…（序号需完整输入）" oninput="fixtureSearch()"></div>
+        <div class="search-bar"><input type="text" id="fix_search" placeholder="搜索夹具编号 / 名称 / 机种 / 库位 / 产线…（序号需完整输入）" oninput="fixtureSearch()"></div>
         <div id="fixture_list"></div>
       </div>
       <div class="panel">
@@ -2360,7 +2248,7 @@
           <ol>
             <li>确定夹具：扫码 / 编号 / 名称 / 机种 / 库位检索</li>
             <li>选择数量：默认 1 件，可在右侧调整</li>
-            <li>填写领用信息：领用人、经办人</li>
+            <li>刷卡录入：先刷领用人工牌，再刷经办人工牌</li>
             <li>提交出库</li>
           </ol>
         </aside>
@@ -2406,14 +2294,8 @@
               </div>
             </div>
             <div class="form-row">
-              <div class="form-group">
-                <label>领用人 / 使用部门 *</label>
-                <input type="text" id="out_party" placeholder="领用人">
-              </div>
-              <div class="form-group">
-                <label>经办人 *</label>
-                <input type="text" id="out_operator" placeholder="经办人">
-              </div>
+              ${swipeFieldHtml('out', 'party')}
+              ${swipeFieldHtml('out', 'operator')}
             </div>
             <div class="form-row form-row-inline">
               <div class="form-group">
@@ -2451,7 +2333,7 @@
           <ol>
             <li>确定夹具：扫码 / 编号 / 名称 / 机种 / 库位检索</li>
             <li>选择数量：默认 1 件，可在右侧调整</li>
-            <li>填写归还信息：退库人、经办人</li>
+            <li>刷卡录入：先刷退库人工牌，再刷经办人工牌</li>
             <li>提交回库</li>
           </ol>
         </aside>
@@ -2492,14 +2374,8 @@
               </div>
             </div>
             <div class="form-row">
-              <div class="form-group">
-                <label>退库人 / 使用部门</label>
-                <input type="text" id="return_party" placeholder="退库人">
-              </div>
-              <div class="form-group">
-                <label>经办人 *</label>
-                <input type="text" id="return_operator" placeholder="经办人">
-              </div>
+              ${swipeFieldHtml('ret', 'party')}
+              ${swipeFieldHtml('ret', 'operator')}
             </div>
             <div class="form-row form-row-inline">
               <div class="form-group">
@@ -2547,6 +2423,9 @@
       }
     };
     ['#out_code', '#out_name', '#out_spec', '#out_location'].forEach(wrapFixes);
+    /* v5.1.0 刷卡位：领用人 / 经办人。刷完自动跳到另一个空位，两张卡刷完点提交 */
+    bindSwipe('out', 'party');
+    bindSwipe('out', 'operator');
     // 用途下拉变化时显示/隐藏自填框
     const outReasonEl = $('#out_reason');
     if (outReasonEl) {
@@ -2574,6 +2453,9 @@
       }
     };
     ['#return_code', '#return_name', '#return_spec', '#return_location'].forEach(wrapFixes);
+    /* v5.1.0 刷卡位：退库人 / 经办人 */
+    bindSwipe('ret', 'party');
+    bindSwipe('ret', 'operator');
     // 用途下拉变化时显示/隐藏自填框
     const returnReasonEl = $('#return_reason');
     if (returnReasonEl) {
@@ -2766,17 +2648,21 @@
     syncQtyToPick('out');
     const ids = pickedIds('out');
     if (!ids.length) { toast('请先勾选要出库的夹具，或填写出库数量', 'err'); return; }
-    const operator = ($('#out_operator') || {}).value.trim();
-    const counterparty = ($('#out_party') || {}).value.trim();
+    /* v5.1.0 严格校验：两人都必须刷已登记且启用的卡，角色匹配，且不能同卡 */
+    const v = validateSwipePair('out');
+    if (!v.ok) { toast(v.msg, 'err'); return; }
+    const operator = v.operator.name;
+    const counterparty = v.party.name;
+    const operatorCard = normCard(v.operator.cardNo);
+    const partyCard = normCard(v.party.cardNo);
     const time = inputToMs(($('#out_time') || {}).value);
     const outReason = ($('#out_reason') || {}).value || 'use';
     const outReasonText = ($('#out_reason_text') || {}).value.trim();
     const remark = ($('#out_remark') || {}).value.trim();
-    if (!operator) { toast('请填写经办人', 'err'); return; }
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
-        await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, time, remark, outReason, outReasonText });
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'out', operator, counterparty, operatorCard, partyCard, time, remark, outReason, outReasonText });
         ok++;
       } catch (e) { fail++; }
     }
@@ -2852,17 +2738,21 @@
     syncQtyToPick('return');
     const ids = pickedIds('return');
     if (!ids.length) { toast('请先勾选要回库的夹具，或填写回库数量', 'err'); return; }
-    const operator = ($('#return_operator') || {}).value.trim();
-    const counterparty = ($('#return_party') || {}).value.trim();
+    /* v5.1.0 严格校验：退库人与经办人都必须刷已登记且启用的卡，且不能同卡 */
+    const v = validateSwipePair('ret');
+    if (!v.ok) { toast(v.msg, 'err'); return; }
+    const operator = v.operator.name;
+    const counterparty = v.party.name;
+    const operatorCard = normCard(v.operator.cardNo);
+    const partyCard = normCard(v.party.cardNo);
     const time = inputToMs(($('#return_time') || {}).value);
     const returnReason = ($('#return_reason') || {}).value || 'use';
     const returnReasonText = ($('#return_reason_text') || {}).value.trim();
     const remark = ($('#return_remark') || {}).value.trim();
-    if (!operator) { toast('请填写经办人', 'err'); return; }
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
-        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, time, remark, outReason: returnReason, outReasonText: returnReasonText });
+        await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, operatorCard, partyCard, time, remark, outReason: returnReason, outReasonText: returnReasonText });
         ok++;
       } catch (e) { fail++; }
     }
@@ -2917,7 +2807,7 @@
     return op || '—';
   }
 
-  /* 当前所在位置（车间/仓库/工位/外借单位）：
+  /* 当前所在位置（车间 / 仓库 / 现场 / 外借单位）：
    * - 在库：库位
    * - 已出库：外借单位（领用人）
    * - 维修中：库位 + （维修中）
@@ -2989,14 +2879,14 @@
         <div class="panel loc-bottom" style="margin-bottom:0">
           <div class="panel-title">${filter ? '库位「' + esc(filter) + '」下夹具' : '全部夹具'}（${list.length} 套）</div>
           <div class="table-wrap"><table>
-            <thead><tr><th>序号</th><th>夹具编号</th><th>名称</th><th>机种名称</th><th>产线 / 工位</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>最近动态</th></tr></thead>
+            <thead><tr><th>序号</th><th>夹具编号</th><th>名称</th><th>机种名称</th><th>产线</th><th>分类</th><th>库位</th><th>状态</th><th>累计出库</th><th>最近动态</th></tr></thead>
             <tbody>
               ${list.length ? list.map((f) => {
                 const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
                 return `<tr>
                   <td class="muted">${esc(f.code)}</td><td>${esc(f.serialNo || '—')}</td>
                   <td>${esc(f.name)}</td><td title="${esc(fullLineModels(f, '—'))}">${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
-                  <td title="${esc(stationNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</td>
+                  <td title="${esc(lineNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))}</td>
                   <td>${esc(f.category || '—')}</td><td>${esc(f.location || '—')}</td>
                   <td><span class="badge ${st.cls}">${st.label}</span></td>
                   <td>${f.totalOutCount || 0}</td><td>${esc(lastMove(f.id))}</td></tr>`;
@@ -3045,9 +2935,9 @@
     list.sort((a, b) => natCompare(a.serialNo || '', b.serialNo || '') || natCompare(a.code, b.code));
 
     // 导出顺序：序号(code) 在前，方便盘点回对数；物理编号(serialNo)紧随其后
-    const headers = ['序号', '夹具编号', '名称', '机种名称', '产线', '工位', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '最近动态', '盘点人', '实盘数量'];
+    const headers = ['序号', '夹具编号', '名称', '机种名称', '产线', '分类', '库位', '状态', '累计出库', '累计回库', '维修次数', '最近动态', '盘点人', '实盘数量'];
     const rows = list.map((f) => [
-      f.code, f.serialNo || '', f.name, formatLineModels(f, ''), lineNamesLabel(f, ''), stationNamesLabel(f, ''), f.category || '', f.location || '',
+      f.code, f.serialNo || '', f.name, formatLineModels(f, ''), lineNamesLabel(f, ''), f.category || '', f.location || '',
       (FIX_STATUS[f.status] || { label: f.status }).label,
       f.totalOutCount || 0, f.totalReturnCount || 0, f.repairCount || 0, lastMove(f.id), op, ''
     ]);
@@ -3122,12 +3012,11 @@
   }
 
   /* ============================================================
-   * 夹具查询（多条件组合检索 + 按实物编号聚合的数量/合计视图）
+   * 夹具查询（多条件组合检索）
    *
-   * 两段：
-   *   ① 按实物编号查询 —— 数量为派生值，按「实物编号 × 库位」分组，行内分列「在库 / 在外」（方式 A），
-   *      合计行沿用同两列求和，台账总数作小字补充
-   *   ② 多条件组合检索 —— 与既有查询页一致，另加实物编号/产线/工位维度
+   * ⚠️ v5.0.0：原「① 按夹具编号查询（数量与合计）」整块面板已移除
+   *   （含 serialQuery 状态、renderSerialAgg、serialQueryInput/Clear），
+   *   页面只保留下方「🔎 夹具查询」多条件组合检索。
    * ============================================================ */
   function renderQuery() {
     const container = $('#content');
@@ -3159,26 +3048,11 @@
 
     container.innerHTML = `
       <div class="panel">
-        <div class="panel-title">🔢 按夹具编号查询（数量与合计）</div>
-        <div class="query-bar">
-          <div class="query-field" style="flex:1">
-            <label>夹具编号</label>
-            <input type="text" id="q_serial" placeholder="如 DH40MC-921-001-001（可只输入片段）" value="${esc(state.serialQuery)}" oninput="serialQueryInput()">
-          </div>
-          <div class="query-field"><label>&nbsp;</label>
-            <button type="button" class="btn sm ghost" onclick="serialQueryClear()">清空</button>
-          </div>
-        </div>
-        <div class="tip">数量是<b>派生值</b>（按「夹具编号 + 库位」分组的记录条数），出库后自动减 1，无需手工维护。</div>
-        <div id="serial_agg"></div>
-      </div>
-
-      <div class="panel">
         <div class="panel-title">🔎 夹具查询
           <span class="panel-actions"><span id="query_count" class="muted"></span></span>
         </div>
         <div class="query-bar">
-          <div class="query-field"><label>关键字</label><input type="text" id="q_keyword" placeholder="夹具编号/名称/机种/库位/产线/工位/责任人…" value="${esc(q.keyword)}" oninput="queryApply()"></div>
+          <div class="query-field"><label>关键字</label><input type="text" id="q_keyword" placeholder="夹具编号/名称/机种/库位/产线/责任人…" value="${esc(q.keyword)}" oninput="queryApply()"></div>
           <div class="query-field"><label>序号</label><input type="text" id="q_code" placeholder="如 1001（需完整）" value="${esc(q.code)}" oninput="queryApply()"></div>
           <div class="query-field"><label>名称/机种</label><input type="text" id="q_name" placeholder="名称或机种" value="${esc(q.name)}" oninput="queryApply()"></div>
           <div class="query-field"><label>存放位置</label><select id="q_location" class="query-select" onchange="queryApply()">${locOpts}</select></div>
@@ -3213,92 +3087,6 @@
     imeGuard($('#q_keyword'), queryApply);
     const sd = $('#q_sortdir'); if (sd) sd.textContent = q.sortDir === 'asc' ? '↑' : '↓';
     queryApply();
-    renderSerialAgg();
-  }
-
-  /* ---- 按夹具编号聚合（方式 A：合计行内分列 在库 / 在外，台账作小字） ---- */
-  window.serialQueryInput = function () {
-    state.serialQuery = ($('#q_serial') || {}).value || '';
-    renderSerialAgg();
-  };
-  window.serialQueryClear = function () {
-    state.serialQuery = '';
-    const el = $('#q_serial'); if (el) el.value = '';
-    renderSerialAgg();
-  };
-
-  function renderSerialAgg() {
-    const box = $('#serial_agg');
-    if (!box) return;
-    const q = String(state.serialQuery || '').trim();
-    if (!q) {
-      box.innerHTML = '<div class="empty-tip">输入夹具编号，查看各库位的在库/在外数量与合计</div>';
-      return;
-    }
-    const ql = q.toLowerCase();
-    const list = state.fixtures.filter((f) => String(f.serialNo || '').toLowerCase().includes(ql));
-    if (!list.length) {
-      box.innerHTML = `<div class="empty-tip">未找到夹具编号含「${esc(q)}」的夹具</div>`;
-      return;
-    }
-    /* 分组键 = 夹具编号 + 库位（这就是「一套」的归属；数量即该组内记录条数） */
-    const map = new Map();
-    list.forEach((f) => {
-      const sn = f.serialNo || '（未填编号）';
-      const key = sn + '\u0000' + (f.location || '');
-      if (!map.has(key)) map.set(key, { serialNo: sn, location: f.location || '—', stock: 0, out: 0, repair: 0, retired: 0 });
-      const g = map.get(key);
-      if (f.status === 'stocked') g.stock++;
-      else if (f.status === 'checked_out') g.out++;
-      else if (f.status === 'repair') g.repair++;
-      else g.retired++;
-    });
-    const groups = Array.from(map.values()).sort((a, b) =>
-      natCompare(a.serialNo, b.serialNo) || natCompare(a.location, b.location));
-    const sum = (k) => groups.reduce((s, g) => s + g[k], 0);
-    const sumStock = sum('stock');
-    const sumOut = sum('out');
-    const sumRepair = sum('repair');
-    const sumRetired = sum('retired');
-    const sumTotal = sumStock + sumOut + sumRepair + sumRetired;
-    const locCount = new Set(groups.map((g) => g.location)).size;
-
-    box.innerHTML = `
-      <div class="agg-head">
-        <span>匹配 <b>${groups.length}</b> 个「夹具编号 × 库位」组合</span>
-        <span class="agg-tag">在库 <b>${sumStock}</b> · 在外 <b>${sumOut}</b> · 台账 <b>${sumTotal}</b></span>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr>
-          <th>夹具编号</th><th style="width:150px">库位</th>
-          <th style="width:100px">在库</th><th style="width:100px">在外</th>
-          <th style="width:100px">维修中</th><th style="width:100px">已报废</th>
-          <th style="width:100px">台账</th>
-        </tr></thead>
-        <tbody>
-          ${groups.map((g) => `<tr>
-            <td>${esc(g.serialNo)}</td>
-            <td>${esc(g.location)}</td>
-            <td class="num">${g.stock}</td>
-            <td class="num">${g.out}</td>
-            <td class="num">${g.repair}</td>
-            <td class="num">${g.retired}</td>
-            <td class="num">${g.stock + g.out + g.repair + g.retired}</td>
-          </tr>`).join('')}
-          <tr class="agg-total">
-            <td>合计</td>
-            <td>${locCount} 个库位</td>
-            <td class="num">在库 ${sumStock}</td>
-            <td class="num">在外 ${sumOut}</td>
-            <td class="num">${sumRepair}</td>
-            <td class="num">${sumRetired}</td>
-            <td class="num">台账 ${sumTotal}</td>
-          </tr>
-        </tbody>
-      </table></div>
-      <p class="muted" style="margin:6px 0 0;">
-        「在库」= 现在能领的套数；「在外」= 已出库未回；台账 = 不限状态总数（含维修 / 报废）。
-      </p>`;
   }
 
   /* 某夹具是否存在指定出库原因的流水（outReason === repair 时含「送修」流水，与 repairCount 同口径） */
@@ -3376,7 +3164,7 @@
       <div class="table-wrap"><table>
         <thead><tr>
           <th style="width:64px">序号</th>${thSort('serial', '夹具编号')}${thSort('name', '名称')}<th>关联机种</th>
-          <th>产线 / 工位</th><th>分类</th><th>库位</th><th>责任人/借用人</th>
+          <th>产线</th><th>分类</th><th>库位</th><th>责任人/借用人</th>
           ${thSort('status', '状态')}${thSort('repair', '维修次数')}${thSort('time', '最近操作时间')}<th style="width:130px">操作</th>
         </tr></thead>
         <tbody>
@@ -3388,7 +3176,7 @@
               <td>${esc(f.serialNo || '—')}</td>
               <td>${esc(f.name)}</td>
               <td title="${esc(fullLineModels(f, '—'))}">${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
-              <td title="${esc(stationNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</td>
+              <td title="${esc(lineNamesLabel(f, '—'))}">${esc(lineNamesLabel(f, '—'))}</td>
               <td>${esc(f.category || '—')}</td>
               <td>${esc(f.location || '—')}</td>
               <td>${esc(fixtureResponsible(f))}</td>
@@ -3472,7 +3260,7 @@
       <div class="form-group"><label>序号（系统分配 · 不可改）</label><input type="text" value="${esc(f.code)}" disabled></div>
       <div class="form-group"><label>名称</label><input type="text" value="${esc(f.name)}" disabled></div>
       <div class="form-group"><label>机种名称</label><input type="text" value="${esc(fullLineModels(f, '—'))}" disabled></div>
-      <div class="form-group"><label>产线 / 工位</label><input type="text" value="${esc(lineStationLabel(f, '—'))}" disabled></div>
+      <div class="form-group"><label>产线</label><input type="text" value="${esc(lineNamesLabel(f, '—'))}" disabled></div>
       <div class="form-group"><label>分类</label><input type="text" value="${esc(f.category || '—')}" disabled></div>
       <div class="form-group"><label>存放位置（库位）</label><input type="text" value="${esc(f.location || '（未分配）')}" disabled></div>
       <div class="form-group"><label>当前所在位置</label><input type="text" value="${esc(loc)}" disabled></div>
@@ -3537,7 +3325,7 @@
 
   /* 纯渲染（不读盘）：点机种展开/收起时调用，避免转圈与滚动条跳动。
    * v4.5.0：「按机种查询」页合并到这里 —— 点机种名称 → 下方展开该机种的
-   * 「线体 → 工位 → 夹具」明细（原页只有产线粒度，没有工位）。 */
+   * 「线体 → 夹具」明细（v5.0.0 起工位模型移除，明细只到线体）。 */
   function paintProduction() {
     const container = $('#content');
     if (!container) return;
@@ -3557,11 +3345,12 @@
             <button class="btn sm" onclick="prodForm(0)">➕ 新建机种</button>
           </span>
         </div>
-        <div class="tip">机种是夹具「适用机种」标签的受控字典，<b>不隶属任何产线</b>。点<b>机种名称</b>即可在下方展开：这个机种有哪些夹具、分别装在哪条线体的哪个工位。</div>
+        <div class="tip">机种是夹具「适用机种」标签的受控字典，<b>不隶属任何产线</b>。点<b>机种名称</b>即可在下方展开：这个机种有哪些夹具、分别装在哪条线体上。</div>
+        <div class="tip"><b>线体</b>列是<b>派生值</b>：把使用该机种的全部夹具的关联产线汇总去重，多条线体用 <code>/</code> 分隔，<b>不单独存储</b>；一条线体都没有时显示「—」。</div>
         ${orphans.length ? `<div class="tip hint-warn">发现 ${orphans.length} 个夹具正在使用、但字典里没有的机种：<b>${esc(orphans.join('、'))}</b>
           <button class="btn sm" style="margin-left:8px" onclick="prodAdoptOrphans()">一键补登</button></div>` : ''}
         ${list.length ? `<div class="table-wrap"><table>
-          <thead><tr><th>机种名称</th><th style="width:110px">关联夹具</th><th style="width:100px">在库套数</th>
+          <thead><tr><th>机种名称</th><th style="width:210px">线体</th><th style="width:110px">关联夹具</th><th style="width:100px">在库套数</th>
             <th style="width:90px">排序号</th><th style="width:150px">操作</th></tr></thead>
           <tbody>
             ${list.map((p) => {
@@ -3569,8 +3358,9 @@
               const stocked = (state.fixtures || []).filter((f) => f.status === 'stocked' && (Array.isArray(f.lineModels) ? f.lineModels : []).includes(p.name)).length;
               const on = pickedProd && pickedProd.id === p.id;
               return `<tr class="${on ? 'pick-row' : ''}">
-                <td><a href="javascript:;" class="prod-pick" title="点击查看该机种的夹具 / 线体 / 工位分布"
+                <td><a href="javascript:;" class="prod-pick" title="点击查看该机种的夹具 / 线体分布"
                   onclick="prodPick(${p.id})">${esc(p.name)}</a>${on ? '<span class="pick-mark">▼ 已展开</span>' : ''}</td>
+                <td>${slashCell(lineNamesOfModel(p.name))}</td>
                 <td>${refs} 套</td>
                 <td>${stocked} 套</td>
                 <td>${esc(p.order == null ? '—' : String(p.order))}</td>
@@ -3586,19 +3376,16 @@
       ${pickedProd ? prodDetailHtml(pickedProd.name) : ''}`;
   }
 
-  /* 机种明细：按「线体 → 工位」分组列出该机种的全部夹具（含未指定/未关联的兜底行） */
+  /* 机种明细：按「线体」分组列出该机种的全部夹具（含未关联产线的兜底行） */
   function prodDetailHtml(name) {
-    const rows = buildProdDetailRows(state.fixtures, state.lines, state.stations, [name]);
+    const rows = buildProdDetailRows(state.fixtures, state.lines, [name]);
     const fxIds = new Set(rows.map((r) => r.fixtureId));
     const stockedIds = new Set(rows.filter((r) => r.status === 'stocked').map((r) => r.fixtureId));
     const lineIds = new Set(rows.filter((r) => r.lineId).map((r) => r.lineId));
-    const stKeys = new Set(rows
-      .filter((r) => r.lineId && r.stationName && r.stationName.charAt(0) !== '（')
-      .map((r) => r.lineId + '\u0000' + r.stationName));
 
     const head = `<div class="panel-title">📋 机种：<span style="color:var(--primary-dark)">${esc(name)}</span>
       <span class="panel-actions">
-        <span class="muted">夹具 ${fxIds.size} 套 ｜ 在库 ${stockedIds.size} 套 ｜ 线体 ${lineIds.size} 条 ｜ 工位 ${stKeys.size} 个</span>
+        <span class="muted">夹具 ${fxIds.size} 套 ｜ 在库 ${stockedIds.size} 套 ｜ 线体 ${lineIds.size} 条</span>
         <button class="btn sm ghost" onclick="prodPick(0)">收起</button>
       </span></div>`;
 
@@ -3607,7 +3394,7 @@
         <div class="empty-tip">该机种下还没有夹具记录。到「夹具管理」新建或编辑夹具，把「适用机种」选上它即可。</div></div>`;
     }
 
-    // 按线体分组（rows 已按 机种 → 线体 → 工位 排好序）
+    // 按线体分组（rows 已按 机种 → 线体 排好序）
     const groups = new Map();
     rows.forEach((r) => {
       const key = r.lineId ? String(r.lineId) : '0';
@@ -3617,17 +3404,13 @@
 
     const sections = Array.from(groups.values()).map((g) => {
       const gFx = new Set(g.rows.map((r) => r.fixtureId)).size;
-      const gSt = new Set(g.rows
-        .filter((r) => r.lineId && r.stationName && r.stationName.charAt(0) !== '（')
-        .map((r) => r.stationName)).size;
       return `<div class="pq-group">
         <div class="pq-head"><b>${esc(g.name)}</b>
-          <span class="muted">工位 ${gSt} 个 ｜ 夹具 ${gFx} 套</span></div>
+          <span class="muted">夹具 ${gFx} 套</span></div>
         <div class="table-wrap"><table>
           <thead><tr>
-            <th style="width:170px">工位</th>
-            <th>夹具编号</th>
-            <th style="width:170px">名称</th>
+            <th style="width:190px">夹具编号</th>
+            <th>名称</th>
             <th style="width:170px">库位</th>
             <th style="width:100px">状态</th>
             <th style="width:90px">操作</th>
@@ -3636,7 +3419,6 @@
             ${g.rows.map((r) => {
               const st = FIX_STATUS[r.status] || { label: r.status, cls: 'muted' };
               return `<tr>
-                <td>${esc(r.stationName || '—')}</td>
                 <td><a href="javascript:;" onclick="fixtureEdit(${r.fixtureId})" title="编辑该夹具">${esc(r.serialNo || '—')}</a>
                   <span class="muted">${esc(r.code)}</span></td>
                 <td>${esc(r.name || '—')}</td>
@@ -3744,12 +3526,12 @@
   };
 
   /* ============================================================
-   * 机种 → 产线 / 工位 反查（纯函数层）
+   * 机种 → 产线 反查（纯函数层）
    *
    * v4.5.0：「按机种查询」页已合并进「机种管理」，界面入口不再单独存在，
    * 但两个纯函数保留并被机种管理页复用 / 供回归测试：
-   *   - buildProdQueryRows：机种 × 产线 的轻量投影（不含工位）
-   *   - buildProdDetailRows：机种 × 线体 × 工位 的完整明细（明细面板用这个）
+   *   - buildProdQueryRows：机种 × 产线 的轻量投影
+   *   - buildProdDetailRows：机种 × 线体 的明细（明细面板用这个；v5.0.0 去工位）
    * 提醒：机种与产线之间**没有**直接绑定关系，全部由夹具记录反查。
    * ============================================================ */
   /* 纯函数：把夹具表摊平成 { 机种 × 产线 } 的行（不触 DOM，便于测试） */
@@ -3783,64 +3565,500 @@
     return out;
   }
 
-  /* 纯函数（v4.5.0）：机种 → 夹具 → 「线体 x 工位」明细
-   * 工位归属只能由 stations 字典的 lineId 反查（工位名可跨产线重名，不能按名字猜）；
-   * f.lines 保留「已关联但一个工位都没选」的产线，这类产线仍出一行并标注「未指定工位」；
-   * 夹具完全没有产线时出一行「（未关联产线）」，保证「有夹具就一定看得见」。
+  /* 纯函数（v5.0.0）：机种 → 夹具 → 线体 明细
+   * 工位模型已移除，夹具只关联到产线（f.lines）；
+   * 夹具完全没有关联产线时出一行「（未关联产线）」，保证「有夹具就一定看得见」。
    * 不触 DOM，便于测试。 */
-  function buildProdDetailRows(fixtures, lines, stations, names) {
+  function buildProdDetailRows(fixtures, lines, names) {
     const set = new Set(names || []);
     const lineById = new Map((lines || []).map((l) => [Number(l.id), l]));
-    const stById = new Map((stations || []).map((s) => [Number(s.id), s]));
     const out = [];
     (fixtures || []).forEach((f) => {
       const lms = (Array.isArray(f.lineModels) ? f.lineModels : []).filter((n) => set.has(n));
       if (!lms.length) return;
-      const mySt = (Array.isArray(f.stations) ? f.stations : [])
-        .map((id) => stById.get(Number(id))).filter(Boolean);
       const lineIds = [];
-      const pushLine = (id) => {
+      (Array.isArray(f.lines) ? f.lines : []).forEach((id) => {
         const n = Number(id);
         if (!Number.isFinite(n) || lineIds.indexOf(n) >= 0) return;
         lineIds.push(n);
-      };
-      (Array.isArray(f.lines) ? f.lines : []).forEach(pushLine);
-      mySt.forEach((s) => pushLine(s.lineId));   // 兜底：历史数据里工位所属产线可能不在 f.lines
+      });
       lineIds.sort((a, b) => a - b);
 
       const base = {
         fixtureId: f.id, code: String(f.code), serialNo: f.serialNo || '',
         name: f.name || '', location: f.location || '', status: f.status || ''
       };
-      const pushRow = (pn, lid, lineName, stationName) => {
-        out.push(Object.assign({ production: pn, lineId: lid, lineName, stationName }, base));
+      const pushRow = (pn, lid, lineName) => {
+        out.push(Object.assign({ production: pn, lineId: lid, lineName }, base));
       };
 
       lms.forEach((pn) => {
-        if (!lineIds.length) { pushRow(pn, 0, '（未关联产线）', '—'); return; }
+        if (!lineIds.length) { pushRow(pn, 0, '（未关联产线）'); return; }
         lineIds.forEach((lid) => {
           const line = lineById.get(lid);
-          const lineName = line ? line.name : '（产线已删除 #' + lid + '）';
-          const sts = mySt.filter((s) => Number(s.lineId) === lid)
-            .sort((a, b) => natCompare(a.name || '', b.name || ''));
-          if (!sts.length) pushRow(pn, lid, lineName, '（未指定工位）');
-          else sts.forEach((s) => pushRow(pn, lid, lineName, s.name || '（未命名工位）'));
+          pushRow(pn, lid, line ? line.name : '（产线已删除 #' + lid + '）');
         });
       });
     });
     out.sort((a, b) =>
       natCompare(a.production, b.production) || natCompare(a.lineName, b.lineName) ||
-      natCompare(a.stationName, b.stationName) || natCompare(a.serialNo, b.serialNo) || natCompare(a.code, b.code));
+      natCompare(a.serialNo, b.serialNo) || natCompare(a.code, b.code));
     return out;
   }
 
   /* v4.5.0：「按机种查询」独立页已**合并进「机种管理」**——
-   * 点机种名称即在表格下方展开该机种的「线体 / 工位 / 夹具」明细。
+   * 点机种名称即在表格下方展开该机种的「线体 / 夹具」明细。
    * 保留本函数名，旧入口（历史按钮或 showView('prodquery')）平滑落到机种管理。 */
   async function renderProdQuery() {
     showView('prod');
   }
 
+
+  /* ============================================================
+   * 人员卡库（v5.1.0）
+   *
+   * 用途：进出库「刷卡」时按卡号反查姓名与角色，取代手打姓名。
+   * 业务规则：一张卡只能登记一个人（卡号归一化后唯一）；停用比删除更安全。
+   * 卡号来源：USB 读卡器（键盘模拟，末尾自动回车）或手工输入。
+   * ============================================================ */
+  const STAFF_ROLE_LABEL = { borrower: '领用人', operator: '经办人', both: '两者皆可' };
+  const STAFF_ROLE_HINT = {
+    borrower: '只能刷在「领用人 / 退库人」位',
+    operator: '只能刷在「经办人」位',
+    both: '领用位与经办位都可以刷'
+  };
+  const STAFF_IMPORT_HEADERS = ['卡号', '姓名', '部门', '角色', '状态', '备注'];
+  const STAFF_IMPORT_ALIAS = {
+    '卡号': 'cardNo', '卡编号': 'cardNo', '工卡号': 'cardNo', '工号': 'cardNo', '员工号': 'cardNo',
+    'ic卡号': 'cardNo', '卡片号': 'cardNo', '卡号id': 'cardNo', 'cardno': 'cardNo', 'card': 'cardNo', '编号': 'cardNo',
+    '姓名': 'name', '名字': 'name', '人员': 'name', '人员姓名': 'name', '员工姓名': 'name', 'name': 'name',
+    '部门': 'dept', '部门名称': 'dept', '所属部门': 'dept', '车间': 'dept', '班组': 'dept', 'dept': 'dept',
+    '角色': 'role', '角色权限': 'role', '权限': 'role', '类型': 'role', 'role': 'role',
+    '状态': 'active', '是否启用': 'active', '启用': 'active', 'status': 'active', 'active': 'active',
+    '备注': 'remark', '说明': 'remark', 'remark': 'remark'
+  };
+
+  /* 卡号归一化（与 DB.normalizeCardNo 同源；DB 在浏览器/主进程两种后端都提供该纯函数） */
+  function normCard(v) {
+    if (typeof DB.normalizeCardNo === 'function') return DB.normalizeCardNo(v);
+    return String(v == null ? '' : v).replace(/[\s\u3000\-_]/g, '').toUpperCase();
+  }
+
+  /* 按卡号在本地已加载的人员里查（刷卡走这里，避免每次刷都走 IPC） */
+  function findStaffLocal(cardNo) {
+    const n = normCard(cardNo);
+    if (!n) return null;
+    return (state.staffs || []).find((s) => normCard(s.cardNo) === n) || null;
+  }
+
+  function staffFiltered() {
+    const kw = String(state.staffQuery || '').trim().toLowerCase();
+    return (state.staffs || [])
+      .filter((s) => {
+        if (!kw) return true;
+        return [s.cardNo, s.name, s.dept, s.remark, STAFF_ROLE_LABEL[s.role]]
+          .some((v) => String(v == null ? '' : v).toLowerCase().indexOf(kw) >= 0);
+      })
+      .sort((a, b) => natCompare(a.cardNo || '', b.cardNo || ''));
+  }
+
+  function staffTableHtml() {
+    const all = state.staffs || [];
+    const list = staffFiltered();
+    const activeCount = all.filter((s) => s.active !== false).length;
+    if (!all.length) {
+      return `<div class="empty-tip">还没有登记任何人员。点上方「＋ 新增人员」录入，或用「⬆ 导入Excel/CSV」批量导入。</div>`;
+    }
+    return `
+      <div class="table-meta">共 <b>${all.length}</b> 人，启用 <b>${activeCount}</b> 人${state.staffQuery ? `，命中 <b>${list.length}</b> 条` : ''}</div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th style="width:190px">卡号</th>
+          <th style="width:120px">姓名</th>
+          <th style="width:170px">部门</th>
+          <th style="width:110px">角色</th>
+          <th style="width:90px">状态</th>
+          <th>备注</th>
+          <th style="width:150px">操作</th>
+        </tr></thead>
+        <tbody>
+          ${list.length ? list.map((s) => `
+            <tr>
+              <td class="cell-code">${esc(s.cardNo || '—')}</td>
+              <td><b>${esc(s.name || '—')}</b></td>
+              <td>${esc(s.dept || '—')}</td>
+              <td title="${esc(STAFF_ROLE_HINT[s.role] || '')}">${esc(STAFF_ROLE_LABEL[s.role] || s.role || '—')}</td>
+              <td><span class="badge ${s.active === false ? 'muted' : 'ok'}">${s.active === false ? '停用' : '启用'}</span></td>
+              <td>${esc(s.remark || '—')}</td>
+              <td>
+                <button class="btn sm ghost" onclick="staffForm(${s.id})">编辑</button>
+                <button class="btn sm danger" onclick="staffDelConfirm(${s.id})">删除</button>
+              </td>
+            </tr>`).join('') : `<tr><td colspan="7"><div class="empty-tip">没有匹配的人员</div></td></tr>`}
+        </tbody>
+      </table></div>`;
+  }
+
+  async function renderStaff() {
+    try { await reloadStaff(); } catch (e) { /* 读不到按空库展示 */ }
+    if (state.view !== 'staff') return;
+    $('#content').innerHTML = `
+      <div class="panel">
+        <div class="panel-title">👤 人员卡库
+          <span class="panel-actions">
+            <button class="btn sm primary" onclick="staffForm(0)">＋ 新增人员</button>
+            <button class="btn sm" onclick="staffImport()">⬆ 导入Excel/CSV</button>
+            <button class="btn sm ghost" onclick="downloadStaffTemplate()">📄 下载模板</button>
+            <button class="btn sm ghost" onclick="exportStaffCsv()">📊 导出CSV</button>
+          </span>
+        </div>
+        <div class="info-tip">
+          进出库<b>刷卡</b>时，程序按卡号在这里反查姓名与角色：<b>一张卡只能登记一个人</b>。
+          卡号用 USB 读卡器刷入（读卡器相当于键盘，末尾自动带回车），也支持手工输入。
+        </div>
+        <div class="query-bar">
+          <div class="query-field" style="flex:1;min-width:260px;">
+            <label>搜索</label>
+            <input type="text" id="staff_kw" placeholder="卡号 / 姓名 / 部门 / 备注" value="${esc(state.staffQuery || '')}" autocomplete="off">
+          </div>
+          <div class="query-field"><label>&nbsp;</label>
+            <button type="button" class="btn sm ghost" onclick="staffQueryClear()">清空搜索</button>
+          </div>
+        </div>
+        <div id="staff_table_box">${staffTableHtml()}</div>
+        <div class="tip">
+          角色决定这张卡能刷在哪：<b>领用人</b>只能刷「领用人 / 退库人」位，<b>经办人</b>只能刷「经办人」位，<b>两者皆可</b>两边都能刷。
+          离职或丢卡请用<b>停用</b>而不是删除 —— 停用后刷卡会被拒绝，历史流水仍可追溯到人。
+        </div>
+      </div>`;
+    const kwEl = $('#staff_kw');
+    if (kwEl) {
+      imeGuard(kwEl, () => {
+        state.staffQuery = kwEl.value || '';
+        const box = $('#staff_table_box');
+        if (box) box.innerHTML = staffTableHtml();
+      });
+      kwEl.focus();
+    }
+  }
+  window.renderStaff = renderStaff;
+
+  window.staffQueryClear = function () {
+    state.staffQuery = '';
+    const box = $('#staff_table_box');
+    if (box) box.innerHTML = staffTableHtml();
+    const kwEl = $('#staff_kw');
+    if (kwEl) { kwEl.value = ''; kwEl.focus(); }
+  };
+
+  /* 新增 / 编辑表单（id = 0 表示新增） */
+  window.staffForm = function (id) {
+    const s = id ? (state.staffs || []).find((x) => x.id === Number(id)) : null;
+    if (id && !s) { toast('人员不存在，请刷新后重试', 'err'); return; }
+    const roleOpts = Object.keys(STAFF_ROLE_LABEL)
+      .map((k) => `<option value="${k}"${(s ? s.role : 'both') === k ? ' selected' : ''}>${STAFF_ROLE_LABEL[k]} — ${STAFF_ROLE_HINT[k]}</option>`)
+      .join('');
+    openModal(id ? `编辑人员 · ${s.name || s.cardNo}` : '新增人员', `
+      <div class="form-row">
+        <div class="form-group">
+          <label>卡号 *</label>
+          <div class="swipe-box">
+            <input type="text" id="st_card" data-swipe="staff" maxlength="64" autocomplete="off"
+              value="${esc(s ? s.cardNo : '')}" placeholder="光标停在此处刷卡，或手工输入卡号">
+            <span class="swipe-state" id="st_card_state">待录入</span>
+          </div>
+          <small class="hint">刷卡后自动跳到「姓名」；卡号不区分大小写与连字符（A1B2-C3D4 = a1b2c3d4）</small>
+        </div>
+        <div class="form-group">
+          <label>姓名 *</label>
+          <input type="text" id="st_name" maxlength="30" value="${esc(s ? s.name : '')}" placeholder="如：张三">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>部门</label>
+          <input type="text" id="st_dept" maxlength="30" value="${esc(s ? s.dept : '')}" placeholder="如：装配一车间">
+        </div>
+        <div class="form-group">
+          <label>角色 *</label>
+          <select id="st_role">${roleOpts}</select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>状态</label>
+          <label class="chk-line"><input type="checkbox" id="st_active"${(!s || s.active !== false) ? ' checked' : ''}> 启用（停用后刷卡会被拒绝）</label>
+        </div>
+        <div class="form-group">
+          <label>备注</label>
+          <input type="text" id="st_remark" maxlength="60" value="${esc(s ? s.remark : '')}" placeholder="可选">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" onclick="submitStaffForm(${id || 0})">保存</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>
+    `);
+    /* 卡号框：回车（= 刷卡结束）只做校验与跳转，不提交表单 */
+    const cardEl = $('#st_card');
+    if (cardEl) {
+      cardEl.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault(); e.stopPropagation();
+        const v = cardEl.value.trim();
+        const st = $('#st_card_state');
+        if (!v) { if (st) { st.className = 'swipe-state err'; st.textContent = '卡号为空'; } return; }
+        const dup = findStaffLocal(v);
+        if (st) {
+          st.className = 'swipe-state ' + (dup && dup.id !== Number(id) ? 'err' : 'ok');
+          st.textContent = dup && dup.id !== Number(id) ? `已登记给 ${dup.name}` : '卡号可用';
+        }
+        const nameEl = $('#st_name');
+        if (nameEl) nameEl.focus();
+      });
+      cardEl.addEventListener('input', () => {
+        const st = $('#st_card_state');
+        if (st) { st.className = 'swipe-state'; st.textContent = cardEl.value.trim() ? '待确认' : '待录入'; }
+      });
+      cardEl.focus();
+    }
+  };
+
+  window.submitStaffForm = async function (id) {
+    const cardNo = (($('#st_card') || {}).value || '').trim();
+    const name = (($('#st_name') || {}).value || '').trim();
+    const dept = (($('#st_dept') || {}).value || '').trim();
+    const role = (($('#st_role') || {}).value || 'both');
+    const active = !!($('#st_active') || {}).checked;
+    const remark = (($('#st_remark') || {}).value || '').trim();
+    if (!cardNo) { toast('请刷卡或填写卡号', 'err'); return; }
+    if (!name) { toast('请填写姓名', 'err'); return; }
+    const payload = { cardNo, name, dept, role, active, remark };
+    if (id) payload.id = Number(id);
+    try {
+      if (id) await DB.staffUpdate(payload); else await DB.staffAdd(payload);
+      closeModal();
+      await reloadStaff();
+      renderStaff();
+      toast(id ? '已保存修改' : `已登记「${name}」`, 'ok');
+    } catch (e) {
+      toast('保存失败：' + (e && e.message ? e.message : e), 'err');
+    }
+  };
+
+  window.staffDelConfirm = function (id) {
+    const s = (state.staffs || []).find((x) => x.id === Number(id));
+    if (!s) { toast('人员不存在', 'err'); return; }
+    openModal(`删除人员 · ${s.name || s.cardNo}`, `
+      <p style="color:var(--danger);font-weight:600;margin:0 0 12px;">⚠️ 删除后这张卡将无法再刷卡，且不保留任何提示。</p>
+      <p class="muted" style="margin:0 0 8px;">
+        卡号 <b>${esc(s.cardNo)}</b> ｜ 姓名 <b>${esc(s.name)}</b> ｜ 角色 <b>${esc(STAFF_ROLE_LABEL[s.role] || s.role)}</b>
+      </p>
+      <p class="muted" style="margin:0 0 12px;">
+        已发生的出入库流水<b>不会受影响</b>（流水里存的是姓名与卡号快照）。
+        若只是离职或丢卡，建议改用<b>编辑 → 取消勾选「启用」</b>，这样刷卡时能明确提示「卡已停用」。
+      </p>
+      <div class="form-actions">
+        <button class="btn danger" onclick="submitStaffDel(${s.id})">确认删除</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>
+    `);
+  };
+
+  window.submitStaffDel = async function (id) {
+    try {
+      await DB.staffDel(Number(id));
+      closeModal();
+      await reloadStaff();
+      renderStaff();
+      toast('已删除该人员', 'ok');
+    } catch (e) { toast('删除失败：' + (e && e.message ? e.message : e), 'err'); }
+  };
+
+  /* ---- 导入：解析（纯函数，供测试切片复用） ---- */
+  function staffHeaderIndex(headerRow) {
+    const idx = {};
+    (headerRow || []).forEach((h, i) => {
+      const key = STAFF_IMPORT_ALIAS[normalizeHeader(h)];
+      if (key && idx[key] == null) idx[key] = i;
+    });
+    return idx;
+  }
+
+  function parseStaffRole(raw) {
+    const t = String(raw == null ? '' : raw).trim();
+    if (!t) return 'both';
+    if (/两者|皆|都|全部|both|all/i.test(t)) return 'both';
+    if (/经办|操作|仓管|operator/i.test(t)) return 'operator';
+    if (/领|借|使用|borrower|user/i.test(t)) return 'borrower';
+    return '';
+  }
+
+  function parseStaffActive(raw) {
+    const t = String(raw == null ? '' : raw).trim().toLowerCase();
+    if (!t) return true;
+    return !/^(停用|禁用|否|不启用|离职|false|0|no|inactive|disabled)$/.test(t);
+  }
+
+  /* 逐行解析 → { ok, staff } / { ok:false, reason } */
+  function parseStaffRow(row, idx) {
+    const get = (k) => (idx[k] == null ? '' : String(row[idx[k]] == null ? '' : row[idx[k]]).trim());
+    const cardNo = get('cardNo');
+    const name = get('name');
+    if (!cardNo) return { ok: false, reason: '卡号为空' };
+    if (!name) return { ok: false, reason: '姓名为空' };
+    const role = parseStaffRole(get('role'));
+    if (!role) return { ok: false, reason: '角色无法识别（可填 领用人 / 经办人 / 两者皆可）' };
+    if (!DB.isValidCardNo(cardNo)) return { ok: false, reason: '卡号含竖线/逗号或超长' };
+    if (!DB.isValidStaffName(name)) return { ok: false, reason: '姓名超长或含非法字符' };
+    return {
+      ok: true,
+      staff: {
+        cardNo, name,
+        dept: get('dept'),
+        role,
+        active: parseStaffActive(get('active')),
+        remark: get('remark')
+      }
+    };
+  }
+
+  /* 导入计划：文件内查重 + 库内查重（已登记的卡直接跳过，不覆盖别人） */
+  function buildStaffImportPlan(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return { ok: false, error: '文件是空的，没有可导入的行' };
+    const idx = staffHeaderIndex(list[0]);
+    if (idx.cardNo == null && idx.name == null) {
+      return { ok: false, error: '没找到「卡号」或「姓名」列，请核对表头（可下载模板对照）' };
+    }
+    if (idx.cardNo == null) return { ok: false, error: '缺少「卡号」列，无法导入' };
+    if (idx.name == null) return { ok: false, error: '缺少「姓名」列，无法导入' };
+
+    const existing = new Map();
+    (state.staffs || []).forEach((s) => existing.set(normCard(s.cardNo), s));
+    const seen = new Map();
+    const plan = [], skipped = [];
+    for (let i = 1; i < list.length; i++) {
+      const row = list[i];
+      if (!row || !row.some((c) => String(c == null ? '' : c).trim() !== '')) continue;
+      const r = parseStaffRow(row, idx);
+      const rowNo = i + 1;
+      if (!r.ok) { skipped.push({ row: rowNo, reason: r.reason }); continue; }
+      const key = normCard(r.staff.cardNo);
+      if (seen.has(key)) { skipped.push({ row: rowNo, reason: `与第 ${seen.get(key)} 行卡号重复` }); continue; }
+      if (existing.has(key)) {
+        skipped.push({ row: rowNo, reason: `卡号已登记给「${existing.get(key).name}」` });
+        continue;
+      }
+      seen.set(key, rowNo);
+      plan.push({ row: rowNo, staff: r.staff });
+    }
+    return { ok: true, plan, skipped };
+  }
+
+  let staffImportPlan = [];
+
+  window.staffImport = async function () {
+    const api = window.api;
+    if (!api || typeof api.pickSpreadsheet !== 'function') {
+      toast('当前环境不支持文件选择（浏览器调试模式），请用 CSV 方式或手工录入', 'err');
+      return;
+    }
+    let picked;
+    try { picked = await api.pickSpreadsheet(); }
+    catch (e) { toast('读取文件失败：' + (e && e.message ? e.message : e), 'err'); return; }
+    if (!picked || picked.ok === false) {
+      if (picked && picked.error) toast('读取失败：' + picked.error, 'err');
+      return;
+    }
+    let rows = null;
+    try {
+      if (picked.kind === 'csv') {
+        rows = parseCSV(picked.text);
+      } else {
+        const r = await api.readSpreadsheet(picked.bytes);
+        if (!r || !r.ok) { toast('解析 Excel 失败：' + ((r && r.error) || '未知错误'), 'err'); return; }
+        rows = r.rows;
+      }
+    } catch (e) { toast('解析失败：' + (e && e.message ? e.message : e), 'err'); return; }
+
+    await reloadStaff();
+    const result = buildStaffImportPlan(rows);
+    if (!result.ok) { toast(result.error, 'err'); return; }
+    staffImportPlan = result.plan;
+    window.showStaffImportPreview(result, picked.name);
+  };
+
+  window.showStaffImportPreview = function (result, filename) {
+    const { plan, skipped } = result;
+    openModal(`导入预览 · ${filename || ''}`, `
+      <p style="margin:0 0 10px;">可导入 <b style="color:var(--ok)">${plan.length}</b> 人；跳过 <b style="color:var(--warn)">${skipped.length}</b> 行。</p>
+      ${plan.length ? `
+        <div class="table-wrap" style="max-height:300px; overflow:auto;">
+          <table>
+            <thead><tr><th style="width:60px">行</th><th>卡号</th><th>姓名</th><th>部门</th><th>角色</th><th>状态</th></tr></thead>
+            <tbody>
+              ${plan.slice(0, 200).map((p) => `<tr>
+                <td class="muted">${p.row}</td>
+                <td class="cell-code">${esc(p.staff.cardNo)}</td>
+                <td>${esc(p.staff.name)}</td>
+                <td>${esc(p.staff.dept || '—')}</td>
+                <td>${esc(STAFF_ROLE_LABEL[p.staff.role] || p.staff.role)}</td>
+                <td>${p.staff.active ? '启用' : '停用'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${plan.length > 200 ? '<p class="muted">仅展示前 200 行…</p>' : ''}` : '<div class="empty-tip">没有可导入的行</div>'}
+      ${skipped.length ? `
+        <p class="muted" style="margin:12px 0 0;">跳过明细（前 10 条）：${esc(skipped.slice(0, 10).map((s) => `第 ${s.row} 行(${s.reason})`).join('、'))}${skipped.length > 10 ? ' 等' : ''}</p>` : ''}
+      <div class="form-actions">
+        <button class="btn primary" onclick="confirmStaffImport()"${plan.length ? '' : ' disabled'}>确认导入 ${plan.length} 人</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>
+    `);
+  };
+
+  window.confirmStaffImport = async function () {
+    if (!staffImportPlan.length) { toast('没有可导入的行', 'err'); return; }
+    let ok = 0, fail = 0;
+    const errs = [];
+    for (const p of staffImportPlan) {
+      try { await DB.staffAdd(p.staff); ok++; }
+      catch (e) { fail++; if (errs.length < 5) errs.push(`${p.staff.cardNo}：${e && e.message ? e.message : e}`); }
+    }
+    staffImportPlan = [];
+    closeModal();
+    await reloadStaff();
+    renderStaff();
+    if (ok) toast(`导入完成：新增 ${ok} 人${fail ? `，失败 ${fail} 人（${errs.join('；')}）` : ''}`, fail ? 'warn' : 'ok');
+    else toast('导入失败：' + (errs.join('；') || '未知原因'), 'err');
+  };
+
+  /* 模板与导出共用同一份列定义，保证「导出 → 改 → 导入」可原样回灌 */
+  window.downloadStaffTemplate = function () {
+    const sample = [
+      ['A1B2C3D4', '张三', '装配一车间', '两者皆可', '启用', '班组长'],
+      ['A1B2C3D5', '李四', '装配一车间', '领用人', '启用', ''],
+      ['A1B2C3D6', '王五', '仓库', '经办人', '启用', '仓管员'],
+      ['A1B2C3D7', '赵六', '冲压车间', '领用人', '停用', '已离职，保留备查']
+    ];
+    download('人员卡库导入模板.csv', buildCsvText(STAFF_IMPORT_HEADERS, sample));
+    toast('模板已下载（角色可填：领用人 / 经办人 / 两者皆可；状态可填：启用 / 停用）', 'ok');
+  };
+
+  window.exportStaffCsv = function () {
+    const list = (state.staffs || []).slice().sort((a, b) => natCompare(a.cardNo || '', b.cardNo || ''));
+    if (!list.length) { toast('还没有人员可导出', 'warn'); return; }
+    const rows = list.map((s) => [
+      s.cardNo || '', s.name || '', s.dept || '',
+      STAFF_ROLE_LABEL[s.role] || '两者皆可',
+      s.active === false ? '停用' : '启用',
+      s.remark || ''
+    ]);
+    download('人员卡库_' + new Date().toISOString().slice(0, 10) + '.csv', buildCsvText(STAFF_IMPORT_HEADERS, rows));
+    toast(`已导出 ${rows.length} 人（列结构与导入模板一致）`, 'ok');
+  };
 
   /* ============================================================
    * 数据备份
@@ -3946,7 +4164,7 @@
           <div><b>名称：</b>${esc(f.name)}</div>
           <div><b>序号：</b>${esc(f.code)}<span class="muted">（系统分配 · 二维码内容）</span></div>
           <div><b>机种名称：</b>${esc(formatLineModels(f, '—'))}</div>
-          <div><b>产线 / 工位：</b>${esc(lineNamesLabel(f, '—'))} / ${esc(stationNamesLabel(f, '—'))}</div>
+          <div><b>产线：</b>${esc(lineNamesLabel(f, '—'))}</div>
           <div><b>库位：</b>${esc(f.location || '（未分配）')}</div>
           <div class="muted">二维码内容：${esc(token)}</div>
           <div class="muted">标签卡只打印「夹具编号 + 名称」两项。</div>
@@ -4123,6 +4341,9 @@
     savePrintSettings(s);
     applyPrintVars(s);
     renderLabels($('#printArea'), printList);   // 确保 #printArea 含最新标签与二维码
+    // 与「产线清单」打印互斥：清掉表格区，避免两页内容混在一起送出
+    const sheet = $('#printListArea');
+    if (sheet) sheet.innerHTML = '';
     const opts = { pageSize: resolvePageSize(s), copies: s.copies };
     const done = (r) => {
       if (r && r.ok) toast('已发送打印任务');
@@ -4280,7 +4501,8 @@
           maxlength="${MAX_LOCATION}" value="${esc(f.location || '')}">
         <datalist id="fix_return_loc_list">${locList}</datalist>
         <small class="hint">默认预填出库前的库位，可改为实际归还位置（改则写回并留痕流水）</small></div>
-      <div class="form-group"><label>经办人</label><input type="text" id="fix_return_op" placeholder="经办人（拼音联想）"></div>
+      ${swipeFieldHtml('rdlg', 'party')}
+      ${swipeFieldHtml('rdlg', 'operator')}
       <div class="form-group"><label>回库时间</label><input type="datetime-local" id="fix_return_time" value="${nowInput()}"></div>
       <div class="form-group"><label>备注</label><input type="text" id="fix_return_remark" placeholder="可选备注"></div>
       <div class="form-actions">
@@ -4289,17 +4511,28 @@
       </div>
     `;
     openModal(`回库 — ${f.serialNo || f.code} ${f.name}`, html);
+    /* 弹窗渲染完再绑刷卡（openModal 会整体替换 modalBody） */
+    state.swipePick.rdlg = { party: 0, operator: 0 };
+    bindSwipe('rdlg', 'party');
+    bindSwipe('rdlg', 'operator');
+    const partyEl = $('#swipe_rdlg_party');
+    if (partyEl) partyEl.focus();
   };
 
   window.submitFixtureReturn = async function (id) {
-    const operator = ($('#fix_return_op') || {}).value.trim();
+    /* v5.1.0 严格校验：退库人与经办人都必须刷已登记且启用的卡，且不能同卡 */
+    const v = validateSwipePair('rdlg');
+    if (!v.ok) { toast(v.msg, 'err'); return; }
+    const operator = v.operator.name;
+    const counterparty = v.party.name;
+    const operatorCard = normCard(v.operator.cardNo);
+    const partyCard = normCard(v.party.cardNo);
     const time = inputToMs($('#fix_return_time').value);
     const remark = ($('#fix_return_remark') || {}).value.trim();
     const location = (($('#fix_return_loc') || {}).value || '').trim();
-    if (!operator) { toast('请填写经办人', 'err'); return; }
     if (!isValidLocation(location)) { toast('库位号需为 4 段式（如 ZP1-U-1-1），且不超过 ' + MAX_LOCATION + ' 字符', 'err'); return; }
     try {
-      await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, time, remark, location });
+      await DB.fixtureAddTransaction({ fixtureId: id, type: 'return', operator, counterparty, operatorCard, partyCard, time, remark, location });
       closeModal();
       await reloadAll();
       renderFixtures();
@@ -4396,16 +4629,16 @@
   };
 
   /* ============================================================
-   * 产线使用 / 产线配置（v3.0.1）
+   * 产线使用 / 产线配置（v5.0.0）
    *
-   * 数据层级：line ─┬─ product（产品隶属线体，用于筛选级联）
-   *                 └─ station（工位隶属线体，按 seq 排序）
-   *   stationFixture 绑定「某产品的某工位 → 一个夹具编号」，一个工位可多条（一对多）。
+   * 数据层级：line（唯一结构表）→ 由 fixtures.lines 反查该产线上装了哪些夹具。
+   * ⚠️ v5.0.0：工位（station）与产线示意图（工位图）已整体移除，夹具只关联到产线；
+   *   机种（productions）是独立字典，不隶属任何产线。
    * ============================================================ */
 
   /* 线体形态只有两种：直线形 / U型。未知值一律按直线形处理。
    * 历史数据兼容：早期版本用过 loop / circle / ring 表示「环形」，一律折算为 U型，
-   *   保证旧 fixture-data.json 直接打开不会丢形态（不写回文件，只影响显示与绘图）。 */
+   *   保证旧 fixture-data.json 直接打开不会丢形态（不写回文件，只影响显示）。 */
   const LINE_TYPES = [
     { key: 'linear', label: '直线形', icon: '▬' },
     { key: 'u', label: 'U型', icon: '⌣' }
@@ -4427,362 +4660,65 @@
     return t ? t.label : '直线形';
   }
 
-  /* 产线示意图画布（归一化坐标，渲染时经 px() 映射到像素）。
-   * 布局与绘图共用同一组常量，避免两处各写一套导致节点与轨迹错位。 */
-  const LINE_W = 1000;
-  const LINE_H = 520;                  // 画布高度（直线形与 U 型统一）
-  const LINE_PER_ROW = 6;              // 直线形每行工位数
-
-  /* 产线布局布点（直线形 / U 型共用，v4.0.2 改版；v4.1.0 重排 U 型纵坐标与底横排横坐标）：
-   *   左列 = ceil((n-底部)/2)（竖排，x=0.22，从上到下，y 0.08→0.72）
-   *   底部 = round(n/3)（横排，y=0.90，x 从 0.22 到 0.78 —— 与左右竖列**同 x**）
-   *   右列 = n - 左列 - 底部（竖排，x=0.78，从下到上，y 0.72→0.08）
-   * 三段依次拼接、严格顺序递增。19 个工位 → 底 6 / 左 7 / 右 6
-   *（左 1~7、底 8~13、右 14~19）；6 个工位 → 底 2 / 左 2 / 右 2。
-   *
-   * ⚠️ v4.1.0：竖列末端由 0.80 收到 0.72、底横排由 0.88 下移到 0.90，给转角留白
-   *   （文字分列圆两侧后，竖列外侧编号会横向伸出去，否则与底排工位名相撞）。
-   * ⚠️ v4.1.0：底横排的 x 跨度由 0.08→0.92 收窄到 0.22→0.78，与左右竖列对齐——
-   *   原来底排比竖列还宽，5 号工位到 6 号工位只能斜着连；收窄后转角是**竖直**下落（→ 直角 U）。
-   *   代价是底排横向更挤，靠 lineDiagramWidth() 拉长画布 + 允许底排间距更密来消化。 */
-  function lineLayoutPoints(n) {
-    if (n <= 0) return [];
-    const bottomCount = Math.max(1, Math.round(n / 3));
-    const leftCount = Math.ceil((n - bottomCount) / 2);
-    const rightCount = n - bottomCount - leftCount;
-
-    // seg 标记该点落在 U 型的哪一段（left 左竖边 / bottom 底横边 / right 右竖边）。
-    // v4.1.0 渲染时据此决定文字排在哪一侧：U 的内侧永远是画布中心方向，外侧相反。
-    const pts = [];
-    // 左列：从上到下，x=0.22，y 从 0.08 到 0.72
-    for (let i = 0; i < leftCount; i++) {
-      const y = leftCount === 1 ? 0.08 : 0.08 + (0.64 * i) / (leftCount - 1);
-      pts.push({ x: 0.22, y, seg: 'left' });
-    }
-    // 底部横排：从左到右，y=0.90，x 从 0.22 到 0.78（与左右竖列同 x，转角才能竖直下落）
-    for (let i = 0; i < bottomCount; i++) {
-      const x = bottomCount === 1 ? 0.5 : 0.22 + (0.56 * i) / (bottomCount - 1);
-      pts.push({ x, y: 0.90, seg: 'bottom' });
-    }
-    // 右列：从下到上，x=0.78，y 从 0.72 到 0.08
-    for (let i = 0; i < rightCount; i++) {
-      const y = rightCount === 1 ? 0.08 : 0.72 - (0.64 * i) / (rightCount - 1);
-      pts.push({ x: 0.78, y, seg: 'right' });
-    }
-    return pts;
-  }
-
-  /* 工位排序：顺序号（seq）数值升序；无顺序号的置末尾；同号按名称自然序。
-   * 注意返回新数组，不改动入参顺序（排序安全）。
-   * 无顺序号包含 null / undefined / ''——不能直接用 Number()，
-   *   因为 Number(null) === 0 会把它们排到最前面。 */
-  function sortStations(list) {
-    const seqOf = (o) => {
-      const raw = o ? o.seq : null;
-      if (raw === null || raw === undefined || raw === '') return Infinity;
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : Infinity;
-    };
-    return (list || []).slice().sort((a, b) => {
-      const va = seqOf(a);
-      const vb = seqOf(b);
-      if (va !== vb) return va - vb;
-      return natCompare((a && a.name) || '', (b && b.name) || '');
-    });
-  }
-
-  /* 工位夹具配置表的数据构建（纯函数，不触及 DOM，便于测试）。
-   *
-   * ⚠️ v4.0.0：`stationFixtures` 集合已整体废弃，「工位 ↔ 夹具」的关联扁平进夹具记录
-   *    （`fixtures.stations = [stationId]`），因此这里改为**从夹具全表反查**。
-   *    工位必须归属唯一产线，所以只按 stationId 命中即可，无需再带产线/产品筛选。
-   *
-   * 入参：
-   *   stations  该线体的全部工位 [{id, lineId, seq, name}]
-   *   fixtures  夹具全表 [{id, code, serialNo, name, status, lineModels, stations}]
-   * 返回：[{ station, seq, fixtures: [{id, code, serialNo, name, status, spec}] }]，
-   *       按工位顺序排列；该工位上无夹具的，fixtures 为空数组（渲染时显示「— / 无」）。 */
-  function buildStationRows(stations, fixtures) {
-    const all = (fixtures || []).filter((f) => f && f.code != null);
-    return sortStations(stations).map((st) => {
-      const list = all
-        .filter((f) => Array.isArray(f.stations) && f.stations.map(Number).indexOf(Number(st.id)) >= 0)
-        .sort((a, b) => natCompare(a.serialNo || '', b.serialNo || '') || natCompare(a.code, b.code))
-        .map((f) => ({
-          id: f.id,
-          code: String(f.code),
-          serialNo: f.serialNo || '',
-          name: f.name || '',
-          status: f.status || 'stocked',
-          spec: formatLineModels(f, '')
-        }));
-      return { station: st, seq: st.seq, fixtures: list };
-    });
-  }
-
-  /* 某条产线当前关联的夹具（fixtures.lines 含该线体 id） */
+  /* 某条产线当前关联的夹具（fixtures.lines 含该线体 id），按夹具编号自然序 */
   function fixturesOfLine(lineId) {
-    return (state.fixtures || []).filter((f) => Array.isArray(f.lines) && f.lines.map(Number).indexOf(Number(lineId)) >= 0);
-  }
-  /* 某个工位当前安装的夹具（fixtures.stations 含该工位 id） */
-  function fixturesOnStation(stationId) {
     return (state.fixtures || [])
-      .filter((f) => Array.isArray(f.stations) && f.stations.map(Number).indexOf(Number(stationId)) >= 0)
+      .filter((f) => Array.isArray(f.lines) && f.lines.map(Number).indexOf(Number(lineId)) >= 0)
       .sort((a, b) => natCompare(a.serialNo || '', b.serialNo || '') || natCompare(a.code, b.code));
   }
 
-  /* 产线图布局计算（纯函数）：返回各工位的归一化坐标（0~1），渲染时再乘容器尺寸。
-   *   linear 直线形：按每行 perRow 个折行排布（蛇形不启用，保持从左到右）；
-   *   u      U型：沿左侧竖边下行 → 底部横边 → 沿右侧竖边上行（lineLayoutPoints）。 */
-  function computeLineLayout(count, type, perRow) {
-    const n = Number(count) || 0;
-    if (n <= 0) return [];
-    if (lineTypeKey(type) === 'u') return lineLayoutPoints(n);
-    const per = Math.max(1, Number(perRow) || LINE_PER_ROW);
-    const rows = Math.ceil(n / per);
-    const pts = [];
-    for (let i = 0; i < n; i++) {
-      const r = Math.floor(i / per);
-      const c = i % per;
-      const inRow = Math.min(per, n - r * per);
-      const x = inRow === 1 ? 0.5 : 0.08 + (0.84 * c) / (inRow - 1);
-      const y = rows === 1 ? 0.5 : 0.16 + (0.68 * r) / (rows - 1);
-      pts.push({ x, y });
-    }
-    return pts;
-  }
-
-  /* 查询条件：某线体下的工位列表（已按 seq 排序） */
-  function stationsOfLine(stations, lineId) {
-    return sortStations((stations || []).filter((s) => s && s.lineId === lineId));
-  }
-
-  /* 工位显示名统一为「N号工位」：去掉「X号线」等线体前缀（线体名已在示意图标题处显示）。
-   * 工位号的取法：优先从名称中解析（"1号线3号工位"→3、"4号工位"→4、"4工位"→4），
-   * 名称里解析不到数字时退回工位顺序号 seq，seq 也没有则用列表位置兜底。 */
-  function stationLabel(station, fallbackNo) {
-    const raw = String((station && station.name) || '').trim();
-    const m = raw.match(/(\d+)\s*号?\s*工位/);
-    if (m) return m[1] + '号工位';
-    const seq = station ? station.seq : null;
-    if (seq !== null && seq !== undefined && seq !== '' && Number.isFinite(Number(seq))) {
-      return Number(seq) + '号工位';
-    }
-    return String(fallbackNo) + '号工位';
-  }
-
-  /* 产线图高度自适应。
-   * 纵向跨度：直线形「圆上名称 + 圆下编号」74px；U 型竖列文字改到圆两侧后只剩单行高度（约 16px）。
-   *   固定 LINE_H=520 时，U 型 5 工位/列竖列间距只有 75.6px、直线形 4 行只有 95.2px，
-   *   上下两行的文字会挤在一起，因此按「最小节点间距」反推高度：
-   *   直线形：纵向可用比例 0.68 → H = 100 + 100×(行数-1)/0.68（节点跨度 74px，需 ≥100px 行距）
-   *   U 型：竖列可用比例 0.64 → H = 100 + 72×(单列最多工位数-1)/0.64（圆 38px + 34px 间隙）
-   * 算出来比 LINE_H 小的（工位很少时）仍取 LINE_H，避免画布过矮。 */
-  function lineDiagramHeight(n, type) {
-    const count = Number(n) || 0;
-    if (count <= 1) return LINE_H;
-    if (lineTypeKey(type) === 'u') {
-      const bottomCount = Math.max(1, Math.round(count / 3));
-      const leftCount = Math.ceil((count - bottomCount) / 2);
-      const rightCount = count - bottomCount - leftCount;
-      const maxCol = Math.max(leftCount, rightCount);
-      if (maxCol <= 1) return LINE_H;
-      return Math.max(LINE_H, Math.ceil(100 + (72 * (maxCol - 1)) / 0.64));
-    }
-    const rowsN = Math.ceil(count / LINE_PER_ROW);
-    if (rowsN <= 1) return LINE_H;
-    return Math.max(LINE_H, Math.ceil(100 + (100 * (rowsN - 1)) / 0.68));
-  }
-
-  /* ---------------- 示意图节点文字排布（v4.1.0） ----------------
-   * U 型：工位名放**内侧**、夹具号放**外侧**。U 的轨迹是「左竖边下行 → 底横边 → 右竖边上行」，
-   *   围出来的内侧恒为画布中心方向：
-   *     左列（seg=left） ：内侧＝右 → 名称在圆右（anchor=start），编号在圆左（anchor=end）
-   *     右列（seg=right）：内侧＝左 → 名称在圆左（anchor=end），编号在圆右（anchor=start）
-   *     底横边（seg=bottom）：内侧＝上 → 名称在圆上、编号在圆下（居中）
-   * 直线形没有内外之分，沿用 v4.0.7 的「圆上工位名 / 圆下夹具号」上下结构。
-   * 侧排时文字压圆心基线（y+4），与圆心的水平间隙 LD_GAP。
-   *
-   * v4.1.0（用户截图反馈：底部夹具号粘连）：底横排节点密、编号长时，同一条基线上的编号会首尾相接。
-   *   底排改为**相邻标签上下错开**——偶数位贴圆（y+CODE_NEAR）、奇数位下沉（y+CODE_FAR），
-   *   两条基线相差 20px；于是同一条基线上的相邻编号相隔 2 个节点间距，横向空间翻倍。 */
-  const LD_R = 19;          // 节点圆半径
-  const LD_GAP = 8;         // 文字与圆之间的间隙
-  const LD_MIN_TEXT_GAP = 16;   // 相邻节点文字的横向呼吸
-  const LINE_MAX_W = 2600;      // 画布自动拉长的上限（超过就靠截断，避免无限变宽）
-  const LD_CODE_NEAR = 46;      // 底排编号：贴圆基线（与圆心差 46）
-  const LD_CODE_FAR = 66;       // 底排编号：错行后的基线（与圆心差 66，与 NEAR 相距 20）
-
-  function nodeTextPos(seg, p, stagger) {
-    if (seg === 'left') {
-      return {
-        name: { x: p.x + LD_R + LD_GAP, y: p.y + 4, anchor: 'start' },
-        code: { x: p.x - LD_R - LD_GAP, y: p.y + 4, anchor: 'end' }
-      };
-    }
-    if (seg === 'right') {
-      return {
-        name: { x: p.x - LD_R - LD_GAP, y: p.y + 4, anchor: 'end' },
-        code: { x: p.x + LD_R + LD_GAP, y: p.y + 4, anchor: 'start' }
-      };
-    }
-    return {
-      name: { x: p.x, y: p.y - 28, anchor: 'middle' },
-      code: { x: p.x, y: p.y + (stagger ? LD_CODE_FAR : LD_CODE_NEAR), anchor: 'middle' }
-    };
-  }
-
-  /* SVG 文本宽度估算（中文≈字号宽，ASCII≈0.56×字号），只用于反推画布要拉多长。 */
-  function svgTextWidth(str, fontSize) {
-    let w = 0;
-    for (const ch of String(str == null ? '' : str)) {
-      w += ch.codePointAt(0) > 0x2e80 ? fontSize : fontSize * 0.56;
-    }
-    return w;
-  }
-
-  /* 节点下方/外侧显示的夹具号：优先实物编号（主搜索键），无实物编号退回桥梁号，超 22 字截断。 */
-  function fixtureBadgeText(row) {
-    const list = (row && row.fixtures) || [];
-    if (!list.length) return '无';
-    const codes = list.map((f) => f.serialNo || f.code).join(' / ');
-    return codes.length > 22 ? codes.slice(0, 21) + '…' : codes;
-  }
-
-  /* 画布宽度自适应（v4.1.0 底排按错行折算）：位置不够就把示意图**拉长**，不让文字互相压。
-   * 归一化横坐标 0~1 映射到 [60, W-60]，相邻节点像素间距 = 跨度 × (W-120)：
-   *   直线形：跨度 0.84/(每行数量-1)，需容下 max(工位名宽, 夹具号宽) + 16
-   *   U 型底横边：跨度 0.56/(底排数量-1)；编号**两行错开**，同一条基线上的相邻编号隔了 2 个节点间距，
-   *     所以只需 codeW+16 的一半；工位名仍是一行一个，按 nameW+16 卡
-   *   U 型左右列（左右结构）：0.22 的比例位置要容下「间隙 + 编号宽」，两侧各留 8px 边距
-   * 画布只加宽、不缩小（不足 LINE_W 仍按 LINE_W）。 */
-  function lineDiagramWidth(rows, type) {
-    const list = rows || [];
-    if (!list.length) return LINE_W;
-    let nameW = 0;
-    let codeW = 0;
-    list.forEach((r) => {
-      nameW = Math.max(nameW, svgTextWidth(stationLabel(r.station, 1), 12));
-      codeW = Math.max(codeW, svgTextWidth(fixtureBadgeText(r), 11));
+  /* ---------------- 线体 ↔ 机种 互查（v5.2.0） ----------------
+   * 机种与线体之间**没有直接绑定**，两条关系都挂在夹具记录上
+   * （`fixtures.lines` 存线体 id、`fixtures.lineModels` 存机种名称）。
+   * 因此这两列都是**派生值**：现算，不落库，夹具一改两列立刻跟着变。
+   * 纯函数（显式传参，便于测试）：不传则退回 state。 */
+  function lineModelNamesOfLine(lineId, fixtures) {
+    const src = Array.isArray(fixtures) ? fixtures : (state.fixtures || []);
+    const want = Number(lineId);
+    const set = new Set();
+    src.forEach((f) => {
+      if (!Array.isArray(f.lines) || f.lines.map(Number).indexOf(want) < 0) return;
+      (Array.isArray(f.lineModels) ? f.lineModels : []).forEach((n) => {
+        const s = String(n == null ? '' : n).trim();
+        if (s) set.add(s);
+      });
     });
-    const need = Math.max(nameW, codeW) + LD_MIN_TEXT_GAP;
-    let W = LINE_W;
-    if (lineTypeKey(type) === 'u') {
-      const bottomCount = Math.max(1, Math.round(list.length / 3));
-      if (bottomCount > 1) {
-        // 底排编号错行 → 同基线相邻编号相隔 2 个间距
-        const pitchNeed = Math.max(nameW + LD_MIN_TEXT_GAP, (codeW + LD_MIN_TEXT_GAP) / 2);
-        W = Math.max(W, 120 + Math.ceil((pitchNeed * (bottomCount - 1)) / 0.56));
-      }
-      // 外侧编号左缘 = 60 + 0.22×(W-120) - (LD_R+LD_GAP) - codeW ≥ 8
-      W = Math.max(W, 120 + Math.ceil(Math.max(0, codeW - 25) / 0.22));
-    } else {
-      const per = Math.min(LINE_PER_ROW, list.length);
-      if (per > 1) W = Math.max(W, 120 + Math.ceil((need * (per - 1)) / 0.84));
-    }
-    return Math.min(W, LINE_MAX_W);
+    return Array.from(set).sort(natCompare);
   }
 
-  /* 产线图渲染：SVG。U型画「左竖边 → 底横边 → 右竖边」的折线轨迹；直线形画折行连线。
-   * v4.1.0 节点排布：U 型——工位名在圆**内侧**、夹具号在圆**外侧**（见 nodeTextPos）；
-   *   直线形——圆上工位名（统一「N号工位」）、圆下夹具号，基线相距 74px。
-   *   圆圈本身只表示夹具状态——实心主色＝已配置夹具，空心灰＝无配置（与右上图例一一对应）。
-   * 画布高见 lineDiagramHeight()、宽见 lineDiagramWidth()（文字放不下就自动拉长）。 */
-  function renderLineDiagram(line, rows) {
-    if (!line || !rows.length) {
-      return '<div class="empty-tip">该线体尚未配置工位</div>';
-    }
-    const isU = lineTypeKey(line.type) === 'u';
-    const W = lineDiagramWidth(rows, line.type);
-    const H = lineDiagramHeight(rows.length, line.type);
-    const pts = computeLineLayout(rows.length, line.type, LINE_PER_ROW);
-    const px = (p) => ({ x: 60 + p.x * (W - 120), y: 50 + p.y * (H - 100) });
-    // 画布已是「按文字宽度算出的自然尺寸」：给 svg 不低于自然宽度的 min-width，
-    // 窄窗口下靠容器横向滚动查看，而不是把整张图等比缩到字号看不清（宽窗口仍撑满）。
-    const minW = W;
+  function lineNamesOfModel(name, fixtures, lines) {
+    const src = Array.isArray(fixtures) ? fixtures : (state.fixtures || []);
+    const ls = Array.isArray(lines) ? lines : (state.lines || []);
+    const want = String(name == null ? '' : name).trim();
+    if (!want) return [];
+    const byId = new Map();
+    ls.forEach((l) => { if (l && l.id != null) byId.set(Number(l.id), l); });
+    const set = new Set();
+    src.forEach((f) => {
+      const models = (Array.isArray(f.lineModels) ? f.lineModels : [])
+        .map((n) => String(n == null ? '' : n).trim());
+      if (models.indexOf(want) < 0) return;
+      (Array.isArray(f.lines) ? f.lines : []).forEach((id) => {
+        const l = byId.get(Number(id));
+        if (!l) return;                       // 线体已被删除 → 忽略，不显示幽灵线体
+        const nm = String(l.name || '').trim();
+        if (nm) set.add(nm);
+      });
+    });
+    return Array.from(set).sort(natCompare);
+  }
 
-    /* v4.1.0：U 型底横排的首/末节点与左右竖列同 x，转角处连线**竖直**穿过该节点的居中标签。
-     * 给这两个标签垫一块与文字等宽的白底（.ld-plate），连线看起来从标签后面穿过，不会割字。
-     * v4.1.0：底排相邻标签上下错开，避免长编号首尾粘连（见 nodeTextPos）。 */
-    const bottomIdx = [];
-    pts.forEach((q, k) => { if (q.seg === 'bottom') bottomIdx.push(k); });
-    const cornerSet = new Set();
-    const bottomPos = new Map();
-    bottomIdx.forEach((k, pos) => bottomPos.set(k, pos));
-    if (isU && bottomIdx.length) {
-      cornerSet.add(bottomIdx[0]);
-      if (bottomIdx.length > 1) cornerSet.add(bottomIdx[bottomIdx.length - 1]);
-    }
-
-    const nodes = rows.map((r, i) => {
-      const p = px(pts[i]);
-      const has = r.fixtures.length > 0;
-      // 工位名统一「N号工位」，去掉「X号线」前缀（线体名已在示意图标题处显示）
-      const label = stationLabel(r.station, i + 1);
-      const codeTxt = fixtureBadgeText(r);
-      // 底横排：奇数位编号下沉一行（两条基线相差 20px），同基线相邻编号隔 2 个节点间距
-      const stagger = isU && bottomPos.has(i) ? bottomPos.get(i) % 2 === 1 : false;
-      const pos = nodeTextPos(pts[i].seg, p, stagger);
-      const tipName = has ? r.fixtures.map((f) => f.name || f.code).join(' / ') : '无夹具';
-      const wName = svgTextWidth(label, 12);
-      const plate = cornerSet.has(i)
-        ? `<rect x="${(pos.name.x - wName / 2 - 2).toFixed(1)}" y="${(pos.name.y - 11).toFixed(1)}" width="${(wName + 4).toFixed(1)}" height="15" rx="3" class="ld-plate"/>`
-        : '';
-      return `
-        <g class="ld-node ${has ? 'ld-on' : 'ld-off'}">
-          <title>${esc(label + ' · ' + tipName)}</title>
-          ${plate}
-          <text x="${pos.name.x.toFixed(1)}" y="${pos.name.y.toFixed(1)}" text-anchor="${pos.name.anchor}" class="ld-name">${esc(label)}</text>
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="19" class="${has ? 'ld-dot-on' : 'ld-dot-off'}"/>
-          <text x="${pos.code.x.toFixed(1)}" y="${pos.code.y.toFixed(1)}" text-anchor="${pos.code.anchor}" class="ld-code${has ? '' : ' ld-none'}">${esc(codeTxt)}</text>
-        </g>`;
-    }).join('');
-
-    // 连线：U 型 = 按工位顺序逐点连线（左上→左下→底部→右上，自动形成 U 形轨迹）；
-    // 直线形 = 按行分段折线 + 行间折返。
-    let path = '';
-    if (isU) {
-      const c = pts.map((p) => px(p));
-      path = `<polyline points="${c.map((p) => `${p.x},${p.y}`).join(' ')}" class="ld-track" fill="none"/>`;
-    } else {
-      const per = LINE_PER_ROW;
-      const rowsN = Math.ceil(rows.length / per);
-      for (let r = 0; r < rowsN; r++) {
-        const seg = rows.slice(r * per, r * per + per);
-        if (seg.length < 2) continue;
-        const a = px(pts[r * per]);
-        const b = px(pts[r * per + seg.length - 1]);
-        path += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" class="ld-track"/>`;
-      }
-      // 行间折返连接（第 1 行末 → 第 2 行首）
-      for (let r = 1; r < rowsN; r++) {
-        const prev = px(pts[r * per - 1]);
-        const cur = px(pts[r * per]);
-        path += `<line x1="${prev.x}" y1="${prev.y}" x2="${cur.x}" y2="${cur.y}" class="ld-track ld-link"/>`;
-      }
-    }
-
-    return `
-      <div class="line-diagram">
-        <div class="line-diagram-head">
-          <span class="ld-title">${esc(line.name)} · ${lineTypeLabel(line.type)}产线示意图</span>
-          <span class="ld-legend">
-            <i class="ld-lg ld-lg-on"></i>已配置夹具
-            <i class="ld-lg ld-lg-off"></i>无配置
-          </span>
-        </div>
-        <div class="ld-canvas">
-          <svg class="ld-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img"
-               style="min-width:${minW}px" aria-label="${esc(line.name)}产线布局示意图">
-            ${path}
-            ${nodes}
-          </svg>
-        </div>
-      </div>`;
+  /* 把名称数组渲染成「A / B / C」单元格；空数组给破折号。
+   * title 里放完整文本，列被压窄时鼠标悬停仍能看全。 */
+  function slashCell(names) {
+    const arr = (Array.isArray(names) ? names : []).filter(Boolean);
+    if (!arr.length) return '<span class="muted">—</span>';
+    const text = arr.join(' / ');
+    return `<span class="slash-text" title="${esc(text)}">${esc(text)}</span>`;
   }
 
   /* ---------------- 产线使用页 ----------------
-   * v4.0.0：产品级联已废除（机种不隶属产线）；工位↔夹具关联从 fixtures 反查。 */
+   * v5.0.0：产品级联已废除（机种不隶属产线）；工位模型移除，直接按 fixtures.lines 反查该线的夹具。 */
   async function renderLineQuery() {
     const container = $('#content');
     if (!container) return;
@@ -4818,6 +4754,9 @@
       (f.lineModels || []).forEach((m) => { if (m) allModels.add(m); });
     });
     const modelSorted = Array.from(allModels).sort((a, b) => natCompare(a, b));
+    /* v5.2.1：若当前选中机种已从全局机种集合中消失（删改夹具所致），下拉会回落显示
+       「全部机种」，但 state 仍保留旧值继续过滤 ⇒ 界面与结果脱节。此处自动复位。 */
+    if (q.lineModel && modelSorted.indexOf(q.lineModel) < 0) q.lineModel = '';
     const modelOpts = ['<option value="">全部机种</option>']
       .concat(modelSorted.map((m) => opt(m, m, m === q.lineModel))).join('');
 
@@ -4837,92 +4776,159 @@
             <button type="button" class="btn sm ghost" onclick="lineQueryReset()">重置筛选</button>
           </div>
           <div class="query-field"><label>&nbsp;</label>
+            <button type="button" class="btn sm" onclick="printLineQueryList()" title="按当前线体 + 机种筛选结果打印 A4 横向清单">🖨 打印清单</button>
+          </div>
+          <div class="query-field"><label>&nbsp;</label>
             <button type="button" class="btn sm" onclick="showView('linecfg')">⚙ 去配置产线</button>
           </div>
           <div class="query-field"><label>&nbsp;</label>
             <button type="button" class="btn sm ghost" onclick="showView('prod')">🏷 机种管理</button>
           </div>
         </div>
-        ${lines.length ? '' : '<div class="tip">尚未配置任何线体。请先到「产线配置」新建线体与工位，或用「导入」批量铺底。</div>'}
+        ${lines.length ? '' : '<div class="tip">尚未配置任何线体。请先到「产线配置」新建线体，或用「导入」批量铺底。</div>'}
         <div id="lq_body"></div>
       </div>`;
     renderLineQueryBody();
   }
 
-  /* 结果区：工位夹具配置表（只读）+ 产线示意图 */
+  /* 当前筛选（线体 + 机种）下的夹具行。
+   * ⚠️ 屏幕渲染与打印**必须共用这一份计算**，否则两处口径一旦分叉，
+   *   就会出现「屏幕 12 套、打印出来 15 套」这种无法自证的问题。 */
+  function lineQueryRows() {
+    const q = state.lineQuery;
+    const line = state.lines.find((l) => l.id === q.lineId) || null;
+    if (!line) return { line: null, lineModel: '', rows: [], stocked: 0 };
+    const lineModel = q.lineModel || '';
+    let rows = fixturesOfLine(line.id);
+    /* v5.2.1：下拉是精确枚举值，用等值匹配（大小写 / 首尾空格不敏感）。
+       旧实现传原始大写值进 lineModelsMatch 做 includes ⇒ 恒 0 条（BUG-012）。 */
+    if (lineModel) rows = rows.filter((f) => lineModelsExact(f, lineModel));
+    return { line, lineModel, rows: rows, stocked: rows.filter((f) => f.status === 'stocked').length };
+  }
+
+  /* 结果区：该产线上装的夹具清单（只读） */
   function renderLineQueryBody() {
     const box = $('#lq_body');
     if (!box) return;
     const q = state.lineQuery;
-    const line = state.lines.find((l) => l.id === q.lineId) || null;
     const cnt = $('#lq_count');
+    const snap = lineQueryRows();
+    const line = snap.line;
+    const lineModel = snap.lineModel;
+    const rows = snap.rows;
+    const stocked = snap.stocked;
 
-    // 无数据状态
     if (!line) {
       if (cnt) cnt.textContent = '';
-      box.innerHTML = '<div class="empty-tip">请选择线体以查看工位夹具配置</div>';
+      box.innerHTML = '<div class="empty-tip">请选择线体以查看该产线上的夹具</div>';
       return;
     }
+    if (cnt) cnt.textContent = `${line.name}（${lineTypeLabel(line.type)}） ｜ 夹具 ${rows.length} 套，在库 ${stocked} 套`;
 
-    const stations = stationsOfLine(state.stations, line.id);
-    if (!stations.length) {
-      if (cnt) cnt.textContent = '';
-      box.innerHTML = `<div class="empty-tip">线体「${esc(line.name)}」下还没有工位，请先到「产线配置」添加工位</div>`;
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty-tip">线体「${esc(line.name)}」上还没有夹具${lineModel ? `（机种「${esc(lineModel)}」下）` : ''}</div>`;
       return;
     }
-
-    const lineModel = state.lineQuery.lineModel || '';
-    let fixtures = state.fixtures || [];
-    if (lineModel) {
-      fixtures = fixtures.filter((f) => lineModelsMatch(f, lineModel));
-    }
-    const rows = buildStationRows(stations, fixtures);
-    const withFix = rows.filter((r) => r.fixtures.length > 0).length;
-    const fixCount = rows.reduce((s, r) => s + r.fixtures.length, 0);
-    const lineFix = fixturesOfLine(line.id).length;
-    if (cnt) cnt.textContent = `${line.name} ｜ 工位 ${rows.length} 个，已装夹具 ${withFix} 个，夹具 ${fixCount} 套（本线关联 ${lineFix} 套）`;
 
     box.innerHTML = `
       <div class="table-wrap"><table>
         <thead><tr>
-          <th style="width:130px">工位名称</th>
-          <th style="width:80px">工位顺序</th>
-          <th style="width:70px">序号</th>
-          <th style="width:170px">夹具编号</th>
-          <th>夹具名称</th>
+          <th style="width:80px">序号</th>
+          <th style="width:190px">夹具编号</th>
+          <th>名称</th>
+          <th style="width:200px">机种名称</th>
+          <th style="width:150px">库位</th>
           <th style="width:100px">状态</th>
-          <th>备注</th>
+          <th style="width:90px">操作</th>
         </tr></thead>
         <tbody>
-          ${rows.map((r) => {
-            const remark = esc((r.station && r.station.remark) || '—');
-            if (!r.fixtures.length) {
-              return `<tr class="row-empty">
-                <td>${esc(r.station.name || '—')}</td>
-                <td>${esc(r.seq == null ? '—' : String(r.seq))}</td>
-                <td class="muted">—</td><td class="muted">—</td><td class="muted">无</td>
-                <td class="muted">—</td>
-                <td class="muted">${remark}</td>
-              </tr>`;
-            }
-            return r.fixtures.map((f, i) => {
-              const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
-              return `<tr>
-                ${i === 0 ? `<td rowspan="${r.fixtures.length}">${esc(r.station.name || '—')}</td>
-                  <td rowspan="${r.fixtures.length}">${esc(r.seq == null ? '—' : String(r.seq))}</td>` : ''}
-                <td class="muted">${esc(f.code)}</td>
-                <td>${esc(f.serialNo || '—')}</td>
-                <td><a href="javascript:;" onclick="fixtureEdit(${f.id})" title="编辑该夹具">${esc(f.name || '—')}</a></td>
-                <td><span class="badge ${st.cls}">${st.label}</span></td>
-                ${i === 0 ? `<td rowspan="${r.fixtures.length}">${remark}</td>` : ''}
-              </tr>`;
-            }).join('');
+          ${rows.map((f) => {
+            const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
+            return `<tr>
+              <td class="muted">${esc(f.code)}</td>
+              <td>${esc(f.serialNo || '—')}</td>
+              <td><a href="javascript:;" onclick="fixtureEdit(${f.id})" title="编辑该夹具">${esc(f.name || '—')}</a></td>
+              <td>${esc(formatLineModels(f, '—', { collapse: 2 }))}</td>
+              <td>${esc(f.location || '—')}</td>
+              <td><span class="badge ${st.cls}">${st.label}</span></td>
+              <td><button class="btn sm ghost" onclick="fixtureEdit(${f.id})">编辑</button></td>
+            </tr>`;
           }).join('')}
         </tbody>
       </table></div>
-      <div class="tip">本表为<b>只读</b>视图：工位上的夹具由「夹具管理 → 编辑夹具」中的产线/工位选择决定。点击夹具名称可直接编辑。</div>
-      ${renderLineDiagram(line, rows)}`;
+      <div class="tip">本表为<b>只读</b>视图：夹具归属哪条产线，由「夹具管理 → 新建/编辑夹具」里的<b>关联产线</b>决定。点击夹具名称可直接编辑。</div>
+      <div class="tip">「🖨 打印清单」按<b>当前线体 + 当前机种</b>筛选结果出单（A4 横向，列与上表一致，仅去掉「操作」列），套数与上表完全相同。</div>`;
   }
+
+  /* ============================================================
+   * 打印产线夹具清单（v5.1.0）
+   *
+   * 内容来源 = lineQueryRows()，与屏幕表格同一份数据、同一种排序，
+   * 因此「屏幕上看到几套，纸上就是几套」。
+   * 纸张：A4 横向（仓库/车间常见打印方式），边距用系统默认值避免贴边被裁。
+   * ============================================================ */
+  window.printLineQueryList = function () {
+    const snap = lineQueryRows();
+    if (!snap.line) { toast('请先选择线体', 'err'); return; }
+    if (!snap.rows.length) { toast('当前筛选没有夹具，无法打印', 'warn'); return; }
+    const area = $('#printListArea');
+    if (!area) { toast('打印容器缺失，请重启程序后重试', 'err'); return; }
+    // 与标签打印互斥：清空另一侧，避免两个容器同时有内容被一起送印
+    const labelArea = $('#printArea');
+    if (labelArea) labelArea.innerHTML = '';
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const ver = (window.api && window.api.version) || DB.APP_VERSION || '';
+
+    area.innerHTML = `
+      <h1>产线夹具清单</h1>
+      <div class="ps-meta">线体：<b>${esc(snap.line.name)}</b>（${esc(lineTypeLabel(snap.line.type))}） ｜ 机种：<b>${esc(snap.lineModel || '全部机种')}</b> ｜ 夹具 <b>${snap.rows.length}</b> 套，其中在库 <b>${snap.stocked}</b> 套</div>
+      <div class="ps-meta">打印时间：${stamp} ｜ 工装夹具管理程序 v${esc(ver)}</div>
+      <table>
+        <thead><tr>
+          <th style="width:12%">序号</th>
+          <th style="width:24%">夹具编号</th>
+          <th style="width:20%">名称</th>
+          <th style="width:18%">机种名称</th>
+          <th style="width:14%">库位</th>
+          <th style="width:12%">状态</th>
+        </tr></thead>
+        <tbody>
+          ${snap.rows.map((f) => {
+            const st = FIX_STATUS[f.status] || { label: f.status };
+            return `<tr>
+              <td>${esc(f.code)}</td>
+              <td>${esc(f.serialNo || '—')}</td>
+              <td>${esc(f.name || '—')}</td>
+              <td>${esc(formatLineModels(f, '—'))}</td>
+              <td>${esc(f.location || '—')}</td>
+              <td>${esc(st.label)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="ps-foot">
+        <span>合计 ${snap.rows.length} 套（在库 ${snap.stocked} 套）</span>
+        <span>线体：${esc(snap.line.name)}${snap.lineModel ? ' ／ ' + esc(snap.lineModel) : ''}</span>
+      </div>
+      <div class="ps-sign"><span>制表人：____________</span><span>审核：____________</span><span>日期：____________</span></div>`;
+
+    const done = (r) => {
+      if (r && r.ok) toast(`已发送打印任务（${snap.rows.length} 套）`, 'ok');
+      else if (r && (r.reason === 'cancelled' || String(r.error || '').indexOf('cancel') >= 0)) { /* 用户取消，不提示 */ }
+      else toast('打印失败：' + ((r && (r.error || r.reason)) || '未知错误'), 'err');
+    };
+    if (window.api && window.api.printLabels) {
+      Promise.resolve(window.api.printLabels({
+        pageSize: 'A4',
+        landscape: true,                          // A4 横向
+        margins: { marginType: 'default' }        // 清单用系统默认边距，留白由 CSS 再补
+      })).then(done).catch(() => window.print());
+    } else {
+      window.print();   // 浏览器调试模式
+    }
+  };
 
   window.lineQueryChangeLine = function () {
     const newLineId = parseInt(($('#lq_line') || {}).value || '0', 10) || 0;
@@ -4950,14 +4956,11 @@
   };
 
   /* ============================================================
-   * 产线配置管理页（线体 / 工位）
+   * 产线配置管理页（线体）
    *
-   * v4.0.0 结构变化：
-   *   - 「产品」面板整体移除 —— 机种（productions）不隶属线体，已独立成「机种管理」页
-   *   - 「工位夹具」由「配置夹具」按钮改为**只读视图**：关联的真身在夹具记录里
-   *     （fixtures.stations），此处只展示 + 提供「编辑夹具」跳转
-   *   - 工位是唯一结构表（工位名跨产线可重名，必须靠 lineId 区分归属）
-   * 两块面板自上而下：① 线体 ② 工位与夹具（只读）
+   * v5.0.0 结构变化：
+   *   - 「工位」面板与工位 CRUD 整体移除（工位模型已废弃，夹具只关联产线）
+   *   - 线体是唯一结构表；夹具归属由 fixtures.lines 反查，此处只读展示数量
    * ============================================================ */
   async function renderLineConfig() {
     const container = $('#content');
@@ -4982,11 +4985,9 @@
     const lines = (state.lines || []).slice().sort((a, b) => natCompare(a.name || '', b.name || ''));
     if (!lines.some((l) => l.id === cfg.lineId)) cfg.lineId = lines.length ? lines[0].id : 0;
 
-    const line = lines.find((l) => l.id === cfg.lineId) || null;
-
     container.innerHTML = `
       <div class="panel">
-        <div class="panel-title">① 线体
+        <div class="panel-title">线体
           <span class="panel-actions">
             <button class="btn sm" onclick="lineCfgLineForm(0)">➕ 新建线体</button>
             <button class="btn sm ghost" onclick="lineCfgImport()">⬆ 导入Excel/CSV</button>
@@ -4995,7 +4996,7 @@
         </div>
         ${lines.length ? `<div class="table-wrap"><table>
           <thead><tr><th style="width:64px">选用</th><th>线体名称</th><th style="width:110px">形态</th>
-            <th style="width:90px">工位数</th><th style="width:110px">关联夹具</th><th>备注</th><th style="width:150px">操作</th></tr></thead>
+            <th style="width:110px">关联夹具</th><th style="width:210px">机种名称</th><th>备注</th><th style="width:150px">操作</th></tr></thead>
           <tbody>
             ${lines.map((l) => {
               const sel = l.id === cfg.lineId;
@@ -5003,8 +5004,8 @@
                 <td><button class="btn sm ${sel ? 'primary' : 'ghost'}" onclick="lineCfgPickLine(${l.id})">${sel ? '已选' : '选择'}</button></td>
                 <td>${esc(l.name)}</td>
                 <td>${lineTypeLabel(l.type)}</td>
-                <td>${stationsOfLine(state.stations, l.id).length}</td>
                 <td>${fixturesOfLine(l.id).length} 套</td>
+                <td>${slashCell(lineModelNamesOfLine(l.id))}</td>
                 <td>${esc(l.remark || '—')}</td>
                 <td><span class="row-actions">
                   <button class="btn sm" onclick="lineCfgLineForm(${l.id})">编辑</button>
@@ -5014,69 +5015,10 @@
             }).join('')}
           </tbody>
         </table></div>` : '<div class="empty-tip">还没有线体，点「➕ 新建线体」开始</div>'}
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">② 工位与夹具（只读关联）${line ? `（${esc(line.name)}）` : ''}
-          <span class="panel-actions">
-            <button class="btn sm" onclick="lineCfgStationForm(0)"${line ? '' : ' disabled'}>➕ 新建工位</button>
-          </span>
-        </div>
-        ${!line ? '<div class="empty-tip">请先在上方选择或新建线体</div>'
-          : (() => {
-            const sts = stationsOfLine(state.stations, line.id);
-            if (!sts.length) return '<div class="empty-tip">该线体下还没有工位</div>';
-            const rows = buildStationRows(sts, state.fixtures);
-            return `<div class="table-wrap"><table>
-              <thead><tr><th style="width:150px">工位名称</th><th style="width:80px">顺序</th>
-                <th>该工位上的夹具（只读）</th><th>备注</th><th style="width:150px">操作</th></tr></thead>
-              <tbody>
-                ${rows.map((r) => `<tr>
-                  <td>${esc(r.station.name || '—')}</td>
-                  <td>${esc(r.seq == null ? '—' : String(r.seq))}</td>
-                  <td class="fx-cell">${r.fixtures.length
-                    ? r.fixtures.map((f) => {
-                      const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
-                      const title = `${f.name} ｜ 状态：${st.label}`;
-                      return `<span class="fx-tag" title="${esc(title)}" onclick="fixtureEdit(${f.id})" style="cursor:pointer">${esc(f.serialNo || (f.code))} <i class="muted">${esc(f.code)}</i></span>`;
-                    }).join('')
-                    : '<span class="muted">—</span>'}</td>
-                  <td>${esc(r.station.remark || '—')}</td>
-                  <td><span class="row-actions">
-                    <button class="btn sm ghost" onclick="lineCfgStationEditFixtures(${r.station.id})">编辑夹具</button>
-                    <button class="btn sm" onclick="lineCfgStationForm(${r.station.id})">编辑工位</button>
-                    <button class="btn sm danger" onclick="lineCfgDelStation(${r.station.id})">删除</button>
-                  </span></td>
-                </tr>`).join('')}
-              </tbody>
-            </table></div>
-            <div class="tip">工位上的夹具由<b>夹具记录</b>决定，这里只读展示。点「编辑夹具」选中该工位上的夹具进行修改；若工位为空，请到「夹具管理 → 新建/编辑夹具」勾选本工位。</div>`;
-          })()}
+        <div class="tip">夹具归属哪条产线，由「夹具管理 → 新建/编辑夹具」里的<b>关联产线</b>决定；这里只统计数量。选中的线体可在「🔗 产线使用」页查看其上的全部夹具。</div>
+        <div class="tip"><b>机种名称</b>列是<b>派生值</b>：把该线体上所有夹具的「适用机种」汇总去重，多个机种用 <code>/</code> 分隔，<b>不单独存储</b>。改夹具的机种或关联产线后，这一列会自动跟着变。</div>
       </div>`;
   }
-
-  /* 只读视图的「编辑夹具」：该工位上仅 1 套时直接打开，多套时先让用户挑 */
-  window.lineCfgStationEditFixtures = function (stationId) {
-    const list = fixturesOnStation(stationId);
-    if (!list.length) {
-      toast('该工位暂无夹具，请到「夹具管理 → 新建夹具」勾选本工位', 'warn');
-      return;
-    }
-    if (list.length === 1) { fixtureEdit(list[0].id); return; }
-    openModal('选择要编辑的夹具', `
-      <div class="table-wrap"><table>
-        <thead><tr><th>序号</th><th>夹具编号</th><th>名称</th><th>状态</th><th style="width:90px">操作</th></tr></thead>
-        <tbody>${list.map((f) => {
-          const st = FIX_STATUS[f.status] || { label: f.status, cls: 'muted' };
-          return `<tr>
-            <td class="muted">${esc(f.code)}</td><td>${esc(f.serialNo || '—')}</td>
-            <td>${esc(f.name)}</td><td><span class="badge ${st.cls}">${st.label}</span></td>
-            <td><button class="btn sm primary" onclick="closeModal(); fixtureEdit(${f.id})">编辑</button></td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div>
-      <div class="form-actions"><button class="btn ghost" onclick="closeModal()">取消</button></div>`);
-  };
 
   window.lineCfgPickLine = function (id) {
     state.lineCfg.lineId = id;
@@ -5095,7 +5037,7 @@
         <select id="lc_line_type" class="query-select">${typeOpts}</select></div>
       <div class="form-group"><label>备注</label>
         <input type="text" id="lc_line_remark" placeholder="可选" value="${esc(l ? (l.remark || '') : '')}"></div>
-      <p class="muted" style="margin:4px 0 0;">产线形态只有两种，决定查询页示意图的画法：<b>直线形</b>按工位顺序横向折行；<b>U型</b>沿左侧竖边下行、经底部横边、再沿右侧竖边上行。</p>
+      <p class="muted" style="margin:4px 0 0;">产线形态为线体自身属性（<b>直线形</b> / <b>U型</b>），仅作标识展示，不影响夹具关联。</p>
       <div class="form-actions">
         <button class="btn primary" onclick="lineCfgSaveLine(${id})">保存</button>
         <button class="btn ghost" onclick="closeModal()">取消</button>
@@ -5122,16 +5064,15 @@
     } catch (e) { toast('保存失败：' + (e && e.message ? e.message : e), 'err'); }
   };
 
-  /* 删除线体：连带删除其工位，并从全部夹具记录的 lines / stations 中摘除 —— 破坏性操作，先说清楚 */
+  /* 删除线体：从全部夹具记录的 lines 中摘除该 id —— 破坏性操作，先说清楚 */
   window.lineCfgDelLine = async function (id) {
     const l = state.lines.find((x) => x.id === id);
     if (!l) return;
-    const ns = stationsOfLine(state.stations, id).length;
     const nf = fixturesOfLine(id).length;
     openModal('删除线体', `
       <p>确定删除线体「<b>${esc(l.name)}</b>」吗？</p>
-      <p class="muted">将同时删除其 <b>${ns}</b> 个工位，并把 <b>${nf}</b> 套夹具从该产线（及其工位）上摘除，此操作不可撤销。</p>
-      ${nf ? `<p class="muted" style="color:var(--danger)">⚠️ 摘除后若某套夹具既无产线也无工位，将被视为「未配置关联」，请随后到「夹具管理」补填。</p>` : ''}
+      <p class="muted">将把 <b>${nf}</b> 套夹具从该产线上摘除（夹具本身保留），此操作不可撤销。</p>
+      ${nf ? `<p class="muted" style="color:var(--danger)">⚠️ 摘除后若某套夹具再无任何产线，将被视为「未关联产线」，请随后到「夹具管理」补填。</p>` : ''}
       <div class="form-actions">
         <button class="btn danger" onclick="lineCfgDelLineConfirm(${id})">确认删除</button>
         <button class="btn ghost" onclick="closeModal()">取消</button>
@@ -5148,91 +5089,28 @@
     } catch (e) { toast('删除失败：' + (e && e.message ? e.message : e), 'err'); }
   };
 
-  /* ---- 工位表单 ---- */
-  window.lineCfgStationForm = function (id) {
-    const s = state.stations.find((x) => x.id === id) || null;
-    const lineId = s ? s.lineId : state.lineCfg.lineId;
-    if (!lineId) { toast('请先选择线体', 'err'); return; }
-    openModal(s ? '编辑工位' : '新建工位', `
-      <div class="form-group"><label>所属线体</label>
-        <input type="text" value="${esc((state.lines.find((l) => l.id === lineId) || {}).name || '')}" disabled></div>
-      <div class="form-group"><label>工位名称</label>
-        <input type="text" id="lc_st_name" placeholder="如 上料工位" value="${esc(s ? s.name : '')}"></div>
-      <div class="form-group"><label>工位顺序</label>
-        <input type="number" id="lc_st_seq" placeholder="数字，越小越靠前（如 10 / 20 / 30）" value="${s && s.seq != null ? esc(String(s.seq)) : ''}"></div>
-      <div class="form-group"><label>备注</label>
-        <input type="text" id="lc_st_remark" placeholder="可选" value="${esc(s ? (s.remark || '') : '')}"></div>
-      <div class="form-actions">
-        <button class="btn primary" onclick="lineCfgSaveStation(${id})">保存</button>
-        <button class="btn ghost" onclick="closeModal()">取消</button>
-      </div>`);
-  };
-
-  window.lineCfgSaveStation = async function (id) {
-    const name = ($('#lc_st_name') || {}).value.trim();
-    const seqRaw = ($('#lc_st_seq') || {}).value.trim();
-    const remark = ($('#lc_st_remark') || {}).value.trim();
-    if (!name) { toast('请填写工位名称', 'err'); return; }
-    const seq = seqRaw === '' ? null : Number(seqRaw);
-    if (seqRaw !== '' && !Number.isFinite(seq)) { toast('工位顺序需为数字', 'err'); return; }
-    try {
-      if (id) {
-        const s = state.stations.find((x) => x.id === id);
-        await DB.put('stations', { ...s, name, seq, remark, updatedAt: Date.now() });
-      } else {
-        await DB.add('stations', { lineId: state.lineCfg.lineId, name, seq, remark, createdAt: Date.now() });
-      }
-      closeModal();
-      await renderLineConfig();
-      toast(id ? '工位已更新' : '工位已创建', 'ok');
-    } catch (e) { toast('保存失败：' + (e && e.message ? e.message : e), 'err'); }
-  };
-
-  window.lineCfgDelStation = function (id) {
-    const s = state.stations.find((x) => x.id === id);
-    if (!s) return;
-    const n = fixturesOnStation(id).length;
-    openModal('删除工位', `
-      <p>确定删除工位「<b>${esc(s.name)}</b>」吗？</p>
-      <p class="muted">将把 <b>${n}</b> 套夹具从该工位上摘除（夹具本身保留），此操作不可撤销。</p>
-      ${n ? '<p class="muted" style="color:var(--danger)">⚠️ 若某套夹具因此失去全部工位，其「工位」栏将变空，请到「夹具管理」重新指派工位。</p>' : ''}
-      <div class="form-actions">
-        <button class="btn danger" onclick="lineCfgDelStationConfirm(${id})">确认删除</button>
-        <button class="btn ghost" onclick="closeModal()">取消</button>
-      </div>`);
-  };
-  window.lineCfgDelStationConfirm = async function (id) {
-    try {
-      await DB.stationDel(id);
-      closeModal();
-      await reloadAll();
-      await renderLineConfig();
-      toast('工位已删除', 'ok');
-    } catch (e) { toast('删除失败：' + (e && e.message ? e.message : e), 'err'); }
-  };
-
   /* ============================================================
    * 产线配置导入（Excel .xlsx / CSV）
    *
-   * ⚠️ v4.0.0 语义反转：旧版「夹具编号」列是「给工位绑夹具」，本版改成
-   *    「给某个夹具**追加**这条产线与这个工位」—— 因为关联的真身已扁平进夹具记录。
+   * 语义：一行 = 「把某套夹具**关联**到某条产线」—— 关联的真身在夹具记录里（fixtures.lines）。
    *
-   * 表格形态：一张平坦表，每行 = 「某线体 · 某工位 · 一个夹具编号」
-   *   线体 | 线体形态 | 工位 | 工位顺序 | 夹具编号 | 备注
+   * 表格形态：一张平坦表，每行 = 「某线体 · 一个夹具编号」
+   *   线体 | 线体形态 | 夹具编号 | 备注
    * 规则：
-   *   - 线体 / 工位：按名称自动补建（同名复用，不重复创建）
+   *   - 线体：按名称自动补建（同名复用，不重复创建）
    *   - 夹具编号：按 **实物编号 serialNo** 匹配夹具记录（唯一匹配才写；0 或 >1 条计入跳过）
-   *   - 写库为**追加 + 去重**（push 前先查重），绝不覆盖该夹具原有的产线/工位
-   *   - 超过产线 5 条 / 工位 10 个上限的行计入跳过
-   *   - 导入完成后可在提示里点「撤销本次导入」，精确回滚本次追加的产线/工位
+   *   - 写库为**追加 + 去重**（push 前先查重），绝不覆盖该夹具原有的产线
+   *   - 超过产线 5 条上限的行计入跳过
+   *   - 导入完成后可在提示里点「撤销本次导入」，精确回滚本次追加的产线
+   *
+   * ⚠️ v5.0.0：工位模型已废弃，模板不再有「工位 / 工位顺序」列；
+   *   旧模板里带工位的表格仍可导入 —— 那两列会被**静默忽略**，不影响线体与夹具关联。
    * ============================================================ */
-  const LINE_IMPORT_HEADERS = ['线体', '线体形态', '工位', '工位顺序', '夹具编号', '备注'];
+  const LINE_IMPORT_HEADERS = ['线体', '线体形态', '夹具编号', '备注'];
   const LINE_IMPORT_ALIAS = {
     '线体': 'line', '产线': 'line', '线体名称': 'line', '产线名称': 'line', 'line': 'line',
     '线体形态': 'lineType', '线体类型': 'lineType', '产线形态': 'lineType', '产线类型': 'lineType',
     '形态': 'lineType', '类型': 'lineType', 'type': 'lineType', 'layout': 'lineType',
-    '工位': 'station', '工位名称': 'station', '工位号': 'station', 'station': 'station',
-    '工位顺序': 'seq', '工位序号': 'seq', '顺序': 'seq', '序号': 'seq', 'seq': 'seq',
     '夹具编号': 'fixtureSerial', '实物编号': 'fixtureSerial', '实物夹具编号': 'fixtureSerial',
     '夹具': 'fixtureSerial', '夹具号': 'fixtureSerial', '编号': 'fixtureSerial',
     '备注': 'remark', 'remark': 'remark'
@@ -5250,35 +5128,31 @@
   /* 线体形态文本 → 类型键。只有 U型 / 直线形两种：
    * 「U / 环 / 圆 / loop」等写法一律归到 U型（兼容老表格里写的「环形」），其余直线形。 */
   function parseLineType(v) {
-    const s = String(v == null ? '' : v).trim();
-    if (!s) return 'linear';
+    const s2 = String(v == null ? '' : v).trim();
+    if (!s2) return 'linear';
     // 只认「U / U型 / U形」开头，避免 "Unit"/"Double" 这类含 u 的词被误判
-    if (/^u\s*[型形]?$|^u\s*[型形]|环|圆|loop|circle|ring/i.test(s)) return 'u';
+    if (/^u\s*[型形]?$|^u\s*[型形]|环|圆|loop|circle|ring/i.test(s2)) return 'u';
     return 'linear';
   }
 
   /* 生成导入计划（纯函数，不写库、不触 DOM）。
    * rows     二维数组（首行表头）
-   * existing { lines, stations, fixtures }
-   * 返回 { ok, newLines, newStations, appends, skipped, error }
-   *   newLines    待新建线体 [{ name, type }]
-   *   newStations 待新建工位 [{ lineName, name, seq }]
-   *   appends     待追加关联 [{ row, fixtureId, code, serialNo, lineName, stationName, addLine, addStation }]
+   * existing { lines, fixtures }
+   * 返回 { ok, newLines, appends, skipped, error }
+   *   newLines  待新建线体 [{ name, type }]
+   *   appends   待追加关联 [{ row, fixtureId, code, serialNo, lineName }]
    *
-   * ⚠️ 全程以「线体名 + 工位名」为键，避免依赖尚未生成的真实 id；
-   *    上限（产线 ≤5 / 工位 ≤10）用「名称集合」预演，故计划阶段即可拦住越界行。 */
+   * ⚠️ 以「线体名」为键，避免依赖尚未生成的真实 id；
+   *    产线上限（≤5 条）用「名称集合」预演，故计划阶段即可拦住越界行。 */
   function buildLineImportPlan(rows, existing) {
     if (!rows || rows.length < 2) return { ok: false, error: '文件中没有数据行' };
     const idx = mapLineImportHeader(rows[0]);
     if (idx.line == null) return { ok: false, error: '模板缺少「线体」列' };
-    if (idx.station == null) return { ok: false, error: '模板缺少「工位」列' };
     if (idx.fixtureSerial == null) return { ok: false, error: '模板缺少「夹具编号」列（填夹具编号）' };
 
     const ex = existing || {};
     const lineByName = new Map((ex.lines || []).map((l) => [l.name, l]));
     const lineIdToName = new Map((ex.lines || []).map((l) => [l.id, l.name]));
-    const stByKey = new Map((ex.stations || []).map((s) => [(lineIdToName.get(s.lineId) || '') + '\u0000' + s.name, s]));
-    const stById = new Map((ex.stations || []).map((s) => [s.id, s]));
     // 实物编号 → 夹具记录（允许重复，重复时无法唯一定位）
     const fixBySerial = new Map();
     (ex.fixtures || []).forEach((f) => {
@@ -5289,23 +5163,17 @@
     });
 
     const newLines = new Map();     // lineName -> { name, type }
-    const newStations = new Map();  // lineName|stationName -> { lineName, name, seq }
     const appends = [];
     const skipped = [];
     const planSeen = new Set();     // 「文件内重复行」判定
 
-    /* 每套夹具的「虚拟状态」：现有产线名集合 + 工位键集合（含计划内新增） */
+    /* 每套夹具的「虚拟产线名集合」（含计划内新增） */
     const vstate = new Map();
     const stateOf = (f) => {
       if (!vstate.has(f.id)) {
         const lineNames = new Set((Array.isArray(f.lines) ? f.lines : [])
           .map((id) => lineIdToName.get(Number(id))).filter(Boolean));
-        const stKeys = new Set((Array.isArray(f.stations) ? f.stations : [])
-          .map((id) => {
-            const o = stById.get(Number(id));
-            return o ? ((lineIdToName.get(o.lineId) || '') + '\u0000' + o.name) : null;
-          }).filter(Boolean));
-        vstate.set(f.id, { lineNames, stKeys });
+        vstate.set(f.id, { lineNames });
       }
       return vstate.get(f.id);
     };
@@ -5316,10 +5184,9 @@
       const row = rows[r];
       if (!row || !row.some((c) => String(c == null ? '' : c).trim() !== '')) continue; // 全空行
       const lineName = val(row, 'line');
-      const stationName = val(row, 'station');
       const serialNo = val(row, 'fixtureSerial');
-      if (!lineName || !stationName) { skipped.push({ row: r + 1, reason: '线体 / 工位 有空缺' }); continue; }
-      if (!serialNo) { skipped.push({ row: r + 1, reason: '夹具编号（夹具编号）为空' }); continue; }
+      if (!lineName) { skipped.push({ row: r + 1, reason: '线体为空' }); continue; }
+      if (!serialNo) { skipped.push({ row: r + 1, reason: '夹具编号为空' }); continue; }
 
       const hits = fixBySerial.get(serialNo) || [];
       if (!hits.length) { skipped.push({ row: r + 1, reason: '夹具「' + serialNo + '」未建档' }); continue; }
@@ -5328,24 +5195,17 @@
         continue;
       }
       const f = hits[0];
-      const sKey = lineName + '\u0000' + stationName;
-      const rowKey = f.id + '\u0000' + sKey;
+      const rowKey = f.id + '\u0000' + lineName;
       if (planSeen.has(rowKey)) { skipped.push({ row: r + 1, reason: '文件中重复行' }); continue; }
       planSeen.add(rowKey);
 
       const vs = stateOf(f);
-      const addLine = !vs.lineNames.has(lineName);
-      const addStation = !vs.stKeys.has(sKey);
-      if (!addLine && !addStation) {
-        skipped.push({ row: r + 1, reason: '夹具「' + serialNo + '」已关联该产线/工位（无新增，已忽略）' });
+      if (vs.lineNames.has(lineName)) {
+        skipped.push({ row: r + 1, reason: '夹具「' + serialNo + '」已关联产线「' + lineName + '」（无新增，已忽略）' });
         continue;
       }
-      if (addLine && vs.lineNames.size >= MAX_LINES) {
+      if (vs.lineNames.size >= MAX_LINES) {
         skipped.push({ row: r + 1, reason: '夹具「' + serialNo + '」关联产线已达上限 ' + MAX_LINES + ' 条' });
-        continue;
-      }
-      if (addStation && vs.stKeys.size >= MAX_STATIONS) {
-        skipped.push({ row: r + 1, reason: '夹具「' + serialNo + '」关联工位已达上限 ' + MAX_STATIONS + ' 个' });
         continue;
       }
 
@@ -5354,38 +5214,23 @@
       if (!lineByName.has(lineName) && !newLines.has(lineName)) {
         newLines.set(lineName, { name: lineName, type: lineType });
       }
-      if (!stByKey.has(sKey) && !newStations.has(sKey)) {
-        const seqRaw = val(row, 'seq');
-        const seq = seqRaw === '' ? null : Number(seqRaw);
-        newStations.set(sKey, { lineName, name: stationName, seq: Number.isFinite(seq) ? seq : null });
-      }
 
-      if (addLine) vs.lineNames.add(lineName);
-      if (addStation) vs.stKeys.add(sKey);
-      appends.push({
-        row: r + 1, fixtureId: f.id, code: f.code, serialNo,
-        lineName, stationName, addLine, addStation
-      });
+      vs.lineNames.add(lineName);
+      appends.push({ row: r + 1, fixtureId: f.id, code: f.code, serialNo, lineName });
     }
 
-    if (!newLines.size && !newStations.size && !appends.length) {
+    if (!newLines.size && !appends.length) {
       return {
         ok: false,
         skipped,
-        error: '没有可导入的有效数据行（需「线体 / 工位 / 已建档的夹具编号」三者齐全且能定位到唯一一套夹具）'
+        error: '没有可导入的有效数据行（需「线体 / 已建档的夹具编号」两者齐全且能定位到唯一一套夹具）'
       };
     }
-    return {
-      ok: true,
-      newLines: Array.from(newLines.values()),
-      newStations: Array.from(newStations.values()),
-      appends,
-      skipped
-    };
+    return { ok: true, newLines: Array.from(newLines.values()), appends, skipped };
   }
 
-  /* 落库：① 补建线体/工位（名称复用）② 把「产线 + 工位」追加进对应夹具记录（去重）
-   * ⚠️ 全程只做 **push**，绝不覆盖夹具原有的 lines / stations。
+  /* 落库：① 补建线体（名称复用）② 把产线追加进对应夹具记录（去重）
+   * ⚠️ 全程只做 **push**，绝不覆盖夹具原有的 lines。
    * 返回的对象里带 undo 信息，供「撤销本次导入」精确回滚。 */
   async function applyLineImportPlan(plan) {
     const lineIdByName = new Map((state.lines || []).map((l) => [l.name, l.id]));
@@ -5396,62 +5241,39 @@
       createdLineIds.push(id);
     }
 
-    const lineIdToName = new Map((state.lines || []).map((l) => [l.id, l.name]));
-    lineIdByName.forEach((id, name) => lineIdToName.set(id, name));
-
-    const stIdByKey = new Map();
-    (state.stations || []).forEach((s) => stIdByKey.set((lineIdToName.get(s.lineId) || '') + '\u0000' + s.name, s.id));
-    const createdStationIds = [];
-    for (const s of plan.newStations) {
-      const lineId = lineIdByName.get(s.lineName);
-      if (!lineId) continue;
-      const id = await DB.add('stations', { lineId, name: s.name, seq: s.seq, remark: '导入创建', createdAt: Date.now() });
-      stIdByKey.set(s.lineName + '\u0000' + s.name, id);
-      createdStationIds.push(id);
-    }
-
-    // 按夹具聚合要追加的 lineId / stationId
+    // 按夹具聚合要追加的 lineId
     const byFix = new Map();
     for (const a of plan.appends) {
       const lineId = lineIdByName.get(a.lineName);
-      const sid = stIdByKey.get(a.lineName + '\u0000' + a.stationName);
-      if (!lineId || !sid) continue;
-      if (!byFix.has(a.fixtureId)) byFix.set(a.fixtureId, { lineIds: new Set(), stationIds: new Set(), code: a.code, serialNo: a.serialNo });
-      const g = byFix.get(a.fixtureId);
-      if (a.addLine) g.lineIds.add(lineId);
-      if (a.addStation) g.stationIds.add(sid);
+      if (!lineId) continue;
+      if (!byFix.has(a.fixtureId)) byFix.set(a.fixtureId, { lineIds: new Set(), code: a.code, serialNo: a.serialNo });
+      byFix.get(a.fixtureId).lineIds.add(lineId);
     }
 
-    const undo = [];   // [{ id, code, serialNo, lineIds:[], stationIds:[] }]
-    let applied = 0, linesAdded = 0, stationsAdded = 0;
+    const undo = [];   // [{ id, code, serialNo, lineIds:[] }]
+    let applied = 0, linesAdded = 0;
     for (const [fid, g] of byFix.entries()) {
       const f = (state.fixtures || []).find((x) => x.id === fid);
       if (!f) continue;
       const lines = (Array.isArray(f.lines) ? f.lines : []).map(Number).slice();
-      const stations = (Array.isArray(f.stations) ? f.stations : []).map(Number).slice();
-      const addL = [], addS = [];
+      const addL = [];
       g.lineIds.forEach((id) => {
         if (lines.indexOf(id) < 0 && lines.length < MAX_LINES) { lines.push(id); addL.push(id); }
       });
-      g.stationIds.forEach((id) => {
-        if (stations.indexOf(id) < 0 && stations.length < MAX_STATIONS) { stations.push(id); addS.push(id); }
-      });
-      if (!addL.length && !addS.length) continue;
-      await DB.fixtureUpdate({ id: f.id, lines, stations });
+      if (!addL.length) continue;
+      await DB.fixtureUpdate({ id: f.id, lines });
       // 同步本地快照，保证同一批内多行继续追加时读到的是最新值
-      f.lines = lines; f.stations = stations;
+      f.lines = lines;
       applied++;
       linesAdded += addL.length;
-      stationsAdded += addS.length;
-      undo.push({ id: f.id, code: f.code, serialNo: f.serialNo || '', lineIds: addL, stationIds: addS });
+      undo.push({ id: f.id, code: f.code, serialNo: f.serialNo || '', lineIds: addL });
     }
 
     return {
       lines: plan.newLines.length,
-      stations: plan.newStations.length,
       appends: plan.appends.length,
-      applied, linesAdded, stationsAdded,
-      undo: { fixtures: undo, createdLineIds, createdStationIds }
+      applied, linesAdded,
+      undo: { fixtures: undo, createdLineIds }
     };
   }
 
@@ -5464,29 +5286,27 @@
           <thead><tr><th>项目</th><th style="width:70px">数量</th><th>说明</th></tr></thead>
           <tbody>
             <tr><td>新建线体</td><td>${plan.newLines.length}</td><td>${esc(plan.newLines.map((l) => l.name).join('、') || '—')}</td></tr>
-            <tr><td>新建工位</td><td>${plan.newStations.length}</td><td>${esc(plan.newStations.map((s) => s.lineName + '/' + s.name).join('、') || '—')}</td></tr>
-            <tr><td>追加关联</td><td>${plan.appends.length}</td><td>向夹具记录<b>追加</b>产线/工位，不覆盖原有内容</td></tr>
+            <tr><td>追加关联</td><td>${plan.appends.length}</td><td>向夹具记录<b>追加</b>产线，不覆盖原有内容</td></tr>
           </tbody>
         </table>
       </div>
       <div style="margin-top:10px;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
         <table style="margin:0;">
-          <thead><tr><th>行号</th><th>夹具编号</th><th>名称</th><th>线体</th><th>工位</th><th style="width:150px">动作</th></tr></thead>
+          <thead><tr><th>行号</th><th>夹具编号</th><th>名称</th><th>线体</th><th style="width:110px">动作</th></tr></thead>
           <tbody>
             ${rowsPreview.map((a) => `<tr>
               <td>${a.row}</td>
               <td>${esc(a.serialNo)}</td>
               <td>${esc(((state.fixtures || []).find((x) => x.id === a.fixtureId) || {}).name || '—')}</td>
               <td>${esc(a.lineName)}</td>
-              <td>${esc(a.stationName)}</td>
-              <td class="muted">${[a.addLine ? '新增产线' : '', a.addStation ? '新增工位' : ''].filter(Boolean).join(' + ') || '—'}</td>
+              <td class="muted">新增产线</td>
             </tr>`).join('')}
           </tbody>
         </table>
       </div>
       ${plan.appends.length > rowsPreview.length ? `<p class="muted" style="margin:6px 0 0;">仅预览前 ${rowsPreview.length} 行，实际将处理全部 ${plan.appends.length} 行。</p>` : ''}
-      ${plan.skipped.length ? `<div class="tip" style="margin-top:8px;">跳过 ${plan.skipped.length} 行：${esc(plan.skipped.slice(0, 10).map((s) => '第 ' + s.row + ' 行(' + s.reason + ')').join('、'))}${plan.skipped.length > 10 ? ' 等' : ''}</div>` : ''}
-      <p class="muted" style="margin:8px 0 0;">同名线体/工位已存在时直接复用。「夹具编号」按<b>夹具编号</b>匹配，重复导入同一文件不会产生重复关联。</p>
+      ${plan.skipped.length ? `<div class="tip" style="margin-top:8px;">跳过 ${plan.skipped.length} 行：${esc(plan.skipped.slice(0, 10).map((x) => '第 ' + x.row + ' 行(' + x.reason + ')').join('、'))}${plan.skipped.length > 10 ? ' 等' : ''}</div>` : ''}
+      <p class="muted" style="margin:8px 0 0;">同名线体已存在时直接复用。「夹具编号」按<b>夹具编号</b>匹配，重复导入同一文件不会产生重复关联。旧模板里的「工位 / 工位顺序」列会被忽略。</p>
       <div class="form-actions">
         <button class="btn primary" onclick="confirmLineImport()">确认导入</button>
         <button class="btn ghost" onclick="closeModal()">取消</button>
@@ -5507,11 +5327,11 @@
       else if (state.view === 'linequery') await renderLineQuery();
       else if (state.view === 'fixtures') renderFixtures();
       // 记录撤销信息，供「撤销本次导入」精确回滚
-      window.__lineImportUndo = (st.applied && (st.linesAdded || st.stationsAdded)) ? st.undo : null;
+      window.__lineImportUndo = (st.applied && st.linesAdded) ? st.undo : null;
       if (st.applied) {
         openModal('导入完成', `
-          <p>已为 <b>${st.applied}</b> 套夹具追加关联：新增产线 <b>${st.linesAdded}</b> 条、新增工位 <b>${st.stationsAdded}</b> 个；新建线体 <b>${st.lines}</b> 个、新建工位 <b>${st.stations}</b> 个。</p>
-          <p class="muted">如需回退，可点「撤销本次导入」精确移除本次追加的关联（不会影响夹具原有的产线与工位）。</p>
+          <p>已为 <b>${st.applied}</b> 套夹具追加关联：新增产线 <b>${st.linesAdded}</b> 条；新建线体 <b>${st.lines}</b> 个。</p>
+          <p class="muted">如需回退，可点「撤销本次导入」精确移除本次追加的关联（不会影响夹具原有的产线）。</p>
           <div class="form-actions">
             <button class="btn danger" onclick="undoLineImport()">↩ 撤销本次导入</button>
             <button class="btn primary" onclick="closeModal()">知道了</button>
@@ -5524,36 +5344,22 @@
     }
   };
 
-  /* 撤销本次导入：精确摘除本次追加的产线/工位，并回收本次新建且已无人使用的结构项 */
+  /* 撤销本次导入：精确摘除本次追加的产线，并回收本次新建且已无人使用的线体 */
   window.undoLineImport = async function () {
     const u = window.__lineImportUndo;
     if (!u) { toast('没有可撤销的导入记录', 'warn'); return; }
     window.__lineImportUndo = null;
-    const removedLines = new Set(u.fixtures.flatMap((f) => f.lineIds));
     try {
-      // ① 先摘产线（连带摘掉该产线下本次新加的工位）
+      // ① 按产线批量摘除本次追加的关联
+      const removedLines = Array.from(new Set(u.fixtures.flatMap((f) => f.lineIds)));
       for (const lineId of removedLines) {
-        const codes = u.fixtures.filter((f) => f.lineIds.includes(lineId)).map((f) => f.code);
+        const codes = u.fixtures.filter((f) => f.lineIds.indexOf(lineId) >= 0).map((f) => f.code);
         if (codes.length) await DB.removeFixtureLinesByBatch({ codes, lineId });
       }
-      // ② 再摘「不属于已移除产线」的工位
-      for (const f of u.fixtures) {
-        for (const sid of f.stationIds) {
-          if (removedLines.has(sid)) continue;
-          const st = (state.stations || []).find((s) => s.id === sid);
-          if (st && removedLines.has(st.lineId)) continue;
-          try { await DB.removeFixtureStation({ code: f.code, stationId: sid }); } catch (e) { /* 已不存在则忽略 */ }
-        }
-      }
-      // ③ 回收本次新建的结构项（此时若无任何夹具引用即删除）
+      // ② 回收本次新建的线体（此时若无任何夹具引用即删除）
       await reloadAll();
-      for (const sid of u.createdStationIds) {
-        const used = (state.fixtures || []).some((f) => Array.isArray(f.stations) && f.stations.map(Number).includes(Number(sid)));
-        if (!used) { try { await DB.stationDel(sid); } catch (e) { /* 忽略 */ } }
-      }
       for (const lid of u.createdLineIds) {
-        const used = (state.fixtures || []).some((f) => Array.isArray(f.lines) && f.lines.map(Number).includes(Number(lid)))
-          || (state.stations || []).some((s) => Number(s.lineId) === Number(lid));
+        const used = (state.fixtures || []).some((f) => Array.isArray(f.lines) && f.lines.map(Number).indexOf(Number(lid)) >= 0);
         if (!used) { try { await DB.lineDel(lid); } catch (e) { /* 忽略 */ } }
       }
       closeModal();
@@ -5597,22 +5403,21 @@
       }
     } catch (e) { toast('解析失败：' + (e && e.message ? e.message : e), 'err'); return; }
 
-    const plan = buildLineImportPlan(rows, { lines: state.lines, stations: state.stations, fixtures: state.fixtures });
+    const plan = buildLineImportPlan(rows, { lines: state.lines, fixtures: state.fixtures });
     if (!plan.ok) { toast(plan.error, 'err'); return; }
     window.showLineImportPreview(plan, picked.name);
   };
 
   /* 下载产线配置导入模板
-   * 语义：一行 = 「把某套夹具挂到某条产线的某个工位上」（追加式） */
+   * 语义：一行 = 「把某套夹具关联到某条产线」（追加式） */
   window.downloadLineTemplate = function () {
     const sample = [
-      ['L1 总装线', '直线形', '上料工位', '10', 'DH40MC-921-001-001', '夹具编号填夹具编号'],
-      ['L1 总装线', '直线形', '压装工位', '20', 'DH40MC-921-001-001', '同一套夹具挂到第二个工位（追加）'],
-      ['L1 总装线', '直线形', '检测工位', '30', 'XXK-D10VG-002', ''],
-      ['L2 U型线', 'U型', '工位一', '10', 'XXK-D10VG-002', '同一套夹具再挂到另一条产线']
+      ['L1 总装线', '直线形', 'DH40MC-921-001-001', '夹具编号填夹具编号'],
+      ['L1 总装线', '直线形', 'XXK-D10VG-002', ''],
+      ['L2 U型线', 'U型', 'XXK-D10VG-002', '同一套夹具再关联到另一条产线']
     ];
     const lines = [LINE_IMPORT_HEADERS.join(','), ...sample.map((r) => r.map((v) => /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v).join(','))];
-    download('产线配置导入模板.csv', '﻿' + lines.join('\r\n'));
+    download('产线配置导入模板.csv', '\ufeff' + lines.join('\r\n'));
     toast('模板已下载，填好后用「⬆ 导入Excel/CSV」导入', 'ok');
   };
 
@@ -5661,6 +5466,9 @@
     if (e.key === 'Escape') { closeModal(); return; }
     if (e.key !== 'Enter') return;
     const id = (e.target && e.target.id) || '';
+    /* 刷卡框的回车由 bindSwipe 自己处理（识别卡号 + 跳到另一位）；
+       这里再兜一层：只要带 data-swipe 就绝不触发提交。 */
+    if (e.target && e.target.dataset && e.target.dataset.swipe) return;
     if (/^out_/.test(id)) { e.preventDefault(); submitOutDo(); }
     else if (/^return_/.test(id)) { e.preventDefault(); submitReturnDo(); }
   }

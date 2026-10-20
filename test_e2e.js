@@ -1,24 +1,26 @@
 'use strict';
 /* ============================================================
- * test_e2e.js — 真实运行测试（v4.0.0）
+ * test_e2e.js — 真实运行测试（v5.2.0）
  * 启动真实 Electron 窗口 → 加载 index.html → 驱动 UI 走完整业务流程
  * → 主进程侧读取 JSON 数据文件校验结果 → 捕获所有 console 错误
  *
- * 覆盖顺序（v4 关键约束：建档强校验要求「≥1 产线 ≥1 工位」，
- *   因此必须先建产线配置，再建档）：
+ * 覆盖顺序（v5 关键约束：建档强校验只要求「≥1 产线」，工位模型已移除，
+ *   因此必须先建线体，再建档）：
  *   0  启动与版本
  *   1  showView 全局挂载
- *   2  产线配置（线体 + 工位）
- *   3  夹具建档（含 7 条强校验的 UI 落地）
- *   4  出库（库位冻结）
+ *   2  产线配置（只有线体，无工位；表头含 v5.2.0 的「机种名称」列）
+ *   2.5 人员卡库（v5.1.0：刷卡前置数据，卡号唯一）
+ *   3  夹具建档（含强校验的 UI 落地）
+ *   3.5 线体 ↔ 机种 派生列（v5.2.0：产线配置「机种名称」= 夹具 lineModels 汇总）
+ *   4  出库（库位冻结 + 刷卡严格校验：未登记 / 同卡 / 角色不符都拒）
  *   5  回库（可改库位，写回 location）
  *   6  重复出库/回库 3 轮
  *   7  送修 / 维修完成
  *   8  报废
  *   9  搜索 / 二维码标签 / 视图切换 / 流水 / 仪表盘
  *   10 库位管理（卡片数字 = 在库套数）
- *   11 产线使用（只读、无产品级联、示意图）
- *   12 机种管理 / 按机种查询
+ *   11 产线使用（只读、无产品级联、无工位/示意图；v5.1.0 打印清单入口）
+ *   12 机种管理 / 机种明细（v5.2.0 表头含「线体」列，与产线配置互逆）
  *   13 清空数据落盘 + 重启恢复
  *   14 运行期错误捕获
  *
@@ -74,12 +76,18 @@ const HELPERS = `
     sel.value=v; sel.dispatchEvent(new Event('change')); return true; };
   const btnByText=(t)=>$$('button').find(b=>b.textContent.includes(t));
   const btnByOnclick=(fn)=>$$('button').find(b=>String(b.getAttribute('onclick')||'').startsWith(fn));
+  /* v5.1.0 刷卡：USB 读卡器 = 键盘模拟，写入卡号后派发 Enter 即等价于刷一次卡 */
+  const swipe=(sel,card)=>{ const el=$(sel); if(!el) return false;
+    el.focus(); el.value=card; el.dispatchEvent(new Event('input'));
+    el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    return true; };
   const idFromOnclick=(b,fn)=>Number(String((b&&b.getAttribute('onclick'))||'').match(new RegExp(fn+'\\\\((\\\\d+)\\\\)'))[1]);
 `;
 
-/* 建档工具：按实物编号建一套夹具（自动选产线 + 勾工位）
-   ⚠️ 产线/工位都以**名称**传入：`#fix_line_pick` 只存在于表单弹窗内，
-      必须在 openFixForm 之后才能读到线体 id，不能在弹窗外预先解析。 */
+/* 建档工具：按夹具编号建一套夹具（自动选产线）
+   ⚠️ 产线以**名称**传入：`#fix_line_pick` 只存在于表单弹窗内，
+      必须在 openFixForm 之后才能读到线体 id，不能在弹窗外预先解析。
+   v5.0.0：工位模型已移除，不再有 #fix_st_pick / 工位勾选步骤。 */
 const NEW_FIXTURE_FN = `
   async function newFixture(o) {
     window.showView('fixtures'); await sleep(150);
@@ -96,25 +104,10 @@ const NEW_FIXTURE_FN = `
       const opt = sel ? [...sel.options].find((x) => x.textContent.includes(nm)) : null;
       if (!opt) { diag.push('no-line:' + nm); continue; }
       sel.value = opt.value; window.fixFormLinePicked(); await sleep(160);
+      /* v5.0.0：fixFormLinePicked 只记住下拉选择，必须再点「+ 添加」才会进入标签区 */
+      window.fixFormAddLine(); await sleep(160);
     }
-    for (const nm of (o.stations || [])) {
-      /* 工位下拉只列「当前所选产线」的工位 → 逐条产线找同名工位再「+ 添加」
-         ⚠️ fixFormLinePicked() 会整体重绘 #fix_ls_box，旧 select 节点立即游离，
-            因此每轮必须先重新查询 #fix_line_pick，不能缓存元素引用。 */
-      let done = false;
-      const lineOpts = [...(($('#fix_line_pick') || {}).options || [])].map((x) => ({ v: x.value }));
-      for (const lo of lineOpts) {
-        if (!lo.v) continue;
-        const lp = $('#fix_line_pick'); if (!lp) continue;
-        lp.value = lo.v; window.fixFormLinePicked(); await sleep(140);
-        const sp = $('#fix_st_pick');
-        const so = sp ? [...sp.options].find((x) => x.textContent.includes(nm)) : null;
-        if (!so || !so.value) continue;
-        sp.value = so.value; window.fixFormAddStation(); await sleep(140);
-        done = true; break;
-      }
-      if (!done) diag.push('no-station:' + nm);
-    }
+    if ($('#fix_st_pick')) diag.push('station-picker-still-present');
     const selCount = (($('#fix_ls_count')||{}).textContent||'');
     window.submitFixForm();
     /* 建档是异步的（IPC + 首次落盘可能 >500ms）⇒ 轮询等弹窗关闭，别用固定 sleep 造成假失败 */
@@ -194,8 +187,8 @@ async function main() {
   ok('点击出库页「清除已选内容」不报错', svRes.btnClick === 'OK', svRes.btnClick);
   ok('旧视图名 showView(\'prodquery\') 平滑落到机种管理', svRes.aliasProdQuery === 'OK', svRes.aliasProdQuery);
 
-  /* ---------- 2. 产线配置（v4：建档前必须先有产线与工位） ---------- */
-  section('2. 产线配置（线体 + 工位）');
+  /* ---------- 2. 产线配置（v5：只有线体，工位模型已移除） ---------- */
+  section('2. 产线配置（仅线体）');
   const cfgRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     const out = {};
@@ -215,30 +208,21 @@ async function main() {
 
     out.lineRows = $$('#content tbody tr').length;
 
-    /* 选中 L1 → 建 2 个工位 */
+    /* 选中 L1 → 面板只展示该线体的夹具数量 */
     const pickBtns = $$('button').filter(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgPickLine'));
     out.pickBtnCount = pickBtns.length;
     const l1Id = idFromOnclick(pickBtns.find(b=>b.closest('tr').textContent.includes('L1 总装线')), 'lineCfgPickLine');
     const l2Id = idFromOnclick(pickBtns.find(b=>b.closest('tr').textContent.includes('L2 U型线')), 'lineCfgPickLine');
     out.l1Id = l1Id; out.l2Id = l2Id;
     window.lineCfgPickLine(l1Id); await sleep(400);
-    for (const [nm, seq] of [['上料工位','10'],['压装工位','20']]) {
-      window.lineCfgStationForm(0); await sleep(150);
-      setV('#lc_st_name', nm); setV('#lc_st_seq', seq);
-      window.lineCfgSaveStation(0); await sleep(400);
-    }
-    /* 切到 L2 → 建 3 个工位（U型图用） */
-    window.lineCfgPickLine(l2Id); await sleep(400);
-    for (const [nm, seq] of [['左一','10'],['底一','20'],['右一','30']]) {
-      window.lineCfgStationForm(0); await sleep(150);
-      setV('#lc_st_name', nm); setV('#lc_st_seq', seq);
-      window.lineCfgSaveStation(0); await sleep(400);
-    }
-    /* 工位面板为只读：无绑定表单，操作列是「编辑夹具 / 编辑工位 / 删除」 */
-    const rowBtns = $$('button').filter(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgStationEditFixtures'));
-    out.editFixBtnCount = rowBtns.length;
-    out.hasBindForm = $$('button').some(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgBindForm'));
-    out.readonlyHead = (($('#content')||{}).textContent||'').includes('只读关联');
+    const bodyTxt = (($('#content')||{}).textContent||'');
+    out.pickedMarked = bodyTxt.includes('已选');
+    /* v5.0.0：工位相关 UI 一律不存在 */
+    out.hasStationForm = $$('button').some(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgStationForm'));
+    out.hasStationBind = $$('button').some(b=>String(b.getAttribute('onclick')||'').startsWith('lineCfgBindForm'));
+    out.hasStationText = /工位/.test(bodyTxt);
+    out.hasDiagram = $$('#content svg').length;
+    out.headText = (($('#content thead')||{}).textContent||'').replace(/\\s+/g,'');
     return out;
   })()`);
   ok('产线配置页可进入', cfgRes.navOk === true, cfgRes.navOk);
@@ -247,14 +231,17 @@ async function main() {
     JSON.stringify(cfgRes.typeOpts) === JSON.stringify(['linear', 'u']), cfgRes.typeOpts);
   ok('线体表渲染 2 行', cfgRes.lineRows === 2, String(cfgRes.lineRows));
   ok('线体行含「选择」按钮', cfgRes.pickBtnCount >= 2, String(cfgRes.pickBtnCount));
-  ok('工位面板标题标注「只读关联」', cfgRes.readonlyHead === true);
-  ok('工位行渲染「编辑夹具」按钮（3 个工位）', cfgRes.editFixBtnCount === 3, String(cfgRes.editFixBtnCount));
-  ok('工位面板已无「配置夹具」绑定表单（v3 的 stationFixtures 入口已删）',
-    cfgRes.hasBindForm === false, String(cfgRes.hasBindForm));
+  ok('点「选择」后该行标记为「已选」', cfgRes.pickedMarked === true);
+  ok('v5：工位表单入口已移除（无 lineCfgStationForm）', cfgRes.hasStationForm === false, String(cfgRes.hasStationForm));
+  ok('v5：工位绑定表单已移除（无 lineCfgBindForm）', cfgRes.hasStationBind === false, String(cfgRes.hasStationBind));
+  ok('v5：产线配置页正文不再出现「工位」字样', cfgRes.hasStationText === false);
+  ok('v5：产线配置页不再渲染任何示意图（无 svg）', cfgRes.hasDiagram === 0, String(cfgRes.hasDiagram));
+  ok('线体表头 = 选用 / 线体名称 / 形态 / 关联夹具 / 机种名称 / 备注 / 操作',
+    ['选用', '线体名称', '形态', '关联夹具', '机种名称', '备注', '操作'].every((h) => cfgRes.headText.includes(h)), cfgRes.headText);
 
   const dbCfg = readDb();
   ok('lines 已落盘 2 条', (dbCfg.lines || []).length === 2, String((dbCfg.lines || []).length));
-  ok('stations 已落盘 5 个', (dbCfg.stations || []).length === 5, String((dbCfg.stations || []).length));
+  ok('v5：数据文件不再有 stations 集合', dbCfg.stations === undefined, Object.keys(dbCfg));
   ok('U型线体落盘 type=u', (dbCfg.lines || []).some((l) => l.type === 'u'));
   ok('v4：数据文件不再有 products 集合', dbCfg.products === undefined, Object.keys(dbCfg));
   ok('v4：数据文件不再有 stationFixtures 集合', dbCfg.stationFixtures === undefined, Object.keys(dbCfg));
@@ -262,8 +249,67 @@ async function main() {
 
   const cfg = { l1: cfgRes.l1Id, l2: cfgRes.l2Id };
 
+  /* ---------- 2.5 人员卡库（v5.1.0：刷卡前置数据） ---------- */
+  section('2.5 人员卡库（卡号 → 姓名 / 角色，刷卡的前置数据）');
+  const staffRes = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const out = {};
+    window.showView('staff'); await sleep(450);
+    out.navOk = ((($('#viewTitle')||{}).textContent)||'').includes('人员卡库');
+    out.emptyBefore = (($('#staff_table_box')||{}).textContent||'').includes('还没有登记');
+    const addStaff = async (card, name, dept, role) => {
+      window.staffForm(0); await sleep(200);
+      setV('#st_card', card); setV('#st_name', name); setV('#st_dept', dept);
+      const rs = $('#st_role'); if (rs) rs.value = role;
+      await window.submitStaffForm(0);
+      for (let i = 0; i < 30; i++) { await sleep(80); if ($('#modalOverlay').hidden) break; }
+      await sleep(180);
+    };
+    await addStaff('OP-0001', '王经办', '仓库', 'operator');
+    await addStaff('BR-0001', '李领用', '生产一车间', 'borrower');
+    await addStaff('BOTH01', '张全能', '装配车间', 'both');
+    out.rows = $$('#staff_table_box tbody tr').length;
+    out.tableText = (($('#staff_table_box')||{}).textContent||'');
+
+    /* 重复卡号（大小写 + 分隔符写法不同，归一化后同号）→ 输入时提示、保存时拦截 */
+    window.staffForm(0); await sleep(200);
+    setV('#st_card', 'op0001'); setV('#st_name', '冒充者');
+    const cardEl = $('#st_card');
+    cardEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await sleep(180);
+    out.dupMark = (($('#st_card_state')||{}).textContent||'');
+    await window.submitStaffForm(0); await sleep(320);
+    out.dupBlocked = $('#modalOverlay').hidden === false;
+    out.dupToast = (($('#toast')||{}).textContent||'');
+    window.closeModal(); await sleep(150);
+    out.rowsAfter = $$('#staff_table_box tbody tr').length;
+
+    /* 搜索过滤 */
+    setV('#staff_kw', '李领用'); await sleep(220);
+    out.filterRows = $$('#staff_table_box tbody tr').length;
+    window.staffQueryClear(); await sleep(150);
+    return out;
+  })()`);
+  ok('人员卡库页可进入', staffRes.navOk === true, staffRes.navOk);
+  ok('初始为空态提示', staffRes.emptyBefore === true);
+  ok('界面新增 3 张卡后表格 3 行', staffRes.rows === 3, String(staffRes.rows));
+  ok('表格显示卡号 / 姓名 / 角色',
+    /OP-0001/.test(staffRes.tableText) && /王经办/.test(staffRes.tableText) && /经办人/.test(staffRes.tableText));
+  ok('重复卡号在录入时即提示「已登记给」', /已登记给/.test(staffRes.dupMark || ''), staffRes.dupMark);
+  ok('重复卡号保存被拒（弹窗保持打开）', staffRes.dupBlocked === true);
+  ok('重复卡号提示写明已登记人', /已登记给「王经办」/.test(staffRes.dupToast || ''), staffRes.dupToast);
+  ok('被拒后人数未增加', staffRes.rowsAfter === 3, String(staffRes.rowsAfter));
+  ok('按姓名搜索命中 1 条', staffRes.filterRows === 1, String(staffRes.filterRows));
+
+  const dbStaff = readDb();
+  ok('staffs 已落盘 3 条', (dbStaff.staffs || []).length === 3, String((dbStaff.staffs || []).length));
+  ok('落盘角色覆盖 operator / borrower / both',
+    ['operator', 'borrower', 'both'].every((r) => (dbStaff.staffs || []).some((x) => x.role === r)),
+    (dbStaff.staffs || []).map((x) => x.role));
+  ok('落盘均默认启用', (dbStaff.staffs || []).every((x) => x.active === true));
+
   /* ---------- 3. 夹具建档 ---------- */
-  section('3. 夹具建档（7 条强校验的 UI 落地）');
+  section('3. 夹具建档（强校验的 UI 落地）');
   const formRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     const out = {};
@@ -271,13 +317,14 @@ async function main() {
     window.fixtureNew(); await sleep(250);
     out.fields = ['#fix_serial','#fix_name','#fix_lm_text','#fix_loc','#fix_cat','#fix_ls_box','#fix_remark']
       .every(s=>!!$(s));
+    out.hasStationPicker = !!$('#fix_st_pick');
     out.labelText = (($('#modalBody')||{}).textContent||'');
-    /* 未选产线/工位直接提交 → 必须被拒 */
+    /* 未选产线直接提交 → 必须被拒 */
     setV('#fix_serial','SN-DENY'); setV('#fix_name','缺产线夹具'); setV('#fix_loc','ZP1-U-9-9');
     setV('#fix_lm_text','WJ-100'); window.fixFormModelsInput(); await sleep(80);
     window.submitFixForm(); await sleep(350);
     const toastTxt1 = (($('#toast')||{}).textContent||'');
-    out.deniedNoLine = /至少选择 1 个工位|至少选择 1 条产线/.test(toastTxt1);
+    out.deniedNoLine = /至少选择 1 条产线/.test(toastTxt1);
     out.deniedStillOpen = $('#modalOverlay').hidden === false;
     window.closeModal(); await sleep(120);
     /* 非法库位被拒 */
@@ -285,9 +332,7 @@ async function main() {
     setV('#fix_serial','SN-BAD'); setV('#fix_name','非法库位'); setV('#fix_loc','A-9');
     setV('#fix_lm_text','WJ-100'); window.fixFormModelsInput(); await sleep(60);
     const sel0 = $('#fix_line_pick'); sel0.value=String(${cfg.l1}); window.fixFormLinePicked(); await sleep(120);
-    const st0 = $('#fix_st_pick');
-    if (st0 && st0.options[1]) { st0.value = st0.options[1].value; window.fixFormAddStation(); }
-    await sleep(120);
+    window.fixFormAddLine(); await sleep(150);
     window.submitFixForm(); await sleep(350);
     out.deniedBadLoc = /4 段式/.test((($('#toast')||{}).textContent||''));
     window.closeModal(); await sleep(120);
@@ -302,16 +347,18 @@ async function main() {
     return out;
   })()`);
   ok('建档表单字段齐全', formRes.fields === true);
-  ok('表单标注「≥1 产线 ≥1 工位 · ≤5 产线 ≤10 工位」',
-    /≥1 产线 ≥1 工位/.test(formRes.labelText) && /≤5 产线 ≤10 工位/.test(formRes.labelText),
+  ok('v5：表单已无工位选择控件（#fix_st_pick）', formRes.hasStationPicker === false, String(formRes.hasStationPicker));
+  ok('表单标注「关联产线（≥1 条 · ≤5 条）」',
+    /关联产线/.test(formRes.labelText) && /≥1 条/.test(formRes.labelText) && /≤5 条/.test(formRes.labelText),
     (formRes.labelText || '').slice(0, 120));
-  ok('零产线零工位提交被拒（弹窗保持打开）', formRes.deniedNoLine === true && formRes.deniedStillOpen === true);
+  ok('表单正文不再出现「工位」字样', !/工位/.test(formRes.labelText), (formRes.labelText || '').slice(0, 160));
+  ok('零产线提交被拒（弹窗保持打开）', formRes.deniedNoLine === true && formRes.deniedStillOpen === true);
   ok('非法库位（A-9）提交被拒', formRes.deniedBadLoc === true);
   ok('机种最多 7 个：第 8 个被截断', formRes.chipCount === 7, String(formRes.chipCount));
   ok('机种计数文案 7 / 7', formRes.lmCountText === '7 / 7', formRes.lmCountText);
   ok('机种超过 7 个时给出截断提示', /超过 7 个/.test(formRes.lmHint || ''), formRes.lmHint);
 
-  /* 正式建 4 套（第 4 套与第 1 套同实物编号，验证「多套追踪」） */
+  /* 正式建 4 套（第 4 套与第 1 套同夹具编号，验证「多套追踪」） */
   const mkRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     ${NEW_FIXTURE_FN}
@@ -319,34 +366,39 @@ async function main() {
     const r = {};
     r.detail = [];
     r.a = await newFixture({ serialNo:'DH40MC-921-001-001', name:'定位销压板', location:'ZP1-U-1-1', cat:'冲压',
-      models:['DH40MC','DH40MC-B'], lines:['L1 总装线'], stations:['上料工位'], remark:'建档测试A' });
+      models:['DH40MC','DH40MC-B'], lines:['L1 总装线'], remark:'建档测试A' });
     r.detail.push(r.a);
     r.b = await newFixture({ serialNo:'XXK-D10VG-002', name:'焊接夹具B', location:'ZP1-U-1-2', cat:'焊接',
-      models:['XXK-D10VG'], lines:['L1 总装线'], stations:['压装工位'] });
+      models:['XXK-D10VG'], lines:['L1 总装线'] });
     r.detail.push(r.b);
     r.c = await newFixture({ serialNo:'SN-C-003', name:'装配工装C', location:'ZP1-U-1-3', cat:'装配',
-      models:['ASSY-01'], lines:['L2 U型线'], stations:['左一'] });
+      models:['ASSY-01'], lines:['L2 U型线'] });
     r.detail.push(r.c);
     r.d = await newFixture({ serialNo:'DH40MC-921-001-001', name:'定位销压板', location:'ZP1-U-1-9', cat:'冲压',
-      models:['DH40MC'], lines:['L1 总装线'], stations:['上料工位'] });
+      models:['DH40MC'], lines:['L1 总装线'] });
     r.detail.push(r.d);
     r.a = r.a.ok; r.b = r.b.ok; r.c = r.c.ok; r.d = r.d.ok;
     r.cards = $$('#fixture_list .fixture-card').length;
     return r;
   })()`);
-  ok('建档 A（DH40MC-921-001-001 / L1·上料工位）成功', mkRes.a === true, JSON.stringify(mkRes.detail && mkRes.detail[0]));
-  ok('建档 B（XXK-D10VG-002 / L1·压装工位）成功', mkRes.b === true, JSON.stringify(mkRes.detail && mkRes.detail[1]));
-  ok('建档 C（SN-C-003 / L2·左一）成功', mkRes.c === true, JSON.stringify(mkRes.detail && mkRes.detail[2]));
-  ok('同实物编号可再建一套（多套追踪）', mkRes.d === true, JSON.stringify(mkRes.detail && mkRes.detail[3]));
+  ok('建档 A（DH40MC-921-001-001 / L1 总装线）成功', mkRes.a === true, JSON.stringify(mkRes.detail && mkRes.detail[0]));
+  ok('建档 B（XXK-D10VG-002 / L1 总装线）成功', mkRes.b === true, JSON.stringify(mkRes.detail && mkRes.detail[1]));
+  ok('建档 C（SN-C-003 / L2 U型线）成功', mkRes.c === true, JSON.stringify(mkRes.detail && mkRes.detail[2]));
+  ok('同夹具编号可再建一套（多套追踪）', mkRes.d === true, JSON.stringify(mkRes.detail && mkRes.detail[3]));
+  ok('建档全流程未出现工位相关的失败诊断',
+    (mkRes.detail || []).every((x) => !(x && x.diag || []).some((d) => /station/i.test(d))),
+    JSON.stringify((mkRes.detail || []).map((x) => x && x.diag)));
   ok('卡片视图渲染 4 张卡', mkRes.cards === 4, String(mkRes.cards));
 
   const db3 = readDb();
   ok('fixtures 落盘 4 条', db3.fixtures.length === 4, String(db3.fixtures.length));
   ok('序号为 4 位纯数字', db3.fixtures.every((f) => /^\d{4}$/.test(String(f.code))), db3.fixtures.map((f) => f.code));
   ok('序号互不相同', new Set(db3.fixtures.map((f) => String(f.code))).size === 4);
-  ok('每条夹具都落盘了 lines / stations 数组',
-    db3.fixtures.every((f) => Array.isArray(f.lines) && f.lines.length >= 1 && Array.isArray(f.stations) && f.stations.length >= 1),
-    db3.fixtures.map((f) => [f.lines, f.stations]));
+  ok('每条夹具都落盘了 lines 数组（≥1 条产线）',
+    db3.fixtures.every((f) => Array.isArray(f.lines) && f.lines.length >= 1),
+    db3.fixtures.map((f) => f.lines));
+  ok('v5：夹具记录不再落盘 stations 字段',
+    db3.fixtures.every((f) => f.stations === undefined), db3.fixtures.map((f) => Object.keys(f).includes('stations')));
   ok('夹具记录无 quantity / qty 存储字段（数量为派生值）',
     db3.fixtures.every((f) => f.quantity === undefined && f.qty === undefined));
   ok('夹具记录不再落盘 qrToken', db3.fixtures.every((f) => f.qrToken === undefined));
@@ -380,6 +432,36 @@ async function main() {
   ok('编辑弹窗标题显示实物编号', /SN-C-003/.test(editRes.title), editRes.title);
   ok('编辑保存后弹窗关闭', editRes.closed === true);
 
+  /* ---------- 3.5 线体 ↔ 机种 派生列（v5.2.0） ---------- */
+  section('3.5 线体 ↔ 机种 派生列（两列都由夹具现算，不新增存储字段）');
+  const crossRes = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const out = {};
+    /* ① 产线配置：线体 → 机种名称（夹具 a/b/d 在 L1，夹具 c 在 L2） */
+    window.showView('linecfg'); await sleep(450);
+    out.lcHead = ((($('#content thead')||{}).textContent)||'').replace(/\\s+/g,'');
+    const trOf = (nm) => $$('#content tbody tr').find(tr=>tr.textContent.includes(nm));
+    const r1 = trOf('L1 总装线'), r2 = trOf('L2 U型线');
+    out.colCount = r1 ? r1.children.length : -1;
+    out.l1Cell = r1 ? r1.children[4].textContent.trim() : '(未找到 L1 行)';
+    out.l2Cell = r2 ? r2.children[4].textContent.trim() : '(未找到 L2 行)';
+    /* 派生列不应写库：机种仍在夹具的 lineModels 上，lines 集合没有机种字段 */
+    return out;
+  })()`);
+  ok('产线配置表头含新增的「机种名称」列', crossRes.lcHead.includes('机种名称'), crossRes.lcHead);
+  ok('线体表列数 = 7（选用 / 线体名称 / 形态 / 关联夹具 / 机种名称 / 备注 / 操作）',
+    crossRes.colCount === 7, String(crossRes.colCount));
+  ok('L1 的机种名称 = DH40MC / DH40MC-B / XXK-D10VG（去重 + 自然序，/ 分隔）',
+    crossRes.l1Cell === 'DH40MC / DH40MC-B / XXK-D10VG', crossRes.l1Cell);
+  ok('L2 的机种名称 = ASSY-01（只算挂在该线上的夹具）', crossRes.l2Cell === 'ASSY-01', crossRes.l2Cell);
+
+  const db35 = readDb();
+  ok('派生列不落库：lines 记录仍只有 name/type/remark（无机种字段）',
+    (db35.lines || []).every((l) => l.models === undefined && l.lineModels === undefined && l.productions === undefined),
+    (db35.lines || []).map((l) => Object.keys(l)));
+  ok('派生列不落库：夹具仍只在 lineModels 上存机种',
+    (db35.fixtures || []).every((f) => Array.isArray(f.lineModels)));
+
   /* ---------- 4. 出库（库位冻结） ---------- */
   section('4. 出库流程');
   const outRes = await wc.executeJavaScript(`(async () => {
@@ -390,17 +472,40 @@ async function main() {
     const btn = [...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
     if (!btn) return { err:'卡片无出库按钮' };
     btn.click(); await sleep(300);
-    const hasOp = !!$('#fix_out_op');
+    const out = {};   // 刷卡校验用例的容器
+    const hasOp = !!$('#swipe_dlg_operator');
     const hasLocInput = !!$('#fix_out_loc');
     if (hasOp) {
-      setV('#fix_out_op','李四'); setV('#fix_out_party','生产一车间'); setV('#fix_out_remark','首次领用');
+      /* ① 未登记的卡 → 必须被拒 */
+      swipe('#swipe_dlg_party','NOCARD-X'); swipe('#swipe_dlg_operator','OP-0001');
+      btnByText('确认出库').click(); await sleep(350);
+      out.unknownBlocked = ('#modalOverlay' && !$('#modalOverlay').hidden) && /未登记/.test((($('#toast')||{}).textContent||''));
+      out.unknownToast = (($('#toast')||{}).textContent||'');
+      /* ② 同一张卡刷两个位 → 必须被拒（用「两者皆可」的卡，否则会先被角色校验拦下） */
+      swipe('#swipe_dlg_party','BOTH01'); swipe('#swipe_dlg_operator','BOTH01');
+      btnByText('确认出库').click(); await sleep(350);
+      out.sameCardBlocked = /同一个人（同一张卡）/.test((($('#toast')||{}).textContent||''));
+      /* ③ 角色不符：领用位刷「经办人」角色的卡 */
+      swipe('#swipe_dlg_party','OP-0001');
+      out.roleBlocked = /不能作为领用人/.test((($('#swipe_dlg_party_tip')||{}).textContent||''));
+      out.roleTip = (($('#swipe_dlg_party_tip')||{}).textContent||'');
+      /* ④ 正常刷卡：领用人 BR-0001 + 经办人 OP-0001 */
+      swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
+      out.partyState = (($('#swipe_dlg_party_state')||{}).textContent||'');
+      out.opState = (($('#swipe_dlg_operator_state')||{}).textContent||'');
+      setV('#fix_out_remark','首次领用');
       btnByText('确认出库').click();
     }
     await sleep(650);
-    return { hasOp, hasLocInput };
+    return Object.assign({ hasOp, hasLocInput }, out);
   })()`);
   ok('出库弹窗打开且字段存在', outRes.hasOp === true, JSON.stringify(outRes));
   ok('建档已填库位 → 出库弹窗无需补填库位', outRes.hasLocInput === false, String(outRes.hasLocInput));
+  ok('v5.1.0：未登记卡号被拒（弹窗未提交）', outRes.unknownBlocked === true, outRes.unknownToast);
+  ok('v5.1.0：同一张卡刷两个位被拒', outRes.sameCardBlocked === true);
+  ok('v5.1.0：角色不符被拒（领用位刷「经办人」的卡）', outRes.roleBlocked === true, outRes.roleTip);
+  ok('v5.1.0：刷卡成功后领用人位显示姓名', /李领用/.test(outRes.partyState || ''), outRes.partyState);
+  ok('v5.1.0：刷卡成功后经办人位显示姓名', /王经办/.test(outRes.opState || ''), outRes.opState);
   ok('数据文件已生成于隔离目录', fs.existsSync(dataFile), dataFile);
 
   const db4 = readDb();
@@ -410,8 +515,10 @@ async function main() {
   ok('出库冻结库位（location 不变）', outFix && outFix.location === 'ZP1-U-1-1', outFix && outFix.location);
   const txOut = db4.fixTransactions.find((t) => t.fixtureCode === String(codeOf['ZP1-U-1-1']) && t.type === 'out');
   ok('出库流水已写入', !!txOut);
-  ok('流水经办人 = 李四', txOut && txOut.operator === '李四', txOut && txOut.operator);
-  ok('流水领用人 = 生产一车间', txOut && txOut.counterparty === '生产一车间', txOut && txOut.counterparty);
+  ok('流水经办人 = 王经办（刷卡带出，非手填）', txOut && txOut.operator === '王经办', txOut && txOut.operator);
+  ok('流水经办人卡号 = OP0001（归一化后落库）', txOut && txOut.operatorCard === 'OP0001', txOut && txOut.operatorCard);
+  ok('流水领用人 = 李领用（刷卡带出）', txOut && txOut.counterparty === '李领用', txOut && txOut.counterparty);
+  ok('流水领用人卡号 = BR0001（归一化后落库）', txOut && txOut.partyCard === 'BR0001', txOut && txOut.partyCard);
   ok('流水状态迁移 stocked → checked_out', txOut && txOut.fromStatus === 'stocked' && txOut.toStatus === 'checked_out');
   ok('流水带库位快照 from/to = ZP1-U-1-1',
     txOut && txOut.fromLocation === 'ZP1-U-1-1' && txOut.toLocation === 'ZP1-U-1-1', txOut && [txOut.fromLocation, txOut.toLocation]);
@@ -440,7 +547,7 @@ async function main() {
     rb.click(); await sleep(320);
     const hasLocField = !!$('#fix_return_loc');
     if (hasLocField) setV('#fix_return_loc','ZP1-U-2-2');
-    setV('#fix_return_op','王五');
+    swipe('#swipe_rdlg_party','BR-0001'); swipe('#swipe_rdlg_operator','OP-0001');
     const btn=btnByText('确认回库');
     if (btn) btn.click();
     await sleep(800);
@@ -456,7 +563,7 @@ async function main() {
   ok('回库后状态 = stocked', retFix && retFix.status === 'stocked', retFix && retFix.status);
   ok('回库次数 = 1', retFix && retFix.totalReturnCount === 1, retFix && String(retFix.totalReturnCount));
   ok('回库库位写回 location（ZP1-U-1-1 → ZP1-U-2-2）', retFix && retFix.location === 'ZP1-U-2-2', retFix && retFix.location);
-  const txRet = db5.fixTransactions.find((t) => t.type === 'return' && t.operator === '王五');
+  const txRet = db5.fixTransactions.find((t) => t.type === 'return' && t.operator === '王经办');
   ok('回库流水已写入', !!txRet);
   ok('流水记录库位变更 from ZP1-U-1-1 → to ZP1-U-2-2',
     txRet && txRet.fromLocation === 'ZP1-U-1-1' && txRet.toLocation === 'ZP1-U-2-2', txRet && [txRet.fromLocation, txRet.toLocation]);
@@ -468,7 +575,8 @@ async function main() {
     const ob=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
     if (!ob) return false;
     ob.click(); await sleep(300);
-    setV('#fix_out_op','李四'); btnByText('确认出库').click(); await sleep(600);
+    swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
+    btnByText('确认出库').click(); await sleep(600);
     /* 再以非法库位回库（卡片弹窗路径，v4.0.4 改库位入口） */
     card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
     const rb=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='回库');
@@ -477,7 +585,7 @@ async function main() {
     const loc=$('#fix_return_loc');
     const hadField = !!loc;
     if (loc) setV('#fix_return_loc','BAD');
-    setV('#fix_return_op','王五');
+    swipe('#swipe_rdlg_party','BR-0001'); swipe('#swipe_rdlg_operator','OP-0001');
     btnByText('确认回库').click(); await sleep(650);
     /* 校验失败时弹窗保持打开，关闭后继续后续流程 */
     if (window.closeModal) { window.closeModal(); await sleep(150); }
@@ -495,7 +603,7 @@ async function main() {
     const box=$('#return_code'); box.value='XXK-D10VG-002'; box.dispatchEvent(new Event('input')); await sleep(400);
     $$('.return-pick').forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
     await sleep(150);
-    setV('#return_operator','王五');
+    swipe('#swipe_ret_party','BR-0001'); swipe('#swipe_ret_operator','OP-0001');
     btnByText('提交回库').click(); await sleep(650);
   })()`);
 
@@ -508,7 +616,7 @@ async function main() {
       const card=$$('.fixture-card').find(c=>c.textContent.includes('DH40MC-921-001-001'));
       [...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库').click();
       await sleep(280);
-      setV('#fix_out_op','李四');
+      swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
       btnByText('确认出库').click();
       await sleep(550);
       window.showView('return'); await sleep(300);
@@ -520,7 +628,7 @@ async function main() {
       if (!picks.length) throw new Error('第 ' + ${i + 1} + ' 轮未渲染出回库候选');
       picks.forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
       await sleep(150);
-      setV('#return_operator','王五');
+      swipe('#swipe_ret_party','BR-0001'); swipe('#swipe_ret_operator','OP-0001');
       const rbtn=btnByText('提交回库');
       if (!rbtn) throw new Error('第 ' + ${i + 1} + ' 轮未找到提交回库按钮');
       rbtn.click();
@@ -634,16 +742,19 @@ async function main() {
     const nRetired=$$('#fixture_list .fixture-card').length;
     await search('不存在的夹具XYZ');
     const empty=!!$('#fixture_list .empty-tip');
+    await search('L1 总装线');
+    const nByLine=$$('#fixture_list .fixture-card').length;
     await search('上料工位');
     const nByStation=$$('#fixture_list .fixture-card').length;
     await search('');
     const n2=$$('#fixture_list .fixture-card').length;
-    return {n1, nRetired, empty, nByStation, n2};
+    return {n1, nRetired, empty, nByLine, nByStation, n2};
   })()`);
-  ok('按实物编号搜索命中 2 套（同编号多套）', searchRes.n1 === 2, JSON.stringify(searchRes));
-  ok('按实物编号搜索命中已报废套', searchRes.nRetired === 1, String(searchRes.nRetired));
+  ok('按夹具编号搜索命中 2 套（同编号多套）', searchRes.n1 === 2, JSON.stringify(searchRes));
+  ok('按夹具编号搜索命中已报废套', searchRes.nRetired === 1, String(searchRes.nRetired));
   ok('无结果显示空提示', searchRes.empty === true);
-  ok('支持按工位名搜索（产线/工位维度的模糊检索）', searchRes.nByStation === 2, String(searchRes.nByStation));
+  ok('支持按产线名搜索（3 套挂在 L1 总装线）', searchRes.nByLine === 3, String(searchRes.nByLine));
+  ok('v5：工位名不再参与检索（搜「上料工位」命中 0）', searchRes.nByStation === 0, String(searchRes.nByStation));
   ok('清空搜索恢复全部 4 条', searchRes.n2 === 4, String(searchRes.n2));
 
   /* 库位管理（卡片数字 = 在库套数） */
@@ -763,7 +874,7 @@ async function main() {
       sample: rows.length>1 ? rows[1].textContent.replace(/\\s+/g,' ').trim().slice(0,60) : ''
     };
     const box=$('#rec_search');
-    box.value='李四'; box.dispatchEvent(new Event('input')); await sleep(300);
+    box.value='王经办'; box.dispatchEvent(new Event('input')); await sleep(300);
     out.n1=$$('#rec_list .tx-row').filter(r=>!r.classList.contains('tx-header')).length;
     box.value=''; box.dispatchEvent(new Event('input')); await sleep(300);
     out.n2=$$('#rec_list .tx-row').filter(r=>!r.classList.contains('tx-header')).length;
@@ -792,7 +903,7 @@ async function main() {
   ok('仪表盘含 v4 数据模型说明（数量为派生值）', dashRes.hasModel === true, dashRes.text.slice(0, 120));
 
   /* ---------- 10. 产线使用 ---------- */
-  section('10. 产线使用（只读 / 无产品级联 / 示意图）');
+  section('10. 产线使用（只读 / 无产品级联 / 无工位与示意图）');
   const lqRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('linequery'); await sleep(700);
@@ -806,46 +917,98 @@ async function main() {
     const bodyL1=(($('#lq_body')||{}).textContent||'');
     out.l1HasSerial=bodyL1.includes('DH40MC-921-001-001');
     out.l1ReadonlyTip=bodyL1.includes('只读');
-    out.l1SvgLines=$$('#lq_body svg line.ld-track').length;
-    out.l1SvgPoly=$$('#lq_body svg polyline.ld-track').length;
-    out.l1Title=(($('#lq_body .ld-title')||{}).textContent||'');
+    out.l1HasStationWord=/工位/.test(bodyL1);
+    out.l1Svg=$$('#lq_body svg').length;
     out.l1Count=(($('#lq_count')||{}).textContent||'');
     out.hasGotoProd=$$('button').some(b=>String(b.getAttribute('onclick')||'').includes("showView('prod')"));
+    /* ---------- v5.2.1 BUG-012：机种下拉筛选（此前任何含字母的机种恒 0 条） ---------- */
+    out.modelDisabled = !!$('#lq_model').disabled;
+    out.modelOptCount = $$('#lq_model option').length;
+    out.modelDefault = $('#lq_model').value;
+    const mSel = $('#lq_line').value ? $('#lq_model') : null;
+    /* helper：选一个机种 → 返回渲染行数与正文 */
+    async function pickModel(m) {
+      const s=$('#lq_model');
+      const o=$$('#lq_model option').find(x=>x.value===m);
+      if (!o) return { missing:true, value:s.value };
+      s.value=o.value; s.dispatchEvent(new Event('change')); await sleep(400);
+      return {
+        value: $('#lq_model').value,
+        rows: $$('#lq_body table tbody tr').length,
+        text: (($('#lq_body')||{}).textContent||''),
+        count: (($('#lq_count')||{}).textContent||'')
+      };
+    }
+    /* L1 上 3 套：DH40MC-921-001-001(DH40MC+DH40MC-B) / XXK-D10VG-002(XXK-D10VG) / DH40MC-921-001-001(DH40MC) */
+    out.mDH40MC   = await pickModel('DH40MC');
+    out.mDH40MCB  = await pickModel('DH40MC-B');
+    out.mXXK      = await pickModel('XXK-D10VG');
+    out.mASSY     = await pickModel('ASSY-01');   // 该机种在 L2，不在 L1 ⇒ 应为 0 条 + 空提示
+    out.mDummy     = await pickModel('DH40');      // 下拉里不存在该值 ⇒ 不得命中 DH40MC
+    window.lineQueryReset(); await sleep(400);
+    out.afterReset = $('#lq_model').value;
+    out.rowsAfterReset = $$('#lq_body table tbody tr').length;
     /* 切到 U 型线 */
     const sel=$('#lq_line');
     const uOpt=$$('#lq_line option').find(o=>o.textContent.includes('U型'));
     if (uOpt) { sel.value=uOpt.value; sel.dispatchEvent(new Event('change')); await sleep(500); }
     out.rowsL2=$$('#lq_body table tbody tr').length;
-    out.l2SvgPoly=$$('#lq_body svg polyline.ld-track').length;
-    out.l2SvgLines=$$('#lq_body svg line.ld-track').length;
-    out.l2Title=(($('#lq_body .ld-title')||{}).textContent||'');
     out.l2HasRetired=(($('#lq_body')||{}).textContent||'').includes('SN-C-003');
     out.hasResetBtn=!!btnByText('重置筛选');
+    out.hasPrintBtn=!!btnByText('打印清单');
+    out.hasPrintArea=!!$('#printListArea');
     return out;
   })()`);
   ok('查询页可进入', lqRes.navOk === true, lqRes.navOk);
   ok('线体下拉 = 2 条线体 + 1 占位 = 3 项', lqRes.lineOptCount === 3, String(lqRes.lineOptCount));
   ok('v4：产品级联下拉已移除（无 #lq_product）', lqRes.hasProductSelect === false, String(lqRes.hasProductSelect));
-  ok('结果表为 7 列，且「序号」排在「夹具编号」之前（工位名称/工位顺序/序号/夹具编号/夹具名称/状态/备注）',
-    ['工位名称', '工位顺序', '序号', '夹具编号', '夹具名称', '状态', '备注'].every((h) => lqRes.headText.includes(h))
+  ok('结果表为 7 列（序号/夹具编号/名称/机种名称/库位/状态/操作）',
+    ['序号', '夹具编号', '名称', '机种名称', '库位', '状态', '操作'].every((h) => lqRes.headText.includes(h))
       && lqRes.headText.indexOf('序号') < lqRes.headText.indexOf('夹具编号'),
     lqRes.headText);
-  ok('L1 配置表渲染 3 行（上料工位 2 套 → 2 行，压装工位 1 套 → 1 行）', lqRes.rowsL1 === 3, String(lqRes.rowsL1));
+  ok('v5：结果表头已无「工位」列',
+    !lqRes.headText.includes('工位名称') && !lqRes.headText.includes('工位顺序'), lqRes.headText);
+  ok('L1 上线 3 套夹具 → 渲染 3 行（按套一行，不再按工位拆行）', lqRes.rowsL1 === 3, String(lqRes.rowsL1));
   ok('表格显示实物夹具编号', lqRes.l1HasSerial === true);
   ok('页面提示「只读」视图', lqRes.l1ReadonlyTip === true);
-  ok('直线形用折线轨迹（line.ld-track）', lqRes.l1SvgLines >= 1, String(lqRes.l1SvgLines));
-  ok('直线形不使用 polyline 轨迹', lqRes.l1SvgPoly === 0, String(lqRes.l1SvgPoly));
-  ok('L1 图标题含「直线形」', lqRes.l1Title.includes('直线形'), lqRes.l1Title);
-  ok('统计文案含工位与夹具数量', /工位\s*2\s*个/.test(lqRes.l1Count) && /本线关联/.test(lqRes.l1Count), lqRes.l1Count);
-  ok('L2 U型线配置表渲染 3 行', lqRes.rowsL2 === 3, String(lqRes.rowsL2));
-  ok('U型使用 polyline 轨迹', lqRes.l2SvgPoly === 1, String(lqRes.l2SvgPoly));
-  ok('U型不使用 line 轨迹', lqRes.l2SvgLines === 0, String(lqRes.l2SvgLines));
-  ok('L2 图标题含「U型」', lqRes.l2Title.includes('U型'), lqRes.l2Title);
+  ok('v5：正文不再出现「工位」字样', lqRes.l1HasStationWord === false);
+  ok('v5：产线使用页不再渲染示意图（无 svg）', lqRes.l1Svg === 0, String(lqRes.l1Svg));
+  ok('统计文案含夹具套数与在库套数',
+    /夹具\s*3\s*套/.test(lqRes.l1Count) && /在库\s*3\s*套/.test(lqRes.l1Count), lqRes.l1Count);
+  ok('L2 U型线上线 1 套 → 1 行', lqRes.rowsL2 === 1, String(lqRes.rowsL2));
   ok('报废夹具仍出现在产线视图中（状态列区分）', lqRes.l2HasRetired === true);
   ok('存在「重置筛选」按钮', lqRes.hasResetBtn === true);
   ok('存在「🏷 机种管理」跳转按钮', lqRes.hasGotoProd === true);
+  ok('v5.1.0：「🖨 打印清单」按钮存在', lqRes.hasPrintBtn === true);
+  ok('v5.1.0：清单打印容器 #printListArea 存在', lqRes.hasPrintArea === true);
 
-  /* ---------- 11. 机种管理（v4.5.0 已合并按机种查询：点机种名展开线体/工位明细） ---------- */
+  /* ---------- v5.2.1 BUG-012 回归：机种下拉筛选 ---------- */
+  ok('选定线体后机种下拉可用（未 disabled）', lqRes.modelDisabled === false, String(lqRes.modelDisabled));
+  ok('机种下拉 = 「全部机种」+ 全库 4 个机种 = 5 项', lqRes.modelOptCount === 5, String(lqRes.modelOptCount));
+  ok('机种下拉默认为「全部机种」（空值）', lqRes.modelDefault === '', JSON.stringify(lqRes.modelDefault));
+  ok('选 DH40MC → L1 命中 2 套（BUG-012 修复前为 0）',
+    lqRes.mDH40MC && !lqRes.mDH40MC.missing && lqRes.mDH40MC.rows === 2,
+    JSON.stringify({ rows: lqRes.mDH40MC && lqRes.mDH40MC.rows, count: lqRes.mDH40MC && lqRes.mDH40MC.count }));
+  ok('选 DH40MC → 正文含该机种两套的编号且不含 XXK 夹具',
+    !!lqRes.mDH40MC && lqRes.mDH40MC.text.includes('DH40MC-921-001-001')
+      && !lqRes.mDH40MC.text.includes('XXK-D10VG-002'),
+    lqRes.mDH40MC && lqRes.mDH40MC.text.slice(0, 120));
+  ok('选 DH40MC → 统计文案套数同步收敛为 2',
+    !!lqRes.mDH40MC && /夹具\s*2\s*套/.test(lqRes.mDH40MC.count), lqRes.mDH40MC && lqRes.mDH40MC.count);
+  ok('选 DH40MC-B → 精确等值只命中 1 套（不被 DH40MC 包含关系带出）',
+    lqRes.mDH40MCB && lqRes.mDH40MCB.rows === 1, JSON.stringify(lqRes.mDH40MCB && lqRes.mDH40MCB.rows));
+  ok('选 XXK-D10VG → L1 命中 1 套', lqRes.mXXK && lqRes.mXXK.rows === 1, JSON.stringify(lqRes.mXXK && lqRes.mXXK.rows));
+  ok('选 XXK-D10VG → 正文含该夹具编号',
+    !!lqRes.mXXK && lqRes.mXXK.text.includes('XXK-D10VG-002'), lqRes.mXXK && lqRes.mXXK.text.slice(0, 80));
+  ok('选本线不存在的机种 ASSY-01 → 0 条并给出空提示（不是静默空白）',
+    lqRes.mASSY && lqRes.mASSY.rows === 0 && /没有|暂无|无符合|0 套/.test(lqRes.mASSY.text),
+    JSON.stringify({ rows: lqRes.mASSY && lqRes.mASSY.rows, text: lqRes.mASSY && lqRes.mASSY.text.slice(0, 120) }));
+  ok('精确匹配：下拉里不存在的「DH40」不会被自动选中（不回落成命中 DH40MC）',
+    lqRes.mDummy && lqRes.mDummy.missing === true, JSON.stringify(lqRes.mDummy));
+  ok('「重置筛选」把机种复位为全部 → 恢复 3 行', lqRes.afterReset === '' && lqRes.rowsAfterReset === 3,
+    JSON.stringify({ v: lqRes.afterReset, rows: lqRes.rowsAfterReset }));
+
+  /* ---------- 11. 机种管理（v4.5.0 已合并按机种查询：点机种名展开线体明细） ---------- */
   section('11. 机种管理与机种明细');
   const prodRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
@@ -859,6 +1022,16 @@ async function main() {
     if (out.hasAdoptBtn) { window.prodAdoptOrphans(); await sleep(600); }
     const t2=($('#content')||{}).textContent||'';
     out.rowsAfterAdopt = $$('#content tbody tr').length;
+    /* v5.2.0：机种 → 线体 派生列（补登后字典齐了才能按名称定位行） */
+    out.headText = ((($('#content thead')||{}).textContent)||'').replace(/\\s+/g,'');
+    const pickRow = (nm) => $$('#content tbody tr').find(tr=>{
+      const a = tr.querySelector('a.prod-pick');
+      return a && a.textContent.trim() === nm;
+    });
+    const pr = pickRow('DH40MC'), pa = pickRow('ASSY-01');
+    out.cellCount = pr ? pr.children.length : -1;
+    out.lineCellDH40 = pr ? pr.children[1].textContent.trim() : '(未找到 DH40MC 行)';
+    out.lineCellASSY = pa ? pa.children[1].textContent.trim() : '(未找到 ASSY-01 行)';
     /* 新建一个机种 */
     window.prodForm(0); await sleep(250);
     out.formOk = !!$('#prod_name') && !!$('#prod_order');
@@ -876,6 +1049,12 @@ async function main() {
   ok('机种管理页识别「孤儿机种」（夹具在用但字典未登记）', prodRes.hasOrphan === true && prodRes.orphanShown === true, JSON.stringify(prodRes));
   ok('「一键补登」按钮存在', prodRes.hasAdoptBtn === true);
   ok('补登后机种字典列出 4 条以上', prodRes.rowsAfterAdopt >= 4, String(prodRes.rowsAfterAdopt));
+  ok('机种管理表头含新增的「线体」列', prodRes.headText.includes('线体'), prodRes.headText);
+  ok('机种表列数 = 6（机种名称 / 线体 / 关联夹具 / 在库套数 / 排序号 / 操作）',
+    prodRes.cellCount === 6, String(prodRes.cellCount));
+  ok('DH40MC 的线体 = L1 总装线（与产线配置「机种名称」列互逆）',
+    prodRes.lineCellDH40 === 'L1 总装线', prodRes.lineCellDH40);
+  ok('ASSY-01 的线体 = L2 U型线', prodRes.lineCellASSY === 'L2 U型线', prodRes.lineCellASSY);
   ok('机种表单字段齐全（名称 + 排序号）', prodRes.formOk === true);
   ok('新建机种 ZZZ-NEW 成功', prodRes.createdZZZ === true);
   ok('被夹具引用的机种禁止删除（提示无法删除）', /无法删除|仍被/.test(prodRes.delGuardText), prodRes.delGuardText.slice(0, 120));
@@ -886,7 +1065,7 @@ async function main() {
     db11.productions && db11.productions[0]);
 
   /* v4.5.0：不再有独立「按机种查询」页 —— 机种管理里点机种名称，
-     下方展开「线体 → 工位 → 夹具」明细；再点一次收起。 */
+     下方展开「线体 → 夹具」明细；再点一次收起。v5.0.0 去掉了工位列。 */
   const pqRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('prod'); await sleep(600);
@@ -900,6 +1079,7 @@ async function main() {
     out.detailShown=!!$('#prod_detail');
     const dt=(($('#prod_detail')||{}).textContent||'');
     out.detailText=dt.replace(/\\s+/g,'');
+    out.hasStationWord=/工位/.test(dt);
     out.groups=$$('#prod_detail .pq-head').map(x=>x.textContent.replace(/\\s+/g,' ').trim());
     out.headText=(($('#prod_detail thead')||{}).textContent||'').replace(/\\s+/g,'');
     out.rowCount=$$('#prod_detail table tbody tr').length;
@@ -916,9 +1096,10 @@ async function main() {
   ok('机种名称渲染为可点击链接', pqRes.pickLinks >= 3, String(pqRes.pickLinks));
   ok('点机种名称 → 下方出现明细面板', pqRes.detailShown === true);
   ok('明细按线体分组（含 L1 总装线）', pqRes.groups.some((g) => g.includes('L1 总装线')), JSON.stringify(pqRes.groups));
-  ok('明细表头含「工位 / 夹具编号 / 库位 / 状态」',
-    ['工位', '夹具编号', '库位', '状态'].every((h) => pqRes.headText.includes(h)), pqRes.headText);
-  ok('明细里能看到具体工位名（上料工位 / 压装工位）', /上料工位|压装工位/.test(pqRes.detailText), pqRes.detailText.slice(0, 160));
+  ok('明细表头含「夹具编号 / 名称 / 库位 / 状态」',
+    ['夹具编号', '名称', '库位', '状态'].every((h) => pqRes.headText.includes(h)), pqRes.headText);
+  ok('v5：明细表头不再有「工位」列', !pqRes.headText.includes('工位'), pqRes.headText);
+  ok('v5：明细正文不再出现「工位」字样', pqRes.hasStationWord === false, pqRes.detailText.slice(0, 160));
   ok('明细列出夹具实物编号', pqRes.detailText.includes('DH40MC-921-001-001'), pqRes.detailText.slice(0, 160));
   ok('选中机种行高亮', pqRes.pickedRow === 1, String(pqRes.pickedRow));
   ok('再次点击同一机种 → 明细收起', pqRes.collapsed === true);
@@ -934,7 +1115,7 @@ async function main() {
     window.setFixViewMode('card'); await sleep(250);
     out.beforeCards = $$('.fixture-card').length;
     out.made = await newFixture({ serialNo:'DEL-TEST-001', name:'待删除夹具', location:'ZP1-U-3-1', cat:'金属',
-      models:['DH40MC'], lines:['L1 总装线'], stations:['上料工位'] });
+      models:['DH40MC'], lines:['L1 总装线'] });
     window.showView('fixtures'); await sleep(300);
     window.setFixViewMode('card'); await sleep(250);
     const card = $$('.fixture-card').find(c => c.textContent.includes('DEL-TEST-001'));
@@ -951,14 +1132,13 @@ async function main() {
     const ob = pickBtn(cardOf(), '出库');
     if (!ob) return { err:'卡片无出库按钮', made: out.made };
     ob.click(); await sleep(320);
-    setV('#fix_out_op','测试员');
-    if ($('#fix_out_party')) setV('#fix_out_party','测试车间');
+    swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
     btnByText('确认出库').click(); await waitModal();
 
     const rb = pickBtn(cardOf(), '回库');
     if (!rb) return { err:'卡片无回库按钮', made: out.made };
     rb.click(); await sleep(320);
-    setV('#fix_return_op','测试员');
+    swipe('#swipe_rdlg_party','BR-0001'); swipe('#swipe_rdlg_operator','OP-0001');
     btnByText('确认回库').click(); await waitModal();
 
     const delBtn2 = pickBtn(cardOf(), '删除');
@@ -1008,18 +1188,18 @@ async function main() {
     String(dbDel.fixTransactions.filter((t) => t.fixtureId === delPre.id).length));
 
   /* ---------- 11.6 导入 → 撤销 → 回收自动补建结构（v4.5.1 BUG-011） ---------- */
-  section('11.6 撤销导入回收自动补建的产线 / 工位');
+  section('11.6 撤销导入回收自动补建的产线');
   const dbImpBefore = readDb();
   const impRun = await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('fixtures'); await sleep(200);
     /* buildImportPlan 未挂 window，这里直接构造落库计划：
-       只验「补建结构 → 落库 → 撤销 → 回收」这条链路（解析/归并由 test_import 覆盖） */
+       只验「补建结构 → 落库 → 撤销 → 回收」这条链路（解析/归并由 test_import 覆盖）
+       v5.0.0：计划里只有 lineNames，不再有 linePairs / stationNames。 */
     window.__importPlan = [{
       row: 2, isDup: false,
       fixture: { serialNo: 'ZZ-IMP-001', name: '导入回收集合', lineModels: ['DH40MC'], category: '金属',
-        location: 'ZP1-U-9-9', remark: '', lineNames: ['E2E临时线'],
-        linePairs: [{ lineName: 'E2E临时线', stationNames: ['1号工位', '2号工位'] }] }
+        location: 'ZP1-U-9-9', remark: '', lineNames: ['E2E临时线'] }
     }];
     await confirmImportPlan('all');
     await sleep(700);
@@ -1031,20 +1211,18 @@ async function main() {
   const impFixture = dbImpAfter.fixtures.find((f) => f.serialNo === 'ZZ-IMP-001') || null;
   const impBatch = impFixture ? impFixture.importBatch : '';
   const impLine = dbImpAfter.lines.find((l) => l.name === 'E2E临时线') || null;
-  ok('导入后新建了 1 条产线 / 2 个工位 / 1 套夹具',
+  ok('导入后新建了 1 条产线 / 1 套夹具（不再补建工位）',
     dbImpAfter.lines.length === dbImpBefore.lines.length + 1
-    && dbImpAfter.stations.length === dbImpBefore.stations.length + 2
     && dbImpAfter.fixtures.length === dbImpBefore.fixtures.length + 1,
     JSON.stringify({ lines: [dbImpBefore.lines.length, dbImpAfter.lines.length],
-      stations: [dbImpBefore.stations.length, dbImpAfter.stations.length],
       fixtures: [dbImpBefore.fixtures.length, dbImpAfter.fixtures.length] }));
-  ok('补建的工位都挂在该线体下',
-    !!impLine && dbImpAfter.stations.filter((s) => s.lineId === impLine.id).length === 2,
-    impLine ? JSON.stringify(dbImpAfter.stations.filter((s) => s.lineId === impLine.id)) : 'line=null');
+  ok('导入补建的产线带「导入自动建档」备注', !!impLine && impLine.remark === '导入自动建档',
+    impLine && impLine.remark);
+  ok('v5：导入不会产生 stations 集合', dbImpAfter.stations === undefined, Object.keys(dbImpAfter));
   ok('落库的夹具带批次号', !!impBatch, impBatch);
   const impCreated = await wc.executeJavaScript(`(window.__importCreatedByBatch || {})[${JSON.stringify(impBatch)}] || null`);
-  ok('渲染层记录了本批新建的产线 / 工位 id',
-    !!impCreated && impCreated.lineIds.length === 1 && impCreated.stationIds.length === 2,
+  ok('渲染层记录了本批新建的产线 id（且无 stationIds）',
+    !!impCreated && impCreated.lineIds.length === 1 && impCreated.stationIds === undefined,
     JSON.stringify(impCreated));
 
   const impUndo = await wc.executeJavaScript(`(async () => {
@@ -1061,15 +1239,10 @@ async function main() {
   const dbImpUndo = readDb();
   ok('撤销后夹具已移除', !dbImpUndo.fixtures.some((f) => f.serialNo === 'ZZ-IMP-001'));
   ok('撤销后自动补建的产线被回收', !dbImpUndo.lines.some((l) => l.name === 'E2E临时线'));
-  ok('撤销后产线 / 工位数量回到导入前',
-    dbImpUndo.lines.length === dbImpBefore.lines.length
-    && dbImpUndo.stations.length === dbImpBefore.stations.length,
-    JSON.stringify({ lines: [dbImpBefore.lines.length, dbImpUndo.lines.length],
-      stations: [dbImpBefore.stations.length, dbImpUndo.stations.length] }));
-  ok('撤销后没有留下孤儿工位（指向已删线体）',
-    !dbImpUndo.stations.some((s) => !dbImpUndo.lines.some((l) => l.id === s.lineId)),
-    String(dbImpUndo.stations.filter((s) => !dbImpUndo.lines.some((l) => l.id === s.lineId)).length));
-  ok('撤销提示写明回收了产线 / 工位', (impUndo.toast || '').includes('回收自动补建'), impUndo.toast);
+  ok('撤销后产线数量回到导入前',
+    dbImpUndo.lines.length === dbImpBefore.lines.length,
+    JSON.stringify({ lines: [dbImpBefore.lines.length, dbImpUndo.lines.length] }));
+  ok('撤销提示写明回收了自动补建的产线', (impUndo.toast || '').includes('回收自动补建'), impUndo.toast);
 
   /* ---------- 12. 清空数据落盘 ---------- */
   section('12. 清空数据落盘验证与重启恢复');
@@ -1099,9 +1272,12 @@ async function main() {
   const db12 = readDb();
   ok('清空后 fixtures 表已落盘为空', db12.fixtures.length === 0, String(db12.fixtures.length));
   ok('清空后 fixTransactions 表已落盘为空', db12.fixTransactions.length === 0, String(db12.fixTransactions.length));
-  ok('清空只清业务数据：产线 / 工位 / 机种字典（主数据）保留',
-    (db12.lines || []).length === 2 && (db12.stations || []).length === 5 && (db12.productions || []).length >= 4,
-    [(db12.lines || []).length, (db12.stations || []).length, (db12.productions || []).length]);
+  ok('清空只清业务数据：产线 / 机种字典（主数据）保留',
+    (db12.lines || []).length === 2 && (db12.productions || []).length >= 4,
+    [(db12.lines || []).length, (db12.productions || []).length]);
+  ok('v5：清空后数据文件仍无 stations 集合', db12.stations === undefined, Object.keys(db12));
+  ok('v5.1.0：清空数据保留人员卡库（主数据，3 人仍在）',
+    (db12.staffs || []).length === 3, String((db12.staffs || []).length));
   ok('清空后页面无夹具卡片', await wc.executeJavaScript(`(async () => {
     ${HELPERS}
     window.showView('fixtures'); await sleep(300);
@@ -1120,6 +1296,44 @@ async function main() {
     window.showView('fixtures'); await sleep(350);
     return $$('.fixture-card').length;
   })()`) === 0);
+
+  /* ---------- 12.5 关于面板鸣谢区（v5.3.0） ---------- */
+  section('12.5 关于 / About 面板（鸣谢区）');
+  const aboutRes = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const out = {};
+    out.hasBtn = !!$('#aboutBtn');
+    $('#aboutBtn').click(); await sleep(400);
+    out.title = (($('#modalTitle')||{}).textContent||'');
+    const txt = (($('#modalBody')||{}).textContent||'');
+    out.hasChangelog = txt.includes('变更日记');
+    out.hasThanksH = !!$('.about-h') && $$('.about-h').some(h=>h.textContent.trim()==='鸣谢');
+    out.thanksCls = !!$('.about-thanks');
+    out.thanksText = ($('.about-thanks')||{}).textContent||'';
+    /* 6 位同事一个都不能少 */
+    out.names = ['薛添才','朱近','林长平','林捷','林详杰','陈旭'].filter(n=>out.thanksText.includes(n));
+    out.missing = ['薛添才','朱近','林长平','林捷','林详杰','陈旭'].filter(n=>!out.thanksText.includes(n));
+    /* 鸣谢必须在滚动区之外（滚到底也看得到） */
+    const sc = $('.about-scroll'), th = $('.about-thanks');
+    out.scrollBeforeThanks = !!(sc && th) && (sc.compareDocumentPosition(th) & Node.DOCUMENT_POSITION_FOLLOWING) > 0;
+    out.thanksBg = th ? getComputedStyle(th).backgroundColor : '';
+    out.version = (($('.about-version')||{}).textContent||'');
+    window.closeModal && window.closeModal();
+    return out;
+  })()`);
+  ok('右下角有「关于 / About」按钮', aboutRes.hasBtn === true);
+  ok('点击后弹出标题为「关于 / About」', /关于/.test(aboutRes.title), aboutRes.title);
+  ok('面板内含「变更日记」滚动区', aboutRes.hasChangelog === true);
+  ok('鸣谢标题渲染为独立小节', aboutRes.hasThanksH === true);
+  ok('鸣谢区使用 .about-thanks 样式（浅蓝底 + 描边）',
+    aboutRes.thanksCls === true && aboutRes.thanksBg && aboutRes.thanksBg !== 'rgba(0, 0, 0, 0)' && aboutRes.thanksBg !== 'transparent',
+    aboutRes.thanksBg);
+  ok('鸣谢文案含「感谢以下同事提供的宝贵意见」', /感谢以下同事提供的宝贵意见/.test(aboutRes.thanksText), aboutRes.thanksText.slice(0, 80));
+  ok('鸣谢名单 6 位同事全部渲染（薛添才、朱近、林长平、林捷、林详杰、陈旭）',
+    aboutRes.names.length === 6 && aboutRes.missing.length === 0,
+    '命中 ' + aboutRes.names.length + ' 位，缺 ' + JSON.stringify(aboutRes.missing));
+  ok('鸣谢区在变更日记滚动区之外（滚到底仍可见）', aboutRes.scrollBeforeThanks === true);
+  ok('底部仍显示当前版本行', /当前版本：v/.test(aboutRes.version), aboutRes.version.slice(0, 60));
 
   /* ---------- 13. 运行期错误捕获 ---------- */
   section('13. 运行期错误捕获');

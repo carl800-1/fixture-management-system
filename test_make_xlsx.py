@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """手工构造真实 .xlsx（zip + sharedStrings），用于验证 xlsx_reader.js 解析器
-与 v4.0.0 的夹具导入链路（14 列表头）。
+与 v5.0.0 的夹具导入链路（17 列表头，已无工位列）。
 
 覆盖：
   • 共享字符串 / inlineStr / 纯数字单元格 / 真·空单元格（缺 <c> 节点）/ 全空行
@@ -41,44 +41,46 @@ def e_cell(ref):
     """真·空单元格：sharedStrings 里的空串"""
     return s_cell(ref, '')
 
-# v4.0.0 标准表头（14 列）
-HEADERS = ['实物编号', '名称',
+# v5.0.0 标准表头（17 列，工位列已移除）
+HEADERS = ['夹具编号', '名称',
            '机种名称1', '机种名称2', '机种名称3', '机种名称4', '机种名称5', '机种名称6', '机种名称7',
-           '分类', '库位', '产线', '工位', '备注']
+           '分类', '库位',
+           '产线1', '产线2', '产线3', '产线4', '产线5',
+           '备注']
 
 rows_xml = []
 rows_xml.append('<row r="1">' + ''.join(s_cell(f'{col_letter(i + 1)}1', h) for i, h in enumerate(HEADERS)) + '</row>')
 
-# 行 2：双机种；E2~I2 完全没有 <c> 节点（模拟 Excel 中真正的空单元格）；备注含 XML 实体
+# 行 2：双机种；D2~I2 完全没有 <c> 节点（模拟 Excel 中真正的空单元格）；备注含 XML 实体
 rows_xml.append('<row r="2">' +
     s_cell('A2', 'DH40MC-921-001-001') + s_cell('B2', '定位销压板') +
     s_cell('C2', 'MODEL-A') + s_cell('D2', 'MODEL-B') +
-    s_cell('J2', '冲压') + s_cell('K2', 'ZP1-U-1-1') + s_cell('L2', 'L1 总装线') + s_cell('M2', '上料工位') +
-    s_cell('N2', '用于冲压定位，含 & <特殊字符>') + '</row>')
+    s_cell('J2', '冲压') + s_cell('K2', 'ZP1-U-1-1') + s_cell('L2', 'L1 总装线') +
+    s_cell('Q2', '用于冲压定位，含 & <特殊字符>') + '</row>')
 
-# 行 3：单机种 + inlineStr 备注 + 真·空单元格（分类/机种2）
+# 行 3：单机种 + inlineStr 备注 + 真·空单元格（机种2/3/4）
 rows_xml.append('<row r="3">' +
     s_cell('A3', 'XXK-D10VG-002') + s_cell('B3', '焊接夹具') + s_cell('C3', 'MODEL-C') +
     e_cell('D3') + e_cell('E3') + e_cell('F3') +
-    s_cell('J3', '焊接') + s_cell('K3', 'ZP1-U-1-2') + s_cell('L3', 'L1 总装线') + s_cell('M3', '压装工位') +
-    inline_cell('N3', 'inline 字符串备注') + '</row>')
+    s_cell('J3', '焊接') + s_cell('K3', 'ZP1-U-1-2') + s_cell('L3', 'L1 总装线') +
+    inline_cell('Q3', 'inline 字符串备注') + '</row>')
 
-# 行 4：单格内的多机种（斜杠分隔）+ inlineStr 机种 + 多产线（逗号分隔）
+# 行 4：单格内的多机种（斜杠分隔）+ inlineStr 机种 + 多产线（分列 L/M）
 rows_xml.append('<row r="4">' +
     s_cell('A4', 'DH40MC-921-001-002') + s_cell('B4', '装配工装') +
     inline_cell('C4', 'MODEL-D/MODEL-E') +
     s_cell('J4', '装配') + s_cell('K4', 'ZP1-U-1-3') +
-    s_cell('L4', 'L1 总装线, L2 U型线') + s_cell('M4', '上料工位') + '</row>')
+    s_cell('L4', 'L1 总装线') + s_cell('M4', 'L2 U型线') + '</row>')
 
 # 行 5：库位用纯数字单元格 → 非 4 段式，应跳过
 rows_xml.append('<row r="5">' +
     s_cell('A5', 'SN-BAD-001') + s_cell('B5', '库位错误夹具') + s_cell('C5', 'MODEL-F') +
-    s_cell('J5', '冲压') + n_cell('K5', 1234) + s_cell('L5', 'L1 总装线') + s_cell('M5', '上料工位') + '</row>')
+    s_cell('J5', '冲压') + n_cell('K5', 1234) + s_cell('L5', 'L1 总装线') + '</row>')
 
-# 行 6：产线未建档 → 应跳过
+# 行 6：产线未建档 → 自动补建（不再跳过）
 rows_xml.append('<row r="6">' +
     s_cell('A6', 'SN-BAD-002') + s_cell('B6', '产线缺失夹具') + s_cell('C6', 'MODEL-G') +
-    s_cell('J6', '焊接') + s_cell('K6', 'ZP1-U-1-4') + s_cell('L6', '幽灵线') + s_cell('M6', '上料工位') + '</row>')
+    s_cell('J6', '焊接') + s_cell('K6', 'ZP1-U-1-4') + s_cell('L6', '幽灵线') + '</row>')
 
 # 行 7：全空行（无任何 <c> 节点）→ 应被解析为空数组并被导入逻辑过滤
 rows_xml.append('<row r="7"></row>')
