@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """手工构造真实 .xlsx（zip + sharedStrings），用于验证 xlsx_reader.js 解析器
-与 v5.0.0 的夹具导入链路（17 列表头，已无工位列）。
+与 v5.4.0 的夹具导入链路（22 列表头：机种 12 列、无工位列）。
 
 覆盖：
   • 共享字符串 / inlineStr / 纯数字单元格 / 真·空单元格（缺 <c> 节点）/ 全空行
   • 多工作表
-  • 有效行（2 机种 / 单机种 / 多机种合并成串 + 多产线）与无效行（库位非法 / 产线未建档）
+  • 有效行（2 机种 / 单机种 / 多机种合并成串 + 多产线 / **12 机种填满**）与无效行（库位非法 / 产线未建档）
+
+⚠️ 行数据按「表头名 → 值」构造，不手写单元格字母：改列数（机种 7→12 这类）只改 HEADERS 与表头上限，
+   行数据自动跟随，不会再出现「表头改了、测试夹具没改」的不一致。
 
 用法：python test_make_xlsx.py test_fixture.xlsx
 """
@@ -41,49 +44,94 @@ def e_cell(ref):
     """真·空单元格：sharedStrings 里的空串"""
     return s_cell(ref, '')
 
-# v5.0.0 标准表头（17 列，工位列已移除）
-HEADERS = ['夹具编号', '名称',
-           '机种名称1', '机种名称2', '机种名称3', '机种名称4', '机种名称5', '机种名称6', '机种名称7',
-           '分类', '库位',
-           '产线1', '产线2', '产线3', '产线4', '产线5',
-           '备注']
+MAX_LINE_MODELS = 12
+MAX_LINES = 5
+
+# v5.4.0 标准表头（22 列：机种 12 列，工位列已移除）
+HEADERS = (['夹具编号', '名称']
+           + [f'机种名称{i}' for i in range(1, MAX_LINE_MODELS + 1)]
+           + ['分类', '库位']
+           + [f'产线{i}' for i in range(1, MAX_LINES + 1)]
+           + ['备注'])
+
+assert len(HEADERS) == 22, len(HEADERS)
+
+def row_cells(r, vals):
+    """vals: {表头名: (kind, text)}，kind ∈ s/n/i/e。
+    未出现在 vals 里的列**不生成 <c> 节点**，用于模拟 Excel 里真正的空单元格。"""
+    out = []
+    for i, h in enumerate(HEADERS):
+        if h not in vals:
+            continue
+        ref = f'{col_letter(i + 1)}{r}'
+        kind, text = vals[h]
+        if kind == 's':
+            out.append(s_cell(ref, text))
+        elif kind == 'n':
+            out.append(n_cell(ref, text))
+        elif kind == 'i':
+            out.append(inline_cell(ref, text))
+        elif kind == 'e':
+            out.append(e_cell(ref))
+        else:
+            raise ValueError('unknown kind ' + kind)
+    return f'<row r="{r}">' + ''.join(out) + '</row>'
 
 rows_xml = []
 rows_xml.append('<row r="1">' + ''.join(s_cell(f'{col_letter(i + 1)}1', h) for i, h in enumerate(HEADERS)) + '</row>')
 
-# 行 2：双机种；D2~I2 完全没有 <c> 节点（模拟 Excel 中真正的空单元格）；备注含 XML 实体
-rows_xml.append('<row r="2">' +
-    s_cell('A2', 'DH40MC-921-001-001') + s_cell('B2', '定位销压板') +
-    s_cell('C2', 'MODEL-A') + s_cell('D2', 'MODEL-B') +
-    s_cell('J2', '冲压') + s_cell('K2', 'ZP1-U-1-1') + s_cell('L2', 'L1 总装线') +
-    s_cell('Q2', '用于冲压定位，含 & <特殊字符>') + '</row>')
+# 行 2：双机种；其余机种列完全没有 <c> 节点（模拟 Excel 中真正的空单元格）；备注含 XML 实体
+rows_xml.append(row_cells(2, {
+    '夹具编号': ('s', 'DH40MC-921-001-001'), '名称': ('s', '定位销压板'),
+    '机种名称1': ('s', 'MODEL-A'), '机种名称2': ('s', 'MODEL-B'),
+    '分类': ('s', '冲压'), '库位': ('s', 'ZP1-U-1-1'),
+    '产线1': ('s', 'L1 总装线'),
+    '备注': ('s', '用于冲压定位，含 & <特殊字符>'),
+}))
 
 # 行 3：单机种 + inlineStr 备注 + 真·空单元格（机种2/3/4）
-rows_xml.append('<row r="3">' +
-    s_cell('A3', 'XXK-D10VG-002') + s_cell('B3', '焊接夹具') + s_cell('C3', 'MODEL-C') +
-    e_cell('D3') + e_cell('E3') + e_cell('F3') +
-    s_cell('J3', '焊接') + s_cell('K3', 'ZP1-U-1-2') + s_cell('L3', 'L1 总装线') +
-    inline_cell('Q3', 'inline 字符串备注') + '</row>')
+rows_xml.append(row_cells(3, {
+    '夹具编号': ('s', 'XXK-D10VG-002'), '名称': ('s', '焊接夹具'),
+    '机种名称1': ('s', 'MODEL-C'),
+    '机种名称2': ('e', ''), '机种名称3': ('e', ''), '机种名称4': ('e', ''),
+    '分类': ('s', '焊接'), '库位': ('s', 'ZP1-U-1-2'),
+    '产线1': ('s', 'L1 总装线'),
+    '备注': ('i', 'inline 字符串备注'),
+}))
 
-# 行 4：单格内的多机种（斜杠分隔）+ inlineStr 机种 + 多产线（分列 L/M）
-rows_xml.append('<row r="4">' +
-    s_cell('A4', 'DH40MC-921-001-002') + s_cell('B4', '装配工装') +
-    inline_cell('C4', 'MODEL-D/MODEL-E') +
-    s_cell('J4', '装配') + s_cell('K4', 'ZP1-U-1-3') +
-    s_cell('L4', 'L1 总装线') + s_cell('M4', 'L2 U型线') + '</row>')
+# 行 4：单格内的多机种（斜杠分隔）+ inlineStr 机种 + 多产线（产线1/产线2）
+rows_xml.append(row_cells(4, {
+    '夹具编号': ('s', 'DH40MC-921-001-002'), '名称': ('s', '装配工装'),
+    '机种名称1': ('i', 'MODEL-D/MODEL-E'),
+    '分类': ('s', '装配'), '库位': ('s', 'ZP1-U-1-3'),
+    '产线1': ('s', 'L1 总装线'), '产线2': ('s', 'L2 U型线'),
+}))
 
 # 行 5：库位用纯数字单元格 → 非 4 段式，应跳过
-rows_xml.append('<row r="5">' +
-    s_cell('A5', 'SN-BAD-001') + s_cell('B5', '库位错误夹具') + s_cell('C5', 'MODEL-F') +
-    s_cell('J5', '冲压') + n_cell('K5', 1234) + s_cell('L5', 'L1 总装线') + '</row>')
+rows_xml.append(row_cells(5, {
+    '夹具编号': ('s', 'SN-BAD-001'), '名称': ('s', '库位错误夹具'),
+    '机种名称1': ('s', 'MODEL-F'),
+    '分类': ('s', '冲压'), '库位': ('n', '1234'),
+    '产线1': ('s', 'L1 总装线'),
+}))
 
 # 行 6：产线未建档 → 自动补建（不再跳过）
-rows_xml.append('<row r="6">' +
-    s_cell('A6', 'SN-BAD-002') + s_cell('B6', '产线缺失夹具') + s_cell('C6', 'MODEL-G') +
-    s_cell('J6', '焊接') + s_cell('K6', 'ZP1-U-1-4') + s_cell('L6', '幽灵线') + '</row>')
+rows_xml.append(row_cells(6, {
+    '夹具编号': ('s', 'SN-BAD-002'), '名称': ('s', '产线缺失夹具'),
+    '机种名称1': ('s', 'MODEL-G'),
+    '分类': ('s', '焊接'), '库位': ('s', 'ZP1-U-1-4'),
+    '产线1': ('s', '幽灵线'),
+}))
 
 # 行 7：全空行（无任何 <c> 节点）→ 应被解析为空数组并被导入逻辑过滤
 rows_xml.append('<row r="7"></row>')
+
+# 行 8：12 个机种位全部填满（v5.4.0 上限验证：末位的 机种名称12 不能被丢）
+rows_xml.append(row_cells(8, dict([
+    ('夹具编号', ('s', 'SN-MAX-012')), ('名称', ('s', '满机种夹具')),
+    ('分类', ('s', '装配')), ('库位', ('s', 'ZP1-U-2-2')),
+    ('产线1', ('s', 'L1 总装线')),
+] + [(f'机种名称{i}', ('s', f'MX-{i}')) for i in range(1, MAX_LINE_MODELS + 1)])))
 
 sheet1 = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{''.join(rows_xml)}</sheetData></worksheet>'''
@@ -117,4 +165,4 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
     z.writestr('xl/worksheets/sheet1.xml', sheet1)
     z.writestr('xl/worksheets/sheet2.xml', sheet2)
 
-print(f'生成 {out} ({os.path.getsize(out)} bytes, sharedStrings={len(_shared)})')
+print(f'生成 {out} ({os.path.getsize(out)} bytes, sharedStrings={len(_shared)}, 表头={len(HEADERS)} 列)')

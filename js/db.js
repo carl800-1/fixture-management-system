@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v5.3.0 — 工装夹具管理程序数据层
+ * db.js v5.4.0 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,11 +7,11 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '5.3.0';
+  const APP_VERSION = '5.4.0';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
-  const MAX_LINE_MODELS = 7;
+  const MAX_LINE_MODELS = 12;
   const MAX_LINES = 5;
   const MAX_SERIAL_NO = 64;
   const MAX_LOCATION = 20;

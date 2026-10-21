@@ -31,7 +31,7 @@ let seq = 1;
 const COLLECTIONS = ['fixtures', 'fixTransactions', 'lines', 'productions', 'staffs'];
 
 /* ---------------- 业务上限与格式约束（与文档第七节一致） ---------------- */
-const MAX_LINE_MODELS = 7;    // 一件夹具最多关联机种数（原 4）
+const MAX_LINE_MODELS = 12;   // 一件夹具最多关联机种数（原 7）
 const MAX_LINES = 5;          // 一件夹具最多涉及产线数
 const MAX_SERIAL_NO = 64;     // 实物夹具编号最大字符数
 const MAX_LOCATION = 20;      // 库位号最大字符数（真实样例 ZP1-U-1-1 = 10）

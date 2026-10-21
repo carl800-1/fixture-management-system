@@ -103,27 +103,35 @@ ok(M.normalizeHeader('库位：') === '库位', '剥离冒号');
 ok(M.normalizeHeader('\uFEFF实物编号') === '实物编号', '剥离 BOM');
 ok(M.normalizeHeader(null) === '', 'null 安全');
 
-/* ---------- 2. 表头映射 · 标准 17 列 ---------- */
-section('表头映射 · 标准 17 列');
-ok(M.FIX_IMPORT_HEADERS.length === 17, '模板为 17 列（v5.0.0 去工位列）', M.FIX_IMPORT_HEADERS.length);
+/* ---------- 2. 表头映射 · 标准 22 列 ---------- */
+section('表头映射 · 标准 22 列（机种 12 列）');
+ok(M.FIX_IMPORT_HEADERS.length === 22, '模板为 22 列（12 机种 + 去工位）', M.FIX_IMPORT_HEADERS.length);
 ok(M.FIX_IMPORT_HEADERS[0] === '夹具编号' && M.FIX_IMPORT_HEADERS[1] === '名称',
   '第 0/1 列为「夹具编号 / 名称」', [M.FIX_IMPORT_HEADERS[0], M.FIX_IMPORT_HEADERS[1]]);
-ok(M.FIX_IMPORT_HEADERS.slice(2, 9).join('|') === '机种名称1|机种名称2|机种名称3|机种名称4|机种名称5|机种名称6|机种名称7',
-  '第 2~8 列为「机种名称1~7」', M.FIX_IMPORT_HEADERS.slice(2, 9));
-ok(M.FIX_IMPORT_HEADERS[9] === '分类' && M.FIX_IMPORT_HEADERS[10] === '库位',
-  '第 9/10 列为「分类 / 库位」', [M.FIX_IMPORT_HEADERS[9], M.FIX_IMPORT_HEADERS[10]]);
-ok(M.FIX_IMPORT_HEADERS.slice(11, 16).join('|') === '产线1|产线2|产线3|产线4|产线5',
-  '第 11~15 列为「产线1~5」', M.FIX_IMPORT_HEADERS.slice(11, 16));
-ok(M.FIX_IMPORT_HEADERS[16] === '备注', '最后一列为「备注」', M.FIX_IMPORT_HEADERS[16]);
+ok(M.FIX_IMPORT_HEADERS.slice(2, 14).join('|')
+  === '机种名称1|机种名称2|机种名称3|机种名称4|机种名称5|机种名称6|机种名称7|机种名称8|机种名称9|机种名称10|机种名称11|机种名称12',
+  '第 2~13 列为「机种名称1~12」', M.FIX_IMPORT_HEADERS.slice(2, 14));
+ok(M.FIX_IMPORT_HEADERS[14] === '分类' && M.FIX_IMPORT_HEADERS[15] === '库位',
+  '第 14/15 列为「分类 / 库位」', [M.FIX_IMPORT_HEADERS[14], M.FIX_IMPORT_HEADERS[15]]);
+ok(M.FIX_IMPORT_HEADERS.slice(16, 21).join('|') === '产线1|产线2|产线3|产线4|产线5',
+  '第 16~20 列为「产线1~5」', M.FIX_IMPORT_HEADERS.slice(16, 21));
+ok(M.FIX_IMPORT_HEADERS[21] === '备注', '最后一列为「备注」', M.FIX_IMPORT_HEADERS[21]);
 ok(!M.FIX_IMPORT_HEADERS.some((h) => /工位/.test(h)), '模板中已无任何「工位」列',
   M.FIX_IMPORT_HEADERS.filter((h) => /工位/.test(h)));
+ok(M.MAX_LINE_MODELS === 12, 'MAX_LINE_MODELS = 12（v5.4.0 由 7 提升）', M.MAX_LINE_MODELS);
+ok(M.FIX_IMPORT_HEADERS.length === 2 + M.MAX_LINE_MODELS + 2 + M.MAX_LINES + 1,
+  '列数 = 2 + 机种上限 + 2 + 产线上限 + 1（表头由常量生成，加机种位只改一处）',
+  M.FIX_IMPORT_HEADERS.length);
 
 const idxStd = M.mapImportHeader(M.FIX_IMPORT_HEADERS);
 ok(idxStd.serialNo === 0 && idxStd.name === 1, '夹具编号 → 第 0 列、名称 → 第 1 列', [idxStd.serialNo, idxStd.name]);
-ok(idxStd.lm1 === 2 && idxStd.lm7 === 8, '机种名称1 / 机种名称7 → 第 2 / 8 列', [idxStd.lm1, idxStd.lm7]);
-ok(idxStd.category === 9 && idxStd.location === 10, '分类 / 库位 → 第 9 / 10 列', [idxStd.category, idxStd.location]);
-ok(idxStd.line1 === 11 && idxStd.line5 === 15, '产线1 / 产线5 → 第 11 / 15 列', [idxStd.line1, idxStd.line5]);
-ok(idxStd.remark === 16, '备注 → 第 16 列', idxStd.remark);
+ok(idxStd.lm1 === 2 && idxStd.lm7 === 8 && idxStd.lm12 === 13,
+  '机种名称1 / 7 / 12 → 第 2 / 8 / 13 列', [idxStd.lm1, idxStd.lm7, idxStd.lm12]);
+ok(idxStd.lm8 === 9 && idxStd.lm9 === 10 && idxStd.lm10 === 11 && idxStd.lm11 === 12,
+  '新增的 机种名称8~11 → 第 9 / 10 / 11 / 12 列', [idxStd.lm8, idxStd.lm9, idxStd.lm10, idxStd.lm11]);
+ok(idxStd.category === 14 && idxStd.location === 15, '分类 / 库位 → 第 14 / 15 列', [idxStd.category, idxStd.location]);
+ok(idxStd.line1 === 16 && idxStd.line5 === 20, '产线1 / 产线5 → 第 16 / 20 列', [idxStd.line1, idxStd.line5]);
+ok(idxStd.remark === 21, '备注 → 第 21 列', idxStd.remark);
 ok(idxStd.station1 === undefined && idxStd.station5 === undefined && idxStd.station === undefined,
   '工位相关字段不再有映射（station1/station5/station 均 undefined）',
   [idxStd.station1, idxStd.station5, idxStd.station]);
@@ -342,18 +350,19 @@ function splitCsvLine(line) {
   const csv = (sandbox.__downloaded || {}).content || '';
   ok(csv.charCodeAt(0) === 0xFEFF, '导出带 UTF-8 BOM（Excel 打开不乱码）', csv.charCodeAt(0));
   const csvLines = csv.replace(/^\uFEFF/, '').split('\r\n');
-  ok(csvLines[0] === M.FIX_IMPORT_HEADERS.join(','), '导出表头与导入模板逐列一致（17 列同序）', csvLines[0]);
+  ok(csvLines[0] === M.FIX_IMPORT_HEADERS.join(','), '导出表头与导入模板逐列一致（22 列同序）', csvLines[0]);
   ok(csvLines.length === 3, '导出 2 条数据行', csvLines.length - 1);
   const rowA = splitCsvLine(csvLines[1]);
   const rowB = splitCsvLine(csvLines[2]);
-  ok(rowA.length === 17, '数据行 17 列（与模板列数一致）', rowA.length);
-  ok(rowB.length === 17, '第二行同样 17 列', rowB.length);
+  ok(rowA.length === 22, '数据行 22 列（与模板列数一致）', rowA.length);
+  ok(rowB.length === 22, '第二行同样 22 列', rowB.length);
   ok(rowA[0] === 'SN-E1' && rowA[1] === '导出甲', '夹具编号 / 名称 就位', [rowA[0], rowA[1]]);
-  ok(rowA[2] === 'A' && rowA[3] === 'B' && rowA[4] === '', '机种展开成 机种名称1~7 七列', rowA.slice(2, 9));
-  ok(rowA[9] === '金属' && rowA[10] === 'ZP1-U-1-1', '分类 / 库位就位', [rowA[9], rowA[10]]);
-  ok(rowA[11] === 'L1 线' && rowA[12] === 'L2 线' && rowA[13] === '', '产线1 / 产线2 填了名称，其余空', rowA.slice(11, 16));
-  ok(rowA[16] === '含"引号"', '备注含双引号正确转义（可被标准 CSV 解析）', rowA[16]);
-  ok(rowB.slice(11, 16).every((v) => v === ''), '无关联产线的夹具产线列全空', JSON.stringify(rowB.slice(11, 16)));
+  ok(rowA[2] === 'A' && rowA[3] === 'B' && rowA[4] === '', '机种展开成 机种名称1~12 十二列', rowA.slice(2, 14));
+  ok(rowA.slice(5, 14).every((v) => v === ''), '未使用的机种位 5~12 全部为空串', JSON.stringify(rowA.slice(5, 14)));
+  ok(rowA[14] === '金属' && rowA[15] === 'ZP1-U-1-1', '分类 / 库位就位', [rowA[14], rowA[15]]);
+  ok(rowA[16] === 'L1 线' && rowA[17] === 'L2 线' && rowA[18] === '', '产线1 / 产线2 填了名称，其余空', rowA.slice(16, 21));
+  ok(rowA[21] === '含"引号"', '备注含双引号正确转义（可被标准 CSV 解析）', rowA[21]);
+  ok(rowB.slice(16, 21).every((v) => v === ''), '无关联产线的夹具产线列全空', JSON.stringify(rowB.slice(16, 21)));
   ok(!csv.includes('累计出库') && !csv.includes('维修次数'), '导出不再带 累计出库/维修次数 等派生列');
   ok(rowA.every((v) => !/工位/.test(v)), '导出内容不含任何「工位」字样');
 
@@ -369,7 +378,7 @@ function splitCsvLine(line) {
   const tl = tmpl.replace(/^\uFEFF/, '').split('\r\n');
   ok(tl[0] === M.FIX_IMPORT_HEADERS.join(','), '模板表头与导出一致（同一份列定义）', tl[0]);
   ok(tl.length > 1, '模板含示例行', tl.length - 1);
-  ok(tl.slice(1).every((ln) => splitCsvLine(ln).length === 17), '每行示例都是 17 列',
+  ok(tl.slice(1).every((ln) => splitCsvLine(ln).length === 22), '每行示例都是 22 列',
     JSON.stringify(tl.slice(1).map((ln) => splitCsvLine(ln).length)));
   ok(tl.slice(1).every((ln) => !/工位/.test(ln)), '模板示例行不含工位字样');
 

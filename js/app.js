@@ -63,7 +63,7 @@
   }
 
   /* ---------------- 业务上限与格式约束（与 store.js / db.js 同源） ---------------- */
-  const MAX_LINE_MODELS = 7;    // 一件夹具最多关联机种数（原 4）
+  const MAX_LINE_MODELS = 12;   // 一件夹具最多关联机种数（原 7）
   const MAX_LINES = 5;          // 一件夹具最多涉及产线数
   const MAX_SERIAL_NO = 64;
   const MAX_LOCATION = 20;
@@ -357,6 +357,15 @@
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
+    {
+      version: '5.4.0', date: '2026-10-21', items: [
+        '【新增】单件夹具可关联的<b>机种数由 7 个提升到 12 个</b>：建档 / 编辑表单的机种标签区上限同步放宽，计数显示为 <code>n / 12</code>，达到 12 个才提示已满',
+        '【调整】夹具导入 / 导出模板由 <b>17 列改为 22 列</b>：<code>夹具编号 | 名称 | 机种名称1…机种名称12 | 分类 | 库位 | 产线1…产线5 | 备注</code>。分类 / 库位移到第 14 / 15 列，产线1~5 为第 16~20 列，备注为第 21 列',
+        '【兼容】<b>旧 17 列模板仍可直接导入</b>（机种只到「机种名称7」也能导）：导入是按<b>表头名称</b>映射、不看列号，缺的机种列按空处理；反过来把新 22 列导出表拿给旧版本导入时，机种8~12 会被旧版忽略',
+        '【维护性】机种表头、表头别名（含「机种名称八…十二」中文数字写法）、模板示例行全部改为<b>按上限常量生成</b>，今后再调机种数量只改 <code>MAX_LINE_MODELS</code> 一处，不会再出现「改了表头漏改示例行 / 别名表」的错位',
+        '【说明】已存数据<b>不受影响</b>：上限放宽不会触发任何截断，原本 7 个以内的机种原样保留'
+      ]
+    },
     {
       version: '5.3.0', date: '2026-10-20', items: [
         '【新增】「关于 / About」面板底部增加 <b>鸣谢</b> 区，致谢提供宝贵意见的同事：<b>薛添才、朱近、林长平、林捷、林详杰、陈旭</b>。名单集中在 app.js 顶部的 <code>THANKS_NAMES</code> 常量，以后增减只改这一处',
@@ -965,7 +974,7 @@
    * 建档 / 编辑夹具表单
    *
    * 三段式：① 基本信息（夹具编号 / 名称 / 库位 / 分类 / 备注）
-   *         ② 机种名称（≤7，输入框 +「添加」→ 标签区，多个用 / 分隔）
+   *         ② 机种名称（≤MAX_LINE_MODELS，输入框 +「添加」→ 标签区，多个用 / 分隔）
    *         ③ 关联产线（下拉 +「添加」→ 标签区；≥1 条、≤5 条）
    *
    * ⚠️ 表单内的「产线 / 机种」暂存在 state.fixForm，重绘只重写
@@ -1351,9 +1360,9 @@
   };
 
   /* 夹具清单导出：
-   * 列定义与「下载模板」**完全同一份** FIX_IMPORT_HEADERS（17 列、同顺序、同 CSV 编码/换行），
+   * 列定义与「下载模板」**完全同一份** FIX_IMPORT_HEADERS（22 列、同顺序、同 CSV 编码/换行），
    * 只是模板多几行示例数据 ⇒ 导出的文件改完可直接用「⬆ 导入Excel/CSV」回灌（BUG-009）。
-   * ⚠️ 机种必须拆成「机种名称1~7」七列，不能合成一格，否则导出→导入会改变行结构；
+   * ⚠️ 机种必须按「机种名称1~N」拆成分列（N = MAX_LINE_MODELS），不能合成一格，否则导出→导入会改变行结构；
    *    序号 / 状态 / 累计出库 / 累计回库 / 维修次数都是系统内部派生值，模板里没有，
    *    导出也不带（要看状态请到「夹具查询」或「流水记录」）。
    * ⚠️ v5.0.0 起模板与导出**不再有工位列**，只保留「产线1~产线5」。 */
@@ -1384,19 +1393,25 @@
    *   - 实物编号 serialNo 为必填，允许重复（同机种多套）
    *   - 产线按「名称」引用；若未建档则**导入时自动补建**（同名复用，不重复创建），
    *     不再因产线未建档而整行跳过，确保符合其它条件的表格可正常导入
-   *   - 机种名称支持 1~7 独立列，也可只给一列「机种名称」用分隔符写多个
+   *   - 机种名称支持 1~N 独立列（N = MAX_LINE_MODELS），也可只给一列「机种名称」用分隔符写多个
    *   - 预览确认后才落库，避免误导入
    * ============================================================ */
-  /* 模板结构（v5.0.0）：只保留产线列，工位列已随工位模型一并移除。
-   *   产线1 | 产线2 | 产线3 | 产线4 | 产线5      （一行 = 一套夹具，最多 5 条产线）
+  /* 模板结构（v5.0.0 去工位；v5.4.0 机种列 7 → 12 列）：
+   *   夹具编号 | 名称 | 机种名称1…机种名称12 | 分类 | 库位 | 产线1…产线5 | 备注 = 22 列
+   *   一行 = 一套夹具；机种上限由 MAX_LINE_MODELS 决定、产线上限由 MAX_LINES 决定，
+   *   **列数组由上限常量生成**，改上限时这里自动跟随（不再手动数表头 —— BUG-009 的教训）。
    *   旧版扁平「产线」单列仍兼容（多个产线用分隔符写在同一格）。
-   *   ⚠️ 旧模板里的「工位1…工位5」「工位」列会被**静默忽略**（表头不在别名表内），不影响产线导入。 */
+   *   旧模板里的「工位1…工位5」「工位」列会被**静默忽略**（表头不在别名表内），不影响产线导入。
+   *   旧 17 列（机种只到 7）模板**仍可直接导入**：按表头名映射、不依赖列号，缺的机种列按空处理。 */
   const FIX_IMPORT_HEADERS = [
-    '夹具编号', '名称', '机种名称1', '机种名称2', '机种名称3', '机种名称4', '机种名称5', '机种名称6', '机种名称7',
+    '夹具编号', '名称',
+    ...Array.from({ length: MAX_LINE_MODELS }, (_, i) => '机种名称' + (i + 1)),
     '分类', '库位',
-    '产线1', '产线2', '产线3', '产线4', '产线5',
+    ...Array.from({ length: MAX_LINES }, (_, i) => '产线' + (i + 1)),
     '备注'
   ];
+  /* 中文数字（机种/产线的表头别名要用，最多到「十二」） */
+  const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'];
 
   /* CSV 文本生成：模板下载与清单导出**共用**，保证两者只有示例行不同、结构逐字节同构 */
   function buildCsvText(headers, rows) {
@@ -1411,26 +1426,31 @@
   const FIX_IMPORT_ALIAS = {
     '实物编号': 'serialNo', '夹具编号': 'serialNo', '实物夹具编号': 'serialNo', '资产编号': 'serialNo', 'serialno': 'serialNo',
     '名称': 'name', '夹具名称': 'name', '品名': 'name', 'name': 'name',
-    '机种名称1': 'lm1', '机种1': 'lm1', '机种名称一': 'lm1', '机型1': 'lm1',
-    '机种名称2': 'lm2', '机种2': 'lm2', '机种名称二': 'lm2', '机型2': 'lm2',
-    '机种名称3': 'lm3', '机种3': 'lm3', '机种名称三': 'lm3', '机型3': 'lm3',
-    '机种名称4': 'lm4', '机种4': 'lm4', '机种名称四': 'lm4', '机型4': 'lm4',
-    '机种名称5': 'lm5', '机种5': 'lm5', '机种名称五': 'lm5', '机型5': 'lm5',
-    '机种名称6': 'lm6', '机种6': 'lm6', '机种名称六': 'lm6', '机型6': 'lm6',
-    '机种名称7': 'lm7', '机种7': 'lm7', '机种名称七': 'lm7', '机型7': 'lm7',
     '机种名称': 'lms', '机种': 'lms', '适用机种': 'lms', '机型': 'lms',
     '分类': 'category', '类别': 'category', 'category': 'category',
     '库位': 'location', '库位号': 'location', '存放位置': 'location', '位置': 'location', '货位': 'location', 'location': 'location',
-    /* 产线N，N=1..5，另兼容中文数字 */
-    '产线1': 'line1', '产线一': 'line1', '线体1': 'line1',
-    '产线2': 'line2', '产线二': 'line2', '线体2': 'line2',
-    '产线3': 'line3', '产线三': 'line3', '线体3': 'line3',
-    '产线4': 'line4', '产线四': 'line4', '线体4': 'line4',
-    '产线5': 'line5', '产线五': 'line5', '线体5': 'line5',
     /* 旧版扁平列（兼容保留）：一格写多条，用分隔符隔开 */
     '产线': 'lines', '线体': 'lines', '产线名称': 'lines', '线体名称': 'lines',
     '备注': 'remark', '备注或用途': 'remark', '说明': 'remark', 'remark': 'remark'
   };
+  /* 机种名称N / 机种N / 机型N（N=1..MAX_LINE_MODELS，另兼容中文数字）与
+   * 产线N / 线体N（N=1..MAX_LINES）的别名**按上限常量自动补齐** ——
+   * 加机种位只改 MAX_LINE_MODELS 一处，别名表与表头自动跟随。 */
+  for (let i = 1; i <= MAX_LINE_MODELS; i++) {
+    const key = 'lm' + i;
+    const cn = CN_NUM[i - 1];
+    FIX_IMPORT_ALIAS['机种名称' + i] = key;
+    FIX_IMPORT_ALIAS['机种' + i] = key;
+    FIX_IMPORT_ALIAS['机型' + i] = key;
+    if (cn) FIX_IMPORT_ALIAS['机种名称' + cn] = key;
+  }
+  for (let i = 1; i <= MAX_LINES; i++) {
+    const key = 'line' + i;
+    const cn = CN_NUM[i - 1];
+    FIX_IMPORT_ALIAS['产线' + i] = key;
+    FIX_IMPORT_ALIAS['线体' + i] = key;
+    if (cn) FIX_IMPORT_ALIAS['产线' + cn] = key;
+  }
 
   // 表头归一化：去 BOM/空白/全角空格，忽略括号注释与常见标点
   function normalizeHeader(h) {
@@ -1452,7 +1472,9 @@
     return idx;
   }
 
-  const IMPORT_LM_KEYS = ['lm1', 'lm2', 'lm3', 'lm4', 'lm5', 'lm6', 'lm7', 'lms'];
+  /* 机种取值列顺序：分列的 lm1…lmN 优先，扁平「机种名称」列（lms）最后合并。
+   * 由 MAX_LINE_MODELS 生成，加机种位无需改这里。 */
+  const IMPORT_LM_KEYS = Array.from({ length: MAX_LINE_MODELS }, (_, i) => 'lm' + (i + 1)).concat('lms');
 
   // 从一行数据提取夹具入参；返回 { ok, fixture } 或 { ok:false, reason }
   function parseImportRow(row, idx) {
@@ -1982,25 +2004,45 @@
    * 列定义与「导出CSV」共用 FIX_IMPORT_HEADERS / buildCsvText ⇒ 两文件除示例行外完全一致。
    * v5.0.0 起只填产线（产线1~产线5），没有工位列。 */
   window.downloadFixtureTemplate = function () {
+    /* 示例行**按表头位置生成**，机种/产线列数随 MAX_LINE_MODELS / MAX_LINES 自动变化 ——
+     * 不再手写固定列数的数组（v5.4.0 机种 7→12 时踩过：改了表头却漏改示例行，模板与模板列数不一致）。 */
+    const mkSample = (o) => {
+      const r = FIX_IMPORT_HEADERS.map(() => '');
+      const base = 2, lmEnd = base + MAX_LINE_MODELS, lineStart = lmEnd + 2;
+      r[0] = o.serialNo || '';
+      r[1] = o.name || '';
+      (o.models || []).slice(0, MAX_LINE_MODELS).forEach((m, i) => { r[base + i] = m; });
+      r[lmEnd] = o.category || '';
+      r[lmEnd + 1] = o.location || '';
+      (o.lines || []).slice(0, MAX_LINES).forEach((ln, i) => { r[lineStart + i] = ln; });
+      r[r.length - 1] = o.remark || '';
+      return r;
+    };
     const sample = [
-      /* 一套夹具 = 一行；本例关联 2 条产线 */
-      ['DH40MC-921-001-001', '定位销压板', 'DH40MC', 'DH40MC-B', 'DH40MC-C', 'DH40MC-D', 'DH40MC-E', 'DH40MC-F', 'DH40MC-G',
-        '金属', 'ZP1-U-1-1',
-        '3 号线', 'L2 U型线', '', '', '',
-        '多产线示例：一条夹具挂在两条线上'],
-      /* 同编号的第 2 套：单产线 */
-      ['DH40MC-921-001-001', '定位销压板', 'DH40MC', '', '', '', '', '', '',
-        '金属', 'ZP1-U-1-2',
-        '3 号线', '', '', '', '',
-        '同编号的第 2 套'],
+      /* 一套夹具 = 一行；本例机种填满 12 位、关联 2 条产线 */
+      mkSample({
+        serialNo: 'DH40MC-921-001-001', name: '定位销压板',
+        models: ['DH40MC', 'DH40MC-B', 'DH40MC-C', 'DH40MC-D', 'DH40MC-E', 'DH40MC-F',
+          'DH40MC-G', 'DH40MC-H', 'DH40MC-I', 'DH40MC-J', 'DH40MC-K', 'DH40MC-L'],
+        category: '金属', location: 'ZP1-U-1-1',
+        lines: ['3 号线', 'L2 U型线'],
+        remark: '满机种示例：12 个机种位全部填满，一条夹具挂在两条线上'
+      }),
+      /* 同编号的第 2 套：单机种单产线 */
+      mkSample({
+        serialNo: 'DH40MC-921-001-001', name: '定位销压板',
+        models: ['DH40MC'], category: '金属', location: 'ZP1-U-1-2',
+        lines: ['3 号线'], remark: '同编号的第 2 套；没用到的机种列留空即可'
+      }),
       /* 分类可用预设值（金属 / PVC / 亚克力 / 橡胶…），也可自行填写新分类 */
-      ['XXK-D10VG-002', '焊接夹具', 'XXK-D10VG', '', '', '', '', '', '',
-        'PVC', 'ZP1-U-2-1',
-        'L2 U型线', '', '', '', '',
-        '']
+      mkSample({
+        serialNo: 'XXK-D10VG-002', name: '焊接夹具',
+        models: ['XXK-D10VG'], category: 'PVC', location: 'ZP1-U-2-1',
+        lines: ['L2 U型线'], remark: ''
+      })
     ];
     download('夹具导入模板.csv', buildCsvText(FIX_IMPORT_HEADERS, sample));
-    toast('模板已下载：列结构与「导出CSV」一致；产线最多填 5 条（产线1~产线5），不再有工位列', 'ok');
+    toast('模板已下载：列结构与「导出CSV」一致；机种最多填 12 个（机种名称1~12），产线最多填 5 条', 'ok');
   };
 
   window.fixtureRetire = function (id) {

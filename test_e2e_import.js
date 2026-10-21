@@ -40,10 +40,11 @@ const wb = readWorkbook(fs.readFileSync(XLSX));
 ok(wb.sheets.length === 2, '解析出 2 张工作表');
 ok(wb.sheets[0].name === '夹具清单', '第 1 张表名为「夹具清单」', wb.sheets[0].name);
 const xrows = wb.sheets[0].rows;
-ok(xrows.length === 7, '第 1 张表 7 行（表头 + 5 条数据 + 1 全空行）', xrows.length);
-ok(xrows[0].length === 17 && xrows[0][0] === '夹具编号' && xrows[0][16] === '备注',
-  '表头 17 列且首列为「夹具编号」', [xrows[0].length, xrows[0][0], xrows[0][16]]);
-ok(xrows[1].length === 17 && xrows[1][4] === '', '稀疏列（缺 <c> 节点）补为空串', xrows[1]);
+ok(xrows.length === 8, '第 1 张表 8 行（表头 + 6 条数据 + 1 全空行）', xrows.length);
+ok(xrows[0].length === 22 && xrows[0][0] === '夹具编号' && xrows[0][21] === '备注',
+  '表头 22 列（机种 12 列）且末列为「备注」', [xrows[0].length, xrows[0][0], xrows[0][21]]);
+ok(xrows[0][13] === '机种名称12', '第 13 列 = 机种名称12（末位机种列）', xrows[0][13]);
+ok(xrows[1].length === 22 && xrows[1][4] === '', '稀疏列（缺 <c> 节点）补为空串', xrows[1]);
 ok(Array.isArray(xrows[6]) && xrows[6].length === 0, '全空行解析为空数组', xrows[6]);
 
 /* ---- 2. 走 app.js 的导入映射（vm 沙箱抽取纯函数） ---- */
@@ -88,7 +89,7 @@ sandbox.state.fixtures = [{ id: 99, code: '1001', serialNo: 'DH40MC-921-001-001'
 
 const plan = M.buildImportPlan(xrows);
 ok(plan.ok, '生成导入计划成功', plan.error);
-ok(plan.plan.length === 4, '4 条有效行（行 2/3/4/6：未建档产线改为自动补建，不再整行跳过）', plan.plan.length);
+ok(plan.plan.length === 5, '5 条有效行（行 2/3/4/6/8：未建档产线改为自动补建，不再整行跳过）', plan.plan.length);
 ok(plan.skipped.length === 1, '1 条被跳过（仅库位非法）', plan.skipped);
 ok(plan.skipped[0].row === 5 && /库位/.test(plan.skipped[0].reason), '第 5 行按库位非法跳过', plan.skipped[0]);
 ok(plan.plan._autoLines.indexOf('幽灵线') >= 0, '未建档产线「幽灵线」被登记为待自动补建', plan.plan._autoLines);
@@ -98,8 +99,8 @@ ok(plan.hasSerialColumn === true && plan.hasLineColumn === true && plan.hasStati
   'hasSerialColumn / hasLineColumn 为 true，hasStationColumn 已不存在', [plan.hasSerialColumn, plan.hasLineColumn, plan.hasStationColumn]);
 
 const names = plan.plan.map((p) => p.fixture.name);
-ok(JSON.stringify(names) === JSON.stringify(['定位销压板', '焊接夹具', '装配工装', '产线缺失夹具']),
-  '四条夹具名称按顺序解析正确（含自动补建的幽灵线行）', names);
+ok(JSON.stringify(names) === JSON.stringify(['定位销压板', '焊接夹具', '装配工装', '产线缺失夹具', '满机种夹具']),
+  '五条夹具名称按顺序解析正确（含自动补建的幽灵线行与满机种行）', names);
 
 // 夹具编号（主搜索键）不再处理「自动分配」，原样保留
 ok(plan.plan[0].fixture.serialNo === 'DH40MC-921-001-001', '第 1 条夹具编号原样保留', plan.plan[0].fixture.serialNo);
@@ -122,6 +123,13 @@ ok(plan.plan[1].fixture.remark === 'inline 字符串备注', '第 2 条 inlineSt
 ok(plan.plan[2].fixture.category === '装配', '第 3 条分类 = 装配', plan.plan[2].fixture.category);
 ok(plan.plan[0].fixture.lineNames.join(',') === 'L1 总装线', '第 1 条产线名原样保留', plan.plan[0].fixture.lineNames);
 ok(plan.plan[2].fixture.lineNames.join(',') === 'L1 总装线,L2 U型线', '第 3 条多产线（分列）保留为 2 个产线名', plan.plan[2].fixture.lineNames);
+// 满机种行：机种 12 个全部入列，末位 MX-12 不能被截断（v5.4.0 机种上限 7→12 的回归点）
+const fMax = plan.plan[4].fixture;
+ok(fMax.lineModels.length === 12, '满机种行解析出 12 个机种（上限已放宽到 12）', fMax.lineModels.length);
+ok(fMax.lineModels[11] === 'MX-12', '末位机种 MX-12 未被截断', fMax.lineModels[11]);
+ok(fMax.lineModels[0] === 'MX-1' && fMax.lineModels[6] === 'MX-7',
+  '机种顺序与表格列顺序一致（MX-1 / MX-7 就位）', [fMax.lineModels[0], fMax.lineModels[6]]);
+
 ok(plan.plan.every((p) => p.fixture.stationNames === undefined), 'v5.0.0 起计划里不再出现 stationNames', plan.plan.map((p) => p.fixture.stationNames));
 
 // 重号提示（夹具编号允许重复，只提示不拦截）
@@ -179,10 +187,10 @@ for (const p of plan.plan) {
   });
   added++;
 }
-ok(added === 4, '写入 4 条成功（含未建档产线行）', added);
+ok(added === 5, '写入 5 条成功（含未建档产线行与满机种行）', added);
 
 const all = store.getAll('fixtures');
-ok(all.length === 4, '库中共 4 条（含自动补建的幽灵线行）', all.length);
+ok(all.length === 5, '库中共 5 条（含自动补建的幽灵线行）', all.length);
 ok(all.every((f) => /^\d{4}$/.test(String(f.code))), '序号由 store 自动分配为 4 位纯数字', all.map((f) => f.code));
 ok(new Set(all.map((f) => String(f.code))).size === all.length, '序号互不相同（各夹具独立分配）');
 ok(all.every((f) => f.stations === undefined), '落库记录里不含 stations 字段', all.map((f) => Object.keys(f).includes('stations')));
@@ -221,7 +229,7 @@ ok(store.stockCountBySerial('DH40MC-921-001-001', 'ZP1-U-1-9') === 1, '按「夹
 /* 重跑计划：应给出「已有 2 套」的重号提示 */
 sandbox.state.fixtures = store.getAll('fixtures');
 const planAgain = M.buildImportPlan(xrows);
-ok(planAgain.ok && planAgain.plan.length === 4, '二次导入计划仍 4 条', planAgain.error);
+ok(planAgain.ok && planAgain.plan.length === 5, '二次导入计划仍 5 条', planAgain.error);
 ok(/已有 2 套/.test(planAgain.plan[0].dupHint), '二次导入重号提示更新为 2 套', planAgain.plan[0].dupHint);
 
 /* 序号重复保护（store 层） */

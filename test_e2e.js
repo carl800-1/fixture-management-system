@@ -336,10 +336,10 @@ async function main() {
     window.submitFixForm(); await sleep(350);
     out.deniedBadLoc = /4 段式/.test((($('#toast')||{}).textContent||''));
     window.closeModal(); await sleep(120);
-    /* 机种上限 7：输入 8 个（用 / 分隔）应只保留前 7 个并给出提示 */
+    /* 机种上限 12：输入 15 个（用 / 分隔）应只保留前 12 个并给出提示 */
     window.fixtureNew(); await sleep(200);
-    const eight = [1,2,3,4,5,6,7,8].map((i)=>'MX-'+i).join(' / ');
-    setV('#fix_lm_text', eight); window.fixFormModelsInput(); await sleep(80);
+    const fifteen = Array.from({length:15},(_,i)=>'MX-'+(i+1)).join(' / ');
+    setV('#fix_lm_text', fifteen); window.fixFormModelsInput(); await sleep(80);
     out.chipCount = $$('#fix_lm_chips .chip-tag').length;
     out.lmCountText = (($('#fix_lm_count')||{}).textContent||'');
     out.lmHint = (($('#fix_lm_hint')||{}).textContent||'');
@@ -354,9 +354,9 @@ async function main() {
   ok('表单正文不再出现「工位」字样', !/工位/.test(formRes.labelText), (formRes.labelText || '').slice(0, 160));
   ok('零产线提交被拒（弹窗保持打开）', formRes.deniedNoLine === true && formRes.deniedStillOpen === true);
   ok('非法库位（A-9）提交被拒', formRes.deniedBadLoc === true);
-  ok('机种最多 7 个：第 8 个被截断', formRes.chipCount === 7, String(formRes.chipCount));
-  ok('机种计数文案 7 / 7', formRes.lmCountText === '7 / 7', formRes.lmCountText);
-  ok('机种超过 7 个时给出截断提示', /超过 7 个/.test(formRes.lmHint || ''), formRes.lmHint);
+  ok('机种最多 12 个：第 13 个起被截断', formRes.chipCount === 12, String(formRes.chipCount));
+  ok('机种计数文案 12 / 12', formRes.lmCountText === '12 / 12', formRes.lmCountText);
+  ok('机种超过 12 个时给出截断提示', /超过 12 个/.test(formRes.lmHint || ''), formRes.lmHint);
 
   /* 正式建 4 套（第 4 套与第 1 套同夹具编号，验证「多套追踪」） */
   const mkRes = await wc.executeJavaScript(`(async () => {

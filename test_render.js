@@ -232,7 +232,7 @@ ok('夹具清单导出不再输出模板外的「序号 / 状态 / 累计出库 
   !/累计出库|累计回库|维修次数|'状态'/.test(exportSrc), exportSrc.slice(0, 200));
 ok('导出与模板共用 buildCsvText（BOM / 换行 / 转义一致）',
   /buildCsvText\(headers, rows\)/.test(exportSrc) && /buildCsvText\(FIX_IMPORT_HEADERS, sample\)/.test(appJs));
-ok('导出保留 7 列机种（机种名称1~7），不再合并成一格',
+ok('导出按 MAX_LINE_MODELS 展开机种列（v5.4.0 为 12 列），不再合并成一格',
   /for \(let i = 0; i < MAX_LINE_MODELS; i\+\+\) models\.push/.test(exportSrc));
 
 /* ---------- 9.5 机种管理（v4.5.0 合并按机种查询） ---------- */
@@ -356,7 +356,10 @@ section('10b. 添加按钮语义（草稿 → 标签区，去重/截断/清空�
       add('A');
       ok('重复项不再入列（去重）', H.state.fixForm.lineModels.length === 3);
       ok('重复项给出提示', /已在列表中/.test(H.hint()), H.hint());
-      add('C / D / E / F / G / H');
+      /* 一次塞满并越过上限：数量随 MAX_LINE_MODELS 自动生成，改上限不用手改这里 */
+      const filler = [];
+      for (let i = 0; i < Number(maxLm) + 3; i++) filler.push('FILL' + i);
+      add(filler.join(' / '));
       ok('超过上限截断到 ' + maxLm + ' 个', H.state.fixForm.lineModels.length === Number(maxLm), String(H.state.fixForm.lineModels.length));
       ok('超上限给出提示', /超过/.test(H.hint()), H.hint());
       ok('满员时「添加」按钮禁用', btn.disabled === true);
@@ -760,8 +763,23 @@ ok('撤销导入调用结构回收（BUG-011）',
   appJs.includes('planStructureRecycle(created, state.fixtures || [])'));
 ok('撤销结果提示回收数量',
   appJs.includes('并回收自动补建的'));
-ok('夹具导入模板 17 列（去工位列）',
+ok('夹具导入模板 22 列（机种 12 列、无工位列）',
   appJs.includes("'夹具编号', '名称',") && !/'工位1'/.test(appJs) && !/'工位顺序'/.test(appJs));
+ok('模板列由上限常量生成（改 MAX_LINE_MODELS 无需手改表头/示例行）',
+  /\.\.\.Array\.from\(\{ length: MAX_LINE_MODELS \}, \(_, i\) => '机种名称' \+ \(i \+ 1\)\)/.test(appJs)
+  && /\.\.\.Array\.from\(\{ length: MAX_LINES \}, \(_, i\) => '产线' \+ \(i \+ 1\)\)/.test(appJs));
+ok('模板示例行按表头位置生成（不再手写固定列数数组）',
+  /const mkSample = \(o\) => \{/.test(appJs) && /FIX_IMPORT_HEADERS\.map\(\(\) => ''\)/.test(appJs));
+
+/* 上限常量三处必须同源：app.js（渲染层）/ db.js（本地存储层）/ store.js（主进程层）改一处漏两处会直接不一致 */
+{
+  const dbSrc = fs.readFileSync(path.join(__dirname, 'js', 'db.js'), 'utf8');
+  const storeSrc = fs.readFileSync(path.join(__dirname, 'store.js'), 'utf8');
+  const grab = (s) => (s.match(/const MAX_LINE_MODELS = (\d+);/) || [])[1];
+  const a = grab(appJs), d = grab(dbSrc), st = grab(storeSrc);
+  ok('MAX_LINE_MODELS 在 app.js / db.js / store.js 三处一致（v5.4.0 = 12）',
+    a === '12' && d === '12' && st === '12', [a, d, st]);
+}
 
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));

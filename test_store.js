@@ -69,7 +69,7 @@ ok('缺名称被拒绝', throws(() => store.addFixture(fix({ name: '' })), '夹�
 ok('产线为空被拒绝', throws(() => store.addFixture(fix({ lines: [] })), '至少选择 1 条产线'));
 ok('产线超过 5 条被拒绝', throws(() => store.addFixture(fix({ lines: [1, 2, 3, 4, 5, 6] })), '最多关联 5 条产线'));
 ok('旧数据带 stations 字段会被静默丢弃（不报错）', (() => { const i = store.addFixture(fix({ code: '3901', serialNo: 'S-OLD-ST', lines: [lineA], stations: [7, 8] })); return store.getAll('fixtures').find((f) => f.id === i).stations === undefined; })());
-ok('机种超过 7 个被拒绝', throws(() => store.addFixture(fix({ lineModels: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] })), '最多 7 个'));
+ok('机种超过 12 个被拒绝', throws(() => store.addFixture(fix({ lineModels: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm'] })), '最多 12 个'));
 ok('库位空被拒绝', throws(() => store.addFixture(fix({ location: '' })), '库位号需为 4 段式'));
 ok('库位非 4 段被拒绝', throws(() => store.addFixture(fix({ location: 'A1-03' })), '库位号需为 4 段式'));
 ok('库位超 20 字符被拒绝', throws(() => store.addFixture(fix({ location: 'ZP12345678901-U-12-15' })), '库位号需为 4 段式'));

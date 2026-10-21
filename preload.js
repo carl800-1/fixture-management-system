@@ -1,11 +1,11 @@
 'use strict';
 /* ============================================================
- * preload.js — 渲染进程桥（v5.3.0）
+ * preload.js — 渲染进程桥（v5.4.0）
  * ============================================================ */
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  version: '5.3.0',
+  version: '5.4.0',
   invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
   // 打印：opts = { pageSize, copies, landscape, margins }，返回 { ok, reason? }
   printLabels: (opts) => ipcRenderer.invoke('print-labels', opts),
