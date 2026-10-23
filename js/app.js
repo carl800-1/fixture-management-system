@@ -359,6 +359,15 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
+      version: '5.7.0', date: '2026-10-23', items: [
+        '<b>【新增】未导入明细记录</b>：导入完成后，结果窗口列出<b>每一行没进库的数据</b>——行号、夹具编号、名称、库位、未导入原因，按行号升序；表格内最多显示前 200 行，完整明细可一键导出 CSV',
+        '【新增】未导入原因分四类并写明：<b>解析未通过</b>（名称为空 / 库位不合规 / 机种全空…）、<b>与库内记录完全一致</b>（选了「跳过重复」）、<b>产线未建档按选择跳过</b>、<b>落库失败</b>（附主进程返回的具体原因）',
+        '<b>【修复】落库失败此前是黑盒</b>：旧版只给一个「失败 N 条」的数字，具体哪几行失败仅打在开发者工具控制台里，普通用户看不到；现在逐行留证并列进结果窗口',
+        '【新增】「⬇ 导出未导入明细 CSV」：输出 <code>未导入明细_日期_时分.csv</code>（UTF-8 BOM + CRLF，Excel 双击不乱码），五列与本窗口表格一致，可用于存档、比对与补导',
+        '【优化】整份表<b>一行都导不进</b>时同样可导出明细（此前只列前 10 条文字）；一行都没进库但存在跳过项时，也会弹出结果窗口而不是只闪一个 toast'
+      ]
+    },
+    {
       version: '5.6.0', date: '2026-10-23', items: [
         '【调整】<b>取消「经办人」</b>：出库页只刷<b>领用人</b>、回库页只刷<b>退库人</b>，单件出库 / 单件回库弹窗同步只留一个刷卡位；送修、维修完成、报废三个弹窗里的「经办人」输入框一并移除。一次出入库只需刷<b>一张卡</b>即可提交',
         '【调整】刷卡位<b>不再按人员角色限制</b>：只要卡已在「👤 人员卡库」登记且启用就能刷（历史「经办人」角色的老卡也照常可用）；角色字段保留，仅作台账标注',
@@ -1629,14 +1638,26 @@
     });
     const batchSerial = new Map();  // 本次文件内已出现的同编号行数
 
+    /* v5.7.0：未导入行也要能被定位到具体实物，所以跳过行带上表格里的
+     * 夹具编号 / 名称 / 库位三列原始值（解析失败时它们仍在表里，只是不合规）。
+     * ⚠️ 只读取、不做任何归一化，纯粹用于「未导入明细」展示与导出。 */
+    const cellOf = (row, i) => (i == null ? '' : String(row[Number(i)] == null ? '' : row[Number(i)]).trim());
+
     const plan = [];
     const skipped = [];
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r];
       if (!row || !row.some((x) => String(x == null ? '' : x).trim() !== '')) continue; // 全空行
       const parsed = parseImportRow(row, idx);
-      if (!parsed.ok) { skipped.push({ row: r + 1, reason: parsed.reason }); continue; }
+      if (!parsed.ok) {
+        skipped.push({
+          row: r + 1, reason: parsed.reason,
+          serialNo: cellOf(row, idx.serialNo), name: cellOf(row, idx.name), location: cellOf(row, idx.location)
+        });
+        continue;
+      }
       const f = parsed.fixture;
+      const ctxCells = { serialNo: f.serialNo, name: f.name, location: f.location };
 
       /* 产线名归并（BUG-010）：把「1#」「1 」这类同义写法并到同一条产线上。 */
       {
@@ -1648,8 +1669,8 @@
         f.lineNames = merged;
       }
 
-      if (!f.lineNames.length) { skipped.push({ row: r + 1, reason: '产线为空' }); continue; }
-      if (f.lineNames.length > MAX_LINES) { skipped.push({ row: r + 1, reason: '产线超过 ' + MAX_LINES + ' 条' }); continue; }
+      if (!f.lineNames.length) { skipped.push(Object.assign({ row: r + 1, reason: '产线为空' }, ctxCells)); continue; }
+      if (f.lineNames.length > MAX_LINES) { skipped.push(Object.assign({ row: r + 1, reason: '产线超过 ' + MAX_LINES + ' 条' }, ctxCells)); continue; }
 
       // 登记需要新建的产线（同名只建一次）
       f.lineNames.forEach((n) => { if (!linesByName.has(n) && !autoLines.has(n)) autoLines.set(n, true); });
@@ -1810,7 +1831,7 @@
         </table>
       </div>
       ${plan.length > rows.length ? `<p class="muted" style="margin:8px 0 0;">仅预览前 ${rows.length} 条，实际将导入全部 ${plan.length} 条。</p>` : ''}
-      ${skipped.length ? `<div class="tip" style="margin-top:8px;">跳过 ${skipped.length} 行：${esc(skipped.slice(0, 10).map((s) => '第 ' + s.row + ' 行(' + s.reason + ')').join('、'))}${skipped.length > 10 ? ' 等' : ''}</div>` : ''}
+      ${skipped.length ? `<div class="tip" style="margin-top:8px;">跳过 ${skipped.length} 行：${esc(skipped.slice(0, 10).map((s) => '第 ' + s.row + ' 行(' + s.reason + ')').join('、'))}${skipped.length > 10 ? ' 等' : ''}<br>导入完成后，结果窗口会列出<b>全部未导入明细</b>并可导出 CSV。</div>` : ''}
       <p class="muted" style="margin:8px 0 0;">序号由系统自动分配；夹具编号允许重复。引用的产线若未建档，将自动补建（同名复用，不重复创建）。导入后可在结果窗口「撤销本次导入」。</p>
       <div class="form-actions">
         ${dupCount
@@ -1821,6 +1842,8 @@
       </div>
     `;
     window.__importPlan = plan;
+    /* v5.7.0：把解析阶段被跳过的行一起交给结果窗口，导入后统一出「未导入明细」 */
+    window.__importSkipped = skipped.slice();
     openModal('导入预览', body);
   };
 
@@ -1853,18 +1876,50 @@
     const b = $('#imp_bar'); if (b) b.style.width = Math.round((done / Math.max(1, total)) * 100) + '%';
   }
 
+  /* ---------------- 未导入明细（v5.7.0） ----------------
+   * 旧版只给「失败 N 条 / 跳过 M 条」的数字，落库失败更是仅 console.warn ——
+   * 用户拿不到「哪一行没进来、为什么」，只能凭猜重试。
+   * 这里把四类未导入行汇成一张统一明细（行号升序），供结果窗口展示与 CSV 导出：
+   *   ① 解析未通过（产线为空 / 库位不合规 / 名称为空…）
+   *   ② 与库内记录完全一致，按「跳过重复」处理
+   *   ③ 产线未建档，用户在弹窗里选了「跳过该行」
+   *   ④ 落库失败（校验不通过或被主进程拒绝） */
+  function collectNotImported(parts) {
+    const out = [];
+    const push = (p, reason) => out.push({
+      row: Number(p.row) || 0,
+      serialNo: p.serialNo != null ? p.serialNo : ((p.fixture && p.fixture.serialNo) || ''),
+      name: p.name != null ? p.name : ((p.fixture && p.fixture.name) || ''),
+      location: p.location != null ? p.location : ((p.fixture && p.fixture.location) || ''),
+      reason: reason || '未导入'
+    });
+    (parts.parseSkipped || []).forEach((s) => push(s, s.reason || '解析未通过'));
+    (parts.dupRows || []).forEach((p) => push(p, '与库内记录完全一致（选了「跳过重复」）'));
+    (parts.userSkipRows || []).forEach((p) => push(p, '产线未建档，按选择跳过'));
+    (parts.failRows || []).forEach((f) => push(f, f.reason || '落库失败'));
+    return out.sort((a, b) => (a.row || 0) - (b.row || 0));
+  }
+
   window.confirmImportPlan = async function (mode) {
     const plan = window.__importPlan || [];
     if (!plan.length) { closeModal(); return; }
     const skipDup = mode !== 'all';
     const skipKeys = new Set(plan._skipKeys || []);
+    const parseSkipped = window.__importSkipped || [];
     const dupRows = skipDup ? plan.filter((p) => p.isDup) : [];
     const userSkipRows = plan.filter((p) => !(skipDup && p.isDup) && _rowSkipByKeys(p, skipKeys));
     const effective = plan.filter((p) => !(skipDup && p.isDup) && !_rowSkipByKeys(p, skipKeys));
     if (!effective.length) {
       window.__importPlan = null;
+      window.__importSkipped = null;
       closeModal();
-      toast(`没有需要导入的行（重复 ${dupRows.length} 条 / 选择跳过 ${userSkipRows.length} 条）`, 'warn');
+      /* 一行都没进库时也要能导出明细，否则「全部跳过」同样是黑盒 */
+      const noneIn = collectNotImported({ parseSkipped, dupRows, userSkipRows });
+      if (!noneIn.length) {
+        toast(`没有需要导入的行（重复 ${dupRows.length} 条 / 选择跳过 ${userSkipRows.length} 条）`, 'warn');
+        return;
+      }
+      showImportResult({ added: 0, failed: 0, dup: dupRows.length, userSkip: userSkipRows.length, batchId: '', notImported: noneIn });
       return;
     }
 
@@ -1895,6 +1950,15 @@
     window.__importCreatedByBatch[batchId] = { lineIds: createdLineIds.slice() };
     let added = 0, failed = 0;
     const canBatch = typeof DB.fixtureAddBatch === 'function';
+    /* v5.7.0：落库失败的行必须逐条留证（行号 + 编号 + 原因），供结果窗口展示与导出 */
+    const failRows = [];
+    const noteFail = (p, msg) => failRows.push({
+      row: p && p.row,
+      serialNo: p && p.fixture ? p.fixture.serialNo : '',
+      name: p && p.fixture ? p.fixture.name : '',
+      location: p && p.fixture ? p.fixture.location : '',
+      reason: '落库失败：' + (msg || '未知原因')
+    });
     showImportProgress(effective.length);
     for (let base = 0; base < effective.length; base += IMPORT_CHUNK) {
       const chunk = effective.slice(base, base + IMPORT_CHUNK);
@@ -1920,40 +1984,82 @@
           const res = await DB.fixtureAddBatch(payload);
           added += (res && res.added) || 0;
           failed += (res && Array.isArray(res.failed)) ? res.failed.length : 0;
-          if (res && res.failed) res.failed.forEach((f) => console.warn('导入失败行', chunk[f.index] && chunk[f.index].row, f.message));
+          if (res && res.failed) res.failed.forEach((f) => noteFail(chunk[f.index], f.message));
         } catch (err) {
+          /* 整片失败：逐行登记，避免只留一个数字 */
           failed += chunk.length;
-          console.warn('导入分片失败', base, err && err.message);
+          chunk.forEach((p) => noteFail(p, (err && err.message) || '分片写入异常'));
         }
       } else {
         /* 兜底：老 preload 没有批量通道时退回逐条（慢，但不会崩） */
-        for (const row of payload) {
-          try { await DB.fixtureAdd(row); added++; }
-          catch (err) { failed++; console.warn('导入失败行', err && err.message); }
+        for (let i = 0; i < payload.length; i++) {
+          try { await DB.fixtureAdd(payload[i]); added++; }
+          catch (err) { failed++; noteFail(chunk[i], err && err.message); }
         }
       }
       setImportProgress(Math.min(base + chunk.length, effective.length), effective.length);
       /* 主进程写盘是同步的：不主动让出一帧，进度条根本不会刷新 */
       await new Promise((r) => setTimeout(r, 0));
     }
+    const notImported = collectNotImported({ parseSkipped, dupRows, userSkipRows, failRows });
     window.__importPlan = null;
+    window.__importSkipped = null;
     closeModal();
     await reloadAll();
     renderFixtures();
-    showImportResult({ added, failed, dup: dupRows.length, userSkip: userSkipRows.length, batchId });
+    showImportResult({ added, failed, dup: dupRows.length, userSkip: userSkipRows.length, batchId, notImported });
   };
 
-  /* 导入结果弹窗：给出本次统计 + 「撤销本次导入」入口（toast 会消失，撤回就没机会点了） */
+  /* 导出未导入明细（v5.7.0）：结果窗口的按钮与「一行都没进库」的分支共用。
+   * CSV 与其它导出同为 UTF-8 BOM + CRLF，Excel 双击直接乱码免疫。 */
+  window.exportImportNotImported = function () {
+    const list = window.__importNotImported || [];
+    if (!list.length) { toast('本次没有未导入的数据行', 'warn'); return; }
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
+    const rows = list.map((x) => [x.row, x.serialNo, x.name, x.location, x.reason]);
+    download('未导入明细_' + stamp + '.csv', buildCsvText(['行号', '夹具编号', '名称', '库位', '未导入原因'], rows));
+    toast('已导出 ' + list.length + ' 条未导入明细（含未导入原因）', 'ok');
+  };
+
+  /* 导入结果弹窗：给出本次统计 + 未导入明细 + 「撤销本次导入」入口
+   * （toast 会消失，撤回就没机会点了） */
   function showImportResult(r) {
     const parts = [`新增 <b>${r.added}</b> 条`];
     if (r.failed) parts.push(`失败 <b>${r.failed}</b> 条`);
     if (r.dup) parts.push(`跳过重复 <b>${r.dup}</b> 条`);
     if (r.userSkip) parts.push(`按选择跳过 <b>${r.userSkip}</b> 条`);
+    const notIn = Array.isArray(r.notImported) ? r.notImported : [];
+    window.__importNotImported = notIn;
+    /* ⚠️ 表格只渲染前 200 行，避免几千条未导入时又把窗口拖死（导出 CSV 才是完整版） */
+    const PREVIEW_MAX = 200;
+    const rowsHtml = notIn.slice(0, PREVIEW_MAX).map((x) => `<tr>
+        <td>${x.row || '—'}</td>
+        <td>${esc(x.serialNo || '—')}</td>
+        <td>${esc(x.name || '—')}</td>
+        <td>${esc(x.location || '—')}</td>
+        <td>${esc(x.reason)}</td>
+      </tr>`).join('');
+    const notInBlock = notIn.length ? `
+      <div class="tip" style="margin-top:12px;border-color:#e0b34d;background:#fff8e6;color:#8a5a00;">
+        有 <b>${notIn.length}</b> 行<b>没有导入</b>，逐行明细如下（按行号升序）。
+      </div>
+      <div style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;">
+        <table class="table" style="margin:0;">
+          <thead><tr><th style="width:70px;">行号</th><th>夹具编号</th><th>名称</th><th>库位</th><th>未导入原因</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      ${notIn.length > PREVIEW_MAX ? `<p class="muted" style="margin:6px 0 0;">窗口内仅列前 ${PREVIEW_MAX} 行；导出 CSV 可拿到全部 ${notIn.length} 行。</p>` : ''}
+    ` : '';
     const body = `
       <div class="tip">导入完成：${parts.join('，')}。</div>
       ${r.added ? `<p class="muted" style="margin:10px 0 0;">如需回退，可点「撤销本次导入」精确移除本次新增的 ${r.added} 条，
         不影响此前导入或手工建档的记录。该按钮关窗后失效，也可以在「夹具管理」里逐条删除。</p>` : ''}
+      ${notInBlock}
       <div class="form-actions">
+        ${notIn.length ? `<button class="btn" onclick="exportImportNotImported()">⬇ 导出未导入明细 CSV（${notIn.length} 条）</button>` : ''}
         ${r.added ? `<button class="btn danger" onclick="undoFixtureImport('${r.batchId}')">↩ 撤销本次导入 ${r.added} 条</button>` : ''}
         <button class="btn primary" onclick="closeModal()">完成</button>
       </div>
@@ -2024,8 +2130,13 @@
       </table>` : ''}
       ${sk.length ? `<p class="muted" style="margin:10px 0 0;">前 10 条明细：${esc(sk.slice(0, 10).map((s) => '第 ' + s.row + ' 行(' + s.reason + ')').join('、'))}${sk.length > 10 ? ' 等' : ''}</p>` : ''}
       <p class="muted" style="margin:10px 0 0;">常见原因：<b>产线为空</b>（建档要求至少 1 条产线）；<b>库位不是 4 段式</b>（如 ZP1-U-1-1）；名称为空；机种全部为空。</p>
-      <div class="form-actions"><button class="btn primary" onclick="closeModal()">知道了</button></div>
+      <div class="form-actions">
+        ${sk.length ? `<button class="btn" onclick="exportImportNotImported()">⬇ 导出全部跳过明细 CSV（${sk.length} 条）</button>` : ''}
+        <button class="btn primary" onclick="closeModal()">知道了</button>
+      </div>
     `;
+    /* v5.7.0：整表不可导入时，同样把完整明细交给导出按钮（原来只有前 10 条文字） */
+    window.__importNotImported = collectNotImported({ parseSkipped: sk });
     openModal('导入失败：没有可用的行', body);
   }
 

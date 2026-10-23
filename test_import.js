@@ -70,14 +70,20 @@ const ctx = vm.createContext(sandbox);
 let moduleSrc = constSrc + '\n' + normSrc + '\n' + relSrc + '\n' + importSrc + '\n' + tmplSrc + '\n' + exportSrc + '\n' + lineImportSrc;
 moduleSrc = moduleSrc.replace(/window\.__importPlan/g, '__importPlan')
   .replace(/window\.__lineImportPlan/g, '__lineImportPlan')
+  .replace(/window\.__importSkipped/g, '__importSkipped')
+  .replace(/window\.__importNotImported/g, '__importNotImported')
   .replace(/window\.showImportPreview/g, '__export_showImportPreview')
   .replace(/window\.confirmImportPlan/g, '__export_confirmImportPlan')
+  .replace(/window\.exportImportNotImported/g, '__export_exportImportNotImported')
   .replace(/window\.downloadFixtureTemplate/g, '__export_downloadFixtureTemplate')
   .replace(/window\.fixtureImport/g, '__export_fixtureImport')
   .replace(/window\.fixtureExportCSV/g, '__export_fixtureExportCSV');
+/* v5.7.0：__importSkipped / __importNotImported 会被「先读后写」，
+ * 在 vm 里必须先声明成全局变量，否则读取未声明标识符会抛 ReferenceError */
+moduleSrc = 'var __importSkipped = null, __importNotImported = [];\n' + moduleSrc;
 moduleSrc += `
 ;__export = { FIX_IMPORT_HEADERS, FIX_IMPORT_ALIAS, normalizeHeader, mapImportHeader,
-              parseImportRow, splitNames, buildImportPlan, buildCsvText,
+              parseImportRow, splitNames, buildImportPlan, buildCsvText, collectNotImported,
               LINE_IMPORT_HEADERS, LINE_IMPORT_ALIAS, mapLineImportHeader, parseLineType,
               buildLineImportPlan,
               MAX_LINE_MODELS, MAX_LINES, MAX_LOCATION, isValidSerialNo, isValidLocation,
@@ -85,7 +91,8 @@ moduleSrc += `
               normalizeLineName, planStructureRecycle,
               lineNamesOf, lineNamesLabel, fixtureLineNamesForExport,
               _sigOfNames, _sigOfFixture,
-              __export_confirmImportPlan, undoFixtureImport: window.undoFixtureImport, showImportFailure,
+              __export_confirmImportPlan, __export_exportImportNotImported,
+              undoFixtureImport: window.undoFixtureImport, showImportFailure,
               __export_downloadFixtureTemplate, __export_fixtureExportCSV };
 `;
 vm.runInContext(moduleSrc, ctx);
@@ -542,6 +549,69 @@ function splitCsvLine(line) {
   ok(batchCalls === 3, '1200 行按 500 一片 → 3 次批量落盘', batchCalls);
   ok(savedTotal === 1200, '分片累计条数 = 1200（一行不漏）', savedTotal);
   ok(db2.fixtures.length === 1200, '库内实际写入 1200 条', db2.fixtures.length);
+
+  /* ---------- v5.7.0 未导入明细与 CSV 导出 ---------- */
+  console.log('\n[ 未导入明细 ]');
+
+  // ① 解析阶段被跳过的行，必须带上表格里的编号 / 名称 / 库位（否则用户无法定位实物）
+  const rowsSkip = [HDR,
+    mkRow({ serialNo: 'SN-K1', lm1: 'M1', location: 'ZP1-U-1-1', line1: 'L1 线' }),          // 名称为空
+    mkRow({ serialNo: 'SN-K2', name: '库位坏件', lm1: 'M1', location: '坏库位', line1: 'L1 线' }), // 库位不合规
+    mkRow({ serialNo: 'SN-K3', name: '缺产线件', lm1: 'M1', location: 'ZP1-U-1-3' })          // 产线为空
+  ];
+  const rSkip = M.buildImportPlan(rowsSkip, { fixtures: [], lines: [{ id: 11, name: 'L1 线' }] });
+  ok(!rSkip.ok && rSkip.skipped.length === 3, '3 行全部被跳过（无可导入行 → ok:false）', rSkip.skipped && rSkip.skipped.length);
+  ok(rSkip.skipped[0].serialNo === 'SN-K1', '跳过行保留夹具编号', rSkip.skipped[0].serialNo);
+  ok(rSkip.skipped[0].location === 'ZP1-U-1-1', '跳过行保留库位', rSkip.skipped[0].location);
+  ok(rSkip.skipped[2].name === '缺产线件', '跳过行保留名称', rSkip.skipped[2].name);
+  ok(rSkip.skipped[2].reason === '产线为空', '产线为空的原因仍准确', rSkip.skipped[2].reason);
+
+  // ② 四类未导入行汇总成一张表，按行号升序
+  const merged = M.collectNotImported({
+    parseSkipped: [{ row: 5, reason: '名称为空', serialNo: 'SN-A', name: '', location: 'ZP1-U-1-5' }],
+    dupRows: [{ row: 3, fixture: { serialNo: 'SN-B', name: '重复件', location: 'ZP1-U-1-3' } }],
+    userSkipRows: [{ row: 2, fixture: { serialNo: 'SN-C', name: '跳产线件', location: 'ZP1-U-1-2' } }],
+    failRows: [{ row: 9, serialNo: 'SN-D', name: '失败件', reason: '落库失败：库位不合规' }]
+  });
+  ok(merged.length === 4, '四类未导入行全部进表', merged.length);
+  ok(merged.map((x) => x.row).join(',') === '2,3,5,9', '按行号升序排列', merged.map((x) => x.row).join(','));
+  ok(merged[1].reason.indexOf('完全一致') >= 0, '重复跳过给出原因', merged[1].reason);
+  ok(merged[0].reason.indexOf('按选择跳过') >= 0, '手动跳过给出原因', merged[0].reason);
+  ok(merged[3].reason.indexOf('落库失败') === 0, '落库失败带原因前缀', merged[3].reason);
+  ok(merged[2].name === '' && merged[2].serialNo === 'SN-A', '缺字段补空串而非 undefined', merged[2].name + '|' + merged[2].serialNo);
+
+  // ③ 导出 CSV：文件名带时间戳、UTF-8 BOM、五列表头、行数对齐
+  sandbox.__importNotImported = merged;
+  sandbox.__downloaded = null;
+  M.__export_exportImportNotImported();
+  const dl = sandbox.__downloaded;
+  ok(dl && /^未导入明细_\d{4}-\d{2}-\d{2}_\d{4}\.csv$/.test(dl.name), 'CSV 文件名带日期时间', dl && dl.name);
+  ok(dl && dl.content.charCodeAt(0) === 0xFEFF, 'CSV 带 UTF-8 BOM（Excel 双击不乱码）');
+  const notInLines = dl.content.split('\r\n');
+  ok(notInLines[0].replace(/^\ufeff/, '') === '行号,夹具编号,名称,库位,未导入原因', 'CSV 表头正确', notInLines[0]);
+  ok(notInLines.length === 5, 'CSV = 表头 + 4 条明细', notInLines.length);
+  ok(notInLines[4].split(',')[4] === '落库失败：库位不合规', 'CSV 末行原因完整', notInLines[4]);
+
+  // ④ 落库失败要逐行进明细（旧版只有 console.warn + 一个数字）
+  const db3 = { fixtures: [], lines: [{ id: 11, name: 'L1 线' }], seq: 5000 };
+  sandbox.state = { fixtures: db3.fixtures, lines: db3.lines };
+  sandbox.DB.fixtureAddBatch = async (list) => {
+    list.slice(1).forEach((obj) => db3.fixtures.push(Object.assign({ id: db3.seq++, status: 'stocked' }, obj)));
+    return { ids: [], added: list.length - 1, failed: [{ index: 0, message: '库位不合规' }] };
+  };
+  const rowsF = [HDR,
+    mkRow({ serialNo: 'SN-F1', name: '失败件', lm1: 'M1', location: 'ZP1-U-1-1', line1: 'L1 线' }),
+    mkRow({ serialNo: 'SN-F2', name: '成功件', lm1: 'M1', location: 'ZP1-U-1-2', line1: 'L1 线' })
+  ];
+  const planF = M.buildImportPlan(rowsF, { fixtures: [], lines: db3.lines });
+  sandbox.__importPlan = planF.plan;
+  sandbox.__importSkipped = planF.skipped;
+  await M.__export_confirmImportPlan('all');
+  const notIn = sandbox.__importNotImported || [];
+  ok(notIn.length === 1, '只有失败的那 1 行进明细', notIn.length);
+  ok(notIn[0].serialNo === 'SN-F1' && notIn[0].row === 2, '失败行定位到第 2 行 SN-F1', notIn[0].row + '|' + notIn[0].serialNo);
+  ok(notIn[0].reason === '落库失败：库位不合规', '失败原因取自主进程返回的 message', notIn[0].reason);
+  ok(db3.fixtures.length === 1 && db3.fixtures[0].serialNo === 'SN-F2', '成功行照常落库', db3.fixtures.length);
 
   /* ---------- 汇总 ---------- */  console.log('\n' + '='.repeat(50));
   console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);
