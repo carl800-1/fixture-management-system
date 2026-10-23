@@ -295,6 +295,7 @@
     locFilter: '',          // 库位管理：当前选中的库位（空 = 全部）
     qrFixture: null,        // 当前查看二维码的夹具（单标签打印用）
     fixViewMode: 'card',    // 夹具列表视图模式：card = 卡片 / list = 表格
+    fixShown: 300,          // 夹具列表已渲染条数（v5.6.0 限流：一次只渲染这么多，可点「显示更多」累加）
     outAvailable: 0,        // 出库页：当前检索结果中的可出库台数（数量上限）
     returnAvailable: 0,     // 回库页：当前检索结果中的可回库台数（数量上限）
     outSelectedId: 0,       // 出库页当前选中的夹具（0 = 未选）
@@ -310,7 +311,7 @@
     staffs: [],                                  // v5.1.0 人员卡库（刷卡反查姓名/角色）
     staffQuery: '',                              // 人员卡库页：搜索关键字
     // 刷卡位已识别的人员（存 staff.id；0 = 未识别）
-    swipePick: { out: { party: 0, operator: 0 }, ret: { party: 0, operator: 0 }, dlg: { party: 0, operator: 0 }, rdlg: { party: 0, operator: 0 } },
+    swipePick: { out: { party: 0 }, ret: { party: 0 }, dlg: { party: 0 }, rdlg: { party: 0 } },
     lineCfg: { lineId: 0 },                          // 产线配置页：当前选中的线体
     lineQuery: { lineId: 0, lineModel: '' },                    // 产线使用页：当前选中的线体 + 机种（为空=全部）
     prodPick: '',            // 机种管理页：当前展开明细的机种名称（'' = 未展开）
@@ -357,6 +358,17 @@
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
+    {
+      version: '5.6.0', date: '2026-10-23', items: [
+        '【调整】<b>取消「经办人」</b>：出库页只刷<b>领用人</b>、回库页只刷<b>退库人</b>，单件出库 / 单件回库弹窗同步只留一个刷卡位；送修、维修完成、报废三个弹窗里的「经办人」输入框一并移除。一次出入库只需刷<b>一张卡</b>即可提交',
+        '【调整】刷卡位<b>不再按人员角色限制</b>：只要卡已在「👤 人员卡库」登记且启用就能刷（历史「经办人」角色的老卡也照常可用）；角色字段保留，仅作台账标注',
+        '【兼容】流水记录 <code>operator</code> / <code>operatorCard</code> 字段保留但<b>新记录写空串</b>，历史流水的经办人仍可查、可搜索、可导出，不做数据迁移',
+        '<b>【修复】大批量导入卡死</b>：原来逐条落库，<b>每条都把整个 fixture-data.json 全量重写一遍</b>；库内 9000 条 + 导入 4114 行时累计要写十几 GB，窗口数分钟无响应，用户以为卡死便反复重试，数据越滚越多（现场被重试出 8999 条）',
+        '【优化】新增<b>批量落库通道</b>（<code>fixture-addBatch</code>）：按 500 条分片、整片一次写盘，4114 行从「4114 次全量写」降到「9 次」；导入过程弹出<b>进度条</b>显示已写入条数，不再是无反馈的假死',
+        '【优化】导入<b>预览阶段</b>的两处 O(n²) 扫描改为一次预计算（同编号统计、产线 id→名称映射），上万行长表预览明显变快',
+        '<b>【修复】导入后界面卡死</b>：夹具列表原来一次渲染全部卡片（9000 条 = 9000 张卡，每张 6~7 个按钮），渲染进程直接拖死；现在<b>默认只渲染前 300 条</b>，底部显示总条数并给「再显示 300 条」按钮，换搜索关键字自动回到首页'
+      ]
+    },
     {
       version: '5.5.0', date: '2026-10-23', items: [
         '【新增】出库页「可出库」、回库页「待回库」状态条的<b>右侧各增加一个「全选」开关</b>：勾上即把<b>当前检索结果里的全部夹具</b>一次性选中（跨分组），出库 / 回库数量自动回填为总套数，已选摘要与各分组头的复选框同步更新，随后回车或点「提交出库 / 提交回库」即完成<b>一键批量提交</b>',
@@ -792,69 +804,60 @@
    * 三处使用：出库页（out）、回库页（ret）、单件出库弹窗（dlg）。
    * ============================================================ */
   const SWIPE_CTX = {
-    out: { partyLabel: '领用人', operatorLabel: '经办人', partyId: '#swipe_out_party', operatorId: '#swipe_out_operator' },
-    ret: { partyLabel: '退库人', operatorLabel: '经办人', partyId: '#swipe_ret_party', operatorId: '#swipe_ret_operator' },
-    dlg: { partyLabel: '领用人', operatorLabel: '经办人', partyId: '#swipe_dlg_party', operatorId: '#swipe_dlg_operator' },
-    rdlg: { partyLabel: '退库人', operatorLabel: '经办人', partyId: '#swipe_rdlg_party', operatorId: '#swipe_rdlg_operator' }
+    out: { partyLabel: '领用人', partyId: '#swipe_out_party' },
+    ret: { partyLabel: '退库人', partyId: '#swipe_ret_party' },
+    dlg: { partyLabel: '领用人', partyId: '#swipe_dlg_party' },
+    rdlg: { partyLabel: '退库人', partyId: '#swipe_rdlg_party' }
   };
 
-  function swipeHintText(role) {
-    return role === 'party'
-      ? '刷卡后自动带出姓名与部门（角色需为「领用人」或「两者皆可」）'
-      : '刷卡后自动带出姓名与部门（角色需为「经办人」或「两者皆可」）';
+  function swipeHintText() {
+    return '刷卡后自动带出姓名与部门（卡需已在「👤 人员卡库」登记并启用）';
   }
 
-  /* 生成一个刷卡输入位（HTML 片段） */
-  function swipeFieldHtml(ctx, role) {
+  /* 生成一个刷卡输入位（HTML 片段）
+   * v5.6.0：经办位整块取消，出库只有「领用人」、回库只有「退库人」，因此不再传 role。 */
+  function swipeFieldHtml(ctx) {
     const c = SWIPE_CTX[ctx];
-    const isParty = role === 'party';
-    const id = (isParty ? c.partyId : c.operatorId).slice(1);
-    const label = isParty ? c.partyLabel : c.operatorLabel;
+    const id = c.partyId.slice(1);
+    const label = c.partyLabel;
     return `
       <div class="form-group">
         <label>${label} *</label>
         <div class="swipe-box">
-          <input type="text" id="${id}" data-swipe="${ctx}:${role}" autocomplete="off"
+          <input type="text" id="${id}" data-swipe="${ctx}" autocomplete="off"
             placeholder="💳 刷${label}工牌，或手工输入卡号后回车">
           <span class="swipe-state" id="${id}_state">未刷卡</span>
         </div>
-        <small class="hint" id="${id}_tip">${swipeHintText(role)}</small>
+        <small class="hint" id="${id}_tip">${swipeHintText()}</small>
       </div>`;
   }
 
-  function bindSwipe(ctx, role) {
+  function bindSwipe(ctx) {
     const c = SWIPE_CTX[ctx];
-    const sel = role === 'party' ? c.partyId : c.operatorId;
-    const el = $(sel);
+    const el = $(c.partyId);
     if (!el || el.dataset.swipeBound) return;
     el.dataset.swipeBound = '1';
     el.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       // 刷卡器以回车收尾：拦死，绝不能冒泡到页面级「回车提交」
       e.preventDefault(); e.stopPropagation();
-      const r = resolveSwipe(ctx, role);
-      if (r.ok) {
-        // 刷完领用人自动跳到经办人，反之亦然（连续刷两张卡即可完成录入）
-        const nextSel = role === 'party' ? c.operatorId : c.partyId;
-        const next = $(nextSel);
-        if (next && !String(next.value || '').trim()) next.focus();
-      }
+      resolveSwipe(ctx);
     });
     // 手工输入后离开输入框也复验一次，避免「填了但没按回车」导致提交时才报错
-    el.addEventListener('change', () => resolveSwipe(ctx, role));
+    el.addEventListener('change', () => resolveSwipe(ctx));
   }
 
-  /* 解析一个刷卡位：查库 → 角色/状态校验 → 渲染状态徽标 → 记录到 state */
-  function resolveSwipe(ctx, role) {
+  /* 解析一个刷卡位：查库 → 停用校验 → 渲染状态徽标 → 记录到 state
+   * v5.6.0：经办位取消后不再按角色限制 —— 只要卡已登记且启用就能刷。
+   *         历史「经办人」角色的人照样能刷领用/退库位（否则老卡就废了）。 */
+  function resolveSwipe(ctx) {
     const c = SWIPE_CTX[ctx];
-    const sel = role === 'party' ? c.partyId : c.operatorId;
-    const el = $(sel);
+    const el = $(c.partyId);
     if (!el) return { ok: false, empty: true };
     const raw = String(el.value || '').trim();
     const stEl = $('#' + el.id + '_state');
     const tipEl = $('#' + el.id + '_tip');
-    const label = role === 'party' ? c.partyLabel : c.operatorLabel;
-    const needRoles = role === 'party' ? ['borrower', 'both'] : ['operator', 'both'];
+    const label = c.partyLabel;
 
     const setState = (cls, txt, tip) => {
       if (stEl) { stEl.className = 'swipe-state' + (cls ? ' ' + cls : ''); stEl.textContent = txt; }
@@ -862,47 +865,35 @@
     };
 
     if (!raw) {
-      state.swipePick[ctx][role] = 0;
-      setState('', '未刷卡', swipeHintText(role));
+      state.swipePick[ctx].party = 0;
+      setState('', '未刷卡', swipeHintText());
       return { ok: false, empty: true };
     }
 
     const s = findStaffLocal(raw);
     if (!s) {
-      state.swipePick[ctx][role] = 0;
-      setState('err', '未登记', `卡号 ${raw} 未在人员卡库登记 —— 请到「👤 人员卡库」新增该卡（角色与姓名登记一次即可复用）`);
+      state.swipePick[ctx].party = 0;
+      setState('err', '未登记', `卡号 ${raw} 未在人员卡库登记 —— 请到「👤 人员卡库」新增该卡（姓名登记一次即可复用）`);
       return { ok: false, msg: `${label}卡号 ${raw} 未登记，请先到「👤 人员卡库」登记` };
     }
     if (s.active === false) {
-      state.swipePick[ctx][role] = 0;
+      state.swipePick[ctx].party = 0;
       setState('err', '已停用', `「${s.name}」的卡已停用，不能用于出入库；如确需使用请到「👤 人员卡库」重新启用`);
       return { ok: false, msg: `${label}「${s.name}」的卡已停用` };
     }
-    if (needRoles.indexOf(s.role) < 0) {
-      state.swipePick[ctx][role] = 0;
-      const other = role === 'party' ? '经办人' : c.partyLabel;
-      setState('err', '角色不符', `「${s.name}」的角色是「${STAFF_ROLE_LABEL[s.role] || s.role}」，不能作为${label}；请换成${other}的卡`);
-      return { ok: false, msg: `「${s.name}」的角色是「${STAFF_ROLE_LABEL[s.role] || s.role}」，不能作为${label}` };
-    }
 
-    state.swipePick[ctx][role] = s.id;
-    setState('ok', `${s.name}${s.dept ? ' · ' + s.dept : ''}`, `✓ 卡号 ${normCard(s.cardNo)} ｜ 角色：${STAFF_ROLE_LABEL[s.role] || s.role}`);
+    state.swipePick[ctx].party = s.id;
+    setState('ok', `${s.name}${s.dept ? ' · ' + s.dept : ''}`, `✓ 卡号 ${normCard(s.cardNo)} ｜ ${STAFF_ROLE_LABEL[s.role] || s.role || '—'}`);
     return { ok: true, staff: s };
   }
 
-  /* 提交前的成对校验：两个位都必须刷、都必须过、且不能是同一张卡 */
-  function validateSwipePair(ctx) {
+  /* 提交前的校验：该位必须刷、必须过（v5.6.0 单人版，双人复核已取消） */
+  function validateSwipe(ctx) {
     const c = SWIPE_CTX[ctx];
-    const rp = resolveSwipe(ctx, 'party');
-    const ro = resolveSwipe(ctx, 'operator');
-    if (!rp.ok && rp.empty) return { ok: false, msg: `请刷${c.partyLabel}的工牌（卡号不能为空）` };
-    if (!rp.ok) return { ok: false, msg: rp.msg || `${c.partyLabel}刷卡未通过` };
-    if (!ro.ok && ro.empty) return { ok: false, msg: `请刷${c.operatorLabel}的工牌（卡号不能为空）` };
-    if (!ro.ok) return { ok: false, msg: ro.msg || `${c.operatorLabel}刷卡未通过` };
-    if (normCard(rp.staff.cardNo) === normCard(ro.staff.cardNo)) {
-      return { ok: false, msg: `${c.partyLabel}与${c.operatorLabel}不能是同一个人（同一张卡）` };
-    }
-    return { ok: true, party: rp.staff, operator: ro.staff };
+    const r = resolveSwipe(ctx);
+    if (!r.ok && r.empty) return { ok: false, msg: `请刷${c.partyLabel}的工牌（卡号不能为空）` };
+    if (!r.ok) return { ok: false, msg: r.msg || `${c.partyLabel}刷卡未通过` };
+    return { ok: true, party: r.staff };
   }
 
   /* ============================================================
@@ -930,8 +921,7 @@
              <datalist id="fix_out_loc_list">${locList}</datalist>`
           : `<input type="text" value="${esc(f.location)}" disabled><small class="hint">出库不改动库位，回库时默认预填该值</small>`}
       </div>
-      ${swipeFieldHtml('dlg', 'party')}
-      ${swipeFieldHtml('dlg', 'operator')}
+      ${swipeFieldHtml('dlg')}
       <div class="form-group"><label>出库原因 <span class="req">*</span></label>
         <select id="fix_out_reason" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
           <option value="use">使用</option>
@@ -948,19 +938,19 @@
     `;
     openModal(`出库 — ${f.serialNo || f.code} ${f.name}`, html);
     /* 弹窗渲染完再绑刷卡：openModal 会整体替换 modalBody，提前绑会绑到游离节点上 */
-    state.swipePick.dlg = { party: 0, operator: 0 };
-    bindSwipe('dlg', 'party');
-    bindSwipe('dlg', 'operator');
+    state.swipePick.dlg = { party: 0 };
+    bindSwipe('dlg');
     const partyEl = $('#swipe_dlg_party');
     if (partyEl) partyEl.focus();
   };
 
   window.submitFixtureOut = async function (id) {
-    const v = validateSwipePair('dlg');
+    const v = validateSwipe('dlg');
     if (!v.ok) { toast(v.msg, 'err'); return; }
-    const operator = v.operator.name;
+    /* v5.6.0：经办位取消，只记一个人；operator / operatorCard 留空以兼容历史字段与旧流水 */
+    const operator = '';
+    const operatorCard = '';
     const counterparty = v.party.name;
-    const operatorCard = normCard(v.operator.cardNo);
     const partyCard = normCard(v.party.cardNo);
     const time = inputToMs($('#fix_out_time').value);
     const remark = ($('#fix_out_remark') || {}).value.trim();
@@ -1363,6 +1353,18 @@
     const q = ($('#fix_search') || {}).value.trim();
     const list = $('#fixture_list');
     if (!list) return;
+    /* 换了关键字就把「已显示条数」收回到首页上限，避免上次点开的 2000 条继续全量渲染 */
+    state.fixShown = FIX_RENDER_LIMIT;
+    const filtered = q ? state.fixtures.filter((f) => matchFixture(f, q)) : state.fixtures;
+    renderFixtureArea(list, filtered, state.fixSelectedId || 0);
+  };
+
+  /* 「显示更多」：每次再放 300 条，避免一次 innerHTML 上万张卡片把渲染进程拖死 */
+  window.showMoreFixtures = function () {
+    state.fixShown = (state.fixShown || FIX_RENDER_LIMIT) + FIX_RENDER_LIMIT;
+    const list = $('#fixture_list');
+    if (!list) return;
+    const q = ($('#fix_search') || {}).value.trim();
     const filtered = q ? state.fixtures.filter((f) => matchFixture(f, q)) : state.fixtures;
     renderFixtureArea(list, filtered, state.fixSelectedId || 0);
   };
@@ -1604,12 +1606,28 @@
     };
     // 待自动补建的产线（同名只登记一次，落库时复用）
     const autoLines = new Map();      // lineName -> true
-    /* 库内已有记录的签名计数（多重集）。每命中一行就减 1，保证「库内 1 套 + 本次 2 行」判成 1 重复 + 1 新增。 */
+    /* 库内已有记录的签名计数（多重集）。每命中一行就减 1，保证「库内 1 套 + 本次 2 行」判成 1 重复 + 1 新增。
+     * ⚠️ 产线 id→名称 只建一次 Map（v5.6.0）：原实现每条夹具都 new Map 一遍，
+     *    9000 条夹具 × 100 多条产线 = 近百万次建表，导入预览会明显卡顿。 */
+    const lineNameById = new Map((c.lines || []).map((l) => [l.id, l.name]));
     const existingSig = new Map();
     (c.fixtures || []).forEach((f) => {
-      const sig = _sigOfFixture(f, c.lines || []);
+      const lns = (f.lines || []).map((id) => lineNameById.get(Number(id))).filter(Boolean);
+      const sig = _sigOfNames(f.serialNo, f.name, f.location, f.category, f.lineModels, lns, f.remark);
       existingSig.set(sig, (existingSig.get(sig) || 0) + 1);
     });
+
+    /* 同编号统计预计算（v5.6.0）：原来每行都 filter 一遍全表，
+     * 4000 行 × 9000 条 ≈ 3600 万次比较，是预览阶段的主要耗时来源之一。 */
+    const serialStat = new Map();   // serialNo -> { total, stocked }
+    (c.fixtures || []).forEach((x) => {
+      const k = String(x.serialNo == null ? '' : x.serialNo);
+      const s = serialStat.get(k) || { total: 0, stocked: 0 };
+      s.total++;
+      if ((x.status || 'stocked') === 'stocked') s.stocked++;
+      serialStat.set(k, s);
+    });
+    const batchSerial = new Map();  // 本次文件内已出现的同编号行数
 
     const plan = [];
     const skipped = [];
@@ -1637,10 +1655,12 @@
       f.lineNames.forEach((n) => { if (!linesByName.has(n) && !autoLines.has(n)) autoLines.set(n, true); });
 
       /* 重号提示：夹具编号允许重复（v4「每套一条记录」），但要告知现有持有量。 */
-      const sameNo = (c.fixtures || []).filter((x) => x.serialNo === f.serialNo);
-      const inBatch = plan.filter((p) => p.fixture.serialNo === f.serialNo).length;
-      const dupTotal = sameNo.length + inBatch;
-      const dupInStock = sameNo.filter((x) => (x.status || 'stocked') === 'stocked').length;
+      const serialKey = String(f.serialNo == null ? '' : f.serialNo);
+      const sstat = serialStat.get(serialKey) || { total: 0, stocked: 0 };
+      const inBatch = batchSerial.get(serialKey) || 0;
+      batchSerial.set(serialKey, inBatch + 1);
+      const dupTotal = sstat.total + inBatch;
+      const dupInStock = sstat.stocked;
       const dupHint = dupTotal
         ? `该编号已有 ${dupTotal} 套（在库 ${dupInStock} 套，在外 ${dupTotal - dupInStock} 套）`
         : '';
@@ -1813,6 +1833,26 @@
   /* 确认导入
    * mode = 'skip'（默认）：跳过与库内已有记录完全一致的重复行（防同一份表重复导入）
    *        'all'        ：全部导入（确实又增加了同类实物时用） */
+  /* ---------------- 导入落库的分片与进度（v5.6.0） ----------------
+   * 每片 500 条：主进程每片只全量写一次盘，4114 行的整批导入 ≈ 9 次写盘（原来 4114 次）。
+   * 片数太多则写盘次数回升，太少则进度条跳动、单片耗时过长，500 是实测折中值。 */
+  const IMPORT_CHUNK = 500;
+
+  function showImportProgress(total) {
+    openModal('正在导入', `
+      <div class="tip">正在写入 <b id="imp_done">0</b> / <b>${total}</b> 条，请勿关闭窗口或重复点「确认导入」…</div>
+      <div style="height:10px;background:#e6e8ec;border-radius:5px;overflow:hidden;margin-top:12px;">
+        <div id="imp_bar" style="height:100%;width:0;background:#2f6fed;transition:width .15s;"></div>
+      </div>
+      <p class="muted" style="margin:10px 0 0;">写入期间界面会短暂无响应属正常现象；进度条走完会自动弹出结果。</p>
+    `);
+  }
+
+  function setImportProgress(done, total) {
+    const t = $('#imp_done'); if (t) t.textContent = String(done);
+    const b = $('#imp_bar'); if (b) b.style.width = Math.round((done / Math.max(1, total)) * 100) + '%';
+  }
+
   window.confirmImportPlan = async function (mode) {
     const plan = window.__importPlan || [];
     if (!plan.length) { closeModal(); return; }
@@ -1841,20 +1881,30 @@
       createdLineIds.push(id);
     }
 
-    /* ② 逐行落库夹具；打批次号 importBatch，供「撤销本次导入」精确回滚这一批 */
+    /* ② 分片批量落库（v5.6.0，BUG-014）
+     *
+     * 原实现：for 每一行 await DB.fixtureAdd() ⇒ 主进程每条都 fs.writeFileSync 整个
+     * fixture-data.json。实测单次写盘 ~50ms（9000 条库 / 4.8MB 文件），4114 行累计要写
+     * 十几 GB，窗口几分钟无响应，用户以为卡死 → 反复重试 → 数据翻倍（实测被堆到 8999 条）。
+     *
+     * 现在：按 IMPORT_CHUNK 分片交给主进程一次落盘（每片 1 次写），片间 await 让出一帧，
+     * 进度条可见、窗口不假死。整批 4114 行从「4000+ 次写盘」降到「9 次写盘」。 */
     const batchId = 'b' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     /* 记录本批新建的结构项 —— 撤销时若已无人引用就一并回收（BUG-011）。 */
     window.__importCreatedByBatch = window.__importCreatedByBatch || {};
     window.__importCreatedByBatch[batchId] = { lineIds: createdLineIds.slice() };
     let added = 0, failed = 0;
-    for (const p of effective) {
-      try {
+    const canBatch = typeof DB.fixtureAddBatch === 'function';
+    showImportProgress(effective.length);
+    for (let base = 0; base < effective.length; base += IMPORT_CHUNK) {
+      const chunk = effective.slice(base, base + IMPORT_CHUNK);
+      const payload = chunk.map((p) => {
         const lineIds = [];
         (p.fixture.lineNames || []).forEach((n) => {
           const id = lineIdByName.get(n);
           if (id != null && !lineIds.includes(id)) lineIds.push(id);
         });
-        await DB.fixtureAdd({
+        return {
           serialNo: p.fixture.serialNo,
           name: p.fixture.name,
           lineModels: p.fixture.lineModels,
@@ -1863,12 +1913,28 @@
           remark: p.fixture.remark,
           lines: lineIds,
           importBatch: batchId
-        });
-        added++;
-      } catch (err) {
-        failed++;
-        console.warn('导入失败行', p.row, err && err.message);
+        };
+      });
+      if (canBatch) {
+        try {
+          const res = await DB.fixtureAddBatch(payload);
+          added += (res && res.added) || 0;
+          failed += (res && Array.isArray(res.failed)) ? res.failed.length : 0;
+          if (res && res.failed) res.failed.forEach((f) => console.warn('导入失败行', chunk[f.index] && chunk[f.index].row, f.message));
+        } catch (err) {
+          failed += chunk.length;
+          console.warn('导入分片失败', base, err && err.message);
+        }
+      } else {
+        /* 兜底：老 preload 没有批量通道时退回逐条（慢，但不会崩） */
+        for (const row of payload) {
+          try { await DB.fixtureAdd(row); added++; }
+          catch (err) { failed++; console.warn('导入失败行', err && err.message); }
+        }
       }
+      setImportProgress(Math.min(base + chunk.length, effective.length), effective.length);
+      /* 主进程写盘是同步的：不主动让出一帧，进度条根本不会刷新 */
+      await new Promise((r) => setTimeout(r, 0));
     }
     window.__importPlan = null;
     closeModal();
@@ -2059,7 +2125,6 @@
     if (f.status === 'retired') { toast('夹具已报废', 'warn'); return; }
     openModal(`报废 — ${f.serialNo || (f.code)} ${f.name}`, `
       <div class="form-group"><label>夹具</label><input type="text" value="${esc(f.serialNo || '')} ${esc(f.name)}（序号 ${esc(f.code)}）" disabled></div>
-      <div class="form-group"><label>经办人</label><input type="text" id="fix_retire_op" placeholder="经办人"></div>
       <div class="form-group"><label>报废时间</label><input type="datetime-local" id="fix_retire_time" value="${nowInput()}"></div>
       <div class="form-group"><label>报废原因</label><input type="text" id="fix_retire_remark" placeholder="如：精度超差无法修复"></div>
       <p class="muted" style="color:var(--danger);margin:8px 0 0;">报废后不可恢复，请谨慎操作。</p>
@@ -2071,10 +2136,9 @@
   };
 
   window.submitFixtureRetire = async function (id) {
-    const operator = (($('#fix_retire_op') || {}).value || '').trim();
     const time = inputToMs($('#fix_retire_time').value);
     const remark = (($('#fix_retire_remark') || {}).value || '').trim();
-    if (!operator) { toast('请填写经办人', 'err'); return; }
+    const operator = '';   // v5.6.0：不再采集经办人
     try {
       await DB.fixtureAddTransaction({ fixtureId: id, type: 'retire', operator, time, remark: remark || '报废' });
       closeModal();
@@ -2190,10 +2254,28 @@
     container.innerHTML = html;
   }
 
-  /* 统一渲染入口：按视图模式渲染卡片或列表 */
+  /* 统一渲染入口：按视图模式渲染卡片或列表
+   *
+   * ⚠️ 必须限流（v5.6.0，BUG-014）：导入 4000+ 条后一次渲染 9000 张卡片
+   *    （每张 6~7 个按钮 + 大量样式）会让渲染进程长时间无响应，看起来就是「卡死」。
+   *    默认只渲染前 FIX_RENDER_LIMIT 条，底部给「显示更多」与全文条数提示。 */
+  const FIX_RENDER_LIMIT = 300;
+
   function renderFixtureArea(container, fixtures, selectedId = 0) {
-    if (state.fixViewMode === 'list') renderFixtureList(container, fixtures, selectedId);
-    else renderFixtureCards(container, fixtures, selectedId);
+    const total = fixtures.length;
+    const limit = Math.max(FIX_RENDER_LIMIT, state.fixShown || 0);
+    const shown = total > limit ? fixtures.slice(0, limit) : fixtures;
+    if (state.fixViewMode === 'list') renderFixtureList(container, shown, selectedId);
+    else renderFixtureCards(container, shown, selectedId);
+    if (total > shown.length) {
+      const more = document.createElement('div');
+      more.className = 'render-more';
+      more.innerHTML = `
+        <span>共 <b>${total}</b> 条，当前只渲染前 <b>${shown.length}</b> 条（避免上万条一次渲染拖死界面）。</span>
+        <button class="btn sm" onclick="showMoreFixtures()">再显示 ${Math.min(FIX_RENDER_LIMIT, total - shown.length)} 条</button>
+        <span class="muted">用上方搜索框缩小范围最快</span>`;
+      container.appendChild(more);
+    }
   }
 
   window.setFixViewMode = function (mode) {
@@ -2240,6 +2322,7 @@
   function renderFixtures() {
     const container = $('#content');
     if (!container) return;
+    state.fixShown = FIX_RENDER_LIMIT;   // 整页重绘 = 重新从第一页开始渲染
     const inStock = state.fixtures.filter((f) => f.status === 'stocked').length;
     const outStock = state.fixtures.filter((f) => f.status === 'checked_out').length;
     const repair = state.fixtures.filter((f) => f.status === 'repair').length;
@@ -2298,7 +2381,7 @@
           <ol>
             <li>确定夹具：扫码 / 编号 / 名称 / 机种 / 库位检索</li>
             <li>选择数量：默认 1 件，可在右侧调整</li>
-            <li>刷卡录入：先刷领用人工牌，再刷经办人工牌</li>
+            <li>刷卡录入：刷领用人工牌</li>
             <li>提交出库</li>
           </ol>
         </aside>
@@ -2348,8 +2431,7 @@
               </div>
             </div>
             <div class="form-row">
-              ${swipeFieldHtml('out', 'party')}
-              ${swipeFieldHtml('out', 'operator')}
+              ${swipeFieldHtml('out')}
             </div>
             <div class="form-row form-row-inline">
               <div class="form-group">
@@ -2387,7 +2469,7 @@
           <ol>
             <li>确定夹具：扫码 / 编号 / 名称 / 机种 / 库位检索</li>
             <li>选择数量：默认 1 件，可在右侧调整</li>
-            <li>刷卡录入：先刷退库人工牌，再刷经办人工牌</li>
+            <li>刷卡录入：刷退库人工牌</li>
             <li>提交回库</li>
           </ol>
         </aside>
@@ -2432,8 +2514,7 @@
               </div>
             </div>
             <div class="form-row">
-              ${swipeFieldHtml('ret', 'party')}
-              ${swipeFieldHtml('ret', 'operator')}
+              ${swipeFieldHtml('ret')}
             </div>
             <div class="form-row form-row-inline">
               <div class="form-group">
@@ -2481,9 +2562,8 @@
       }
     };
     ['#out_code', '#out_name', '#out_spec', '#out_location'].forEach(wrapFixes);
-    /* v5.1.0 刷卡位：领用人 / 经办人。刷完自动跳到另一个空位，两张卡刷完点提交 */
-    bindSwipe('out', 'party');
-    bindSwipe('out', 'operator');
+    /* v5.6.0 刷卡位：只剩「领用人」一个位，刷一张卡即可提交 */
+    bindSwipe('out');
     // 用途下拉变化时显示/隐藏自填框
     const outReasonEl = $('#out_reason');
     if (outReasonEl) {
@@ -2511,9 +2591,8 @@
       }
     };
     ['#return_code', '#return_name', '#return_spec', '#return_location'].forEach(wrapFixes);
-    /* v5.1.0 刷卡位：退库人 / 经办人 */
-    bindSwipe('ret', 'party');
-    bindSwipe('ret', 'operator');
+    /* v5.6.0 刷卡位：只剩「退库人」一个位，刷一张卡即可提交 */
+    bindSwipe('ret');
     // 用途下拉变化时显示/隐藏自填框
     const returnReasonEl = $('#return_reason');
     if (returnReasonEl) {
@@ -2740,18 +2819,19 @@
     $('#out_code') && $('#out_code').focus();
   };
 
-  /* 一次提交多台：每台各出库 1 件，共用经办人/领用人/时间/备注 */
+  /* 一次提交多台：每台各出库 1 件，共用领用人/时间/备注 */
   window.submitOutDo = async function () {
     // 提交前按数量框同步一次勾选，确保「数量 = 实际出库台数」且不超过可用库存
     syncQtyToPick('out');
     const ids = pickedIds('out');
     if (!ids.length) { toast('请先勾选要出库的夹具，或填写出库数量', 'err'); return; }
-    /* v5.1.0 严格校验：两人都必须刷已登记且启用的卡，角色匹配，且不能同卡 */
-    const v = validateSwipePair('out');
+    /* v5.6.0 校验：领用人必须刷已登记且启用的卡 */
+    const v = validateSwipe('out');
     if (!v.ok) { toast(v.msg, 'err'); return; }
-    const operator = v.operator.name;
+    /* v5.6.0：经办位取消，只记一个人；operator / operatorCard 留空以兼容历史字段与旧流水 */
+    const operator = '';
+    const operatorCard = '';
     const counterparty = v.party.name;
-    const operatorCard = normCard(v.operator.cardNo);
     const partyCard = normCard(v.party.cardNo);
     const time = inputToMs(($('#out_time') || {}).value);
     const outReason = ($('#out_reason') || {}).value || 'use';
@@ -2765,7 +2845,7 @@
       } catch (e) { fail++; }
     }
     await reloadAll();
-    // 只清理本次的选择结果，保留经办人/领用人/时间便于连续录入
+    // 只清理本次的选择结果，保留领用人/时间便于连续录入
     clearPickState('out');
     const remarkEl = $('#out_remark'); if (remarkEl) remarkEl.value = '';
     const reasonTextEl = $('#out_reason_text'); if (reasonTextEl) reasonTextEl.value = '';
@@ -2840,12 +2920,13 @@
     syncQtyToPick('return');
     const ids = pickedIds('return');
     if (!ids.length) { toast('请先勾选要回库的夹具，或填写回库数量', 'err'); return; }
-    /* v5.1.0 严格校验：退库人与经办人都必须刷已登记且启用的卡，且不能同卡 */
-    const v = validateSwipePair('ret');
+    /* v5.6.0 校验：退库人必须刷已登记且启用的卡 */
+    const v = validateSwipe('ret');
     if (!v.ok) { toast(v.msg, 'err'); return; }
-    const operator = v.operator.name;
+    /* v5.6.0：经办位取消，只记一个人；operator / operatorCard 留空以兼容历史字段与旧流水 */
+    const operator = '';
+    const operatorCard = '';
     const counterparty = v.party.name;
-    const operatorCard = normCard(v.operator.cardNo);
     const partyCard = normCard(v.party.cardNo);
     const time = inputToMs(($('#return_time') || {}).value);
     const returnReason = ($('#return_reason') || {}).value || 'use';
@@ -2901,11 +2982,12 @@
 
   /* 责任人/借用人展示：
    * - 已出库：借用人（领用部门/外借单位）即当前责任人
-   * - 其他状态：最近一次操作的经办人 */
+   * - 其他状态：最近一次经手人（v5.6.0 起经办位取消，回库流水只有退库人，故回落到 counterparty） */
   function fixtureResponsible(f) {
     if (f.status === 'checked_out') return fixtureCurrentBorrower(f) || '—';
     const txs = state.fixTransactions.filter((t) => t.fixtureId === f.id);
-    const op = txs.length ? (txs[txs.length - 1].operator || '') : '';
+    const last = txs.length ? txs[txs.length - 1] : null;
+    const op = last ? (last.operator || last.counterparty || '') : '';
     return op || '—';
   }
 
@@ -3059,7 +3141,7 @@
     container.innerHTML = `
       <div class="panel">
         <div class="panel-title">🔍 流水记录查询</div>
-        <div class="search-bar"><input type="text" id="rec_search" placeholder="搜索编号/名称/经办人..." oninput="searchRecords()"></div>
+        <div class="search-bar"><input type="text" id="rec_search" placeholder="搜索编号/名称/领用人/退库人..." oninput="searchRecords()"></div>
         <div id="rec_list"></div>
       </div>
     `;
@@ -3073,7 +3155,11 @@
     const code = parseQRToken(raw);
     const q = (code || raw).toLowerCase();
     const filtered = q ? state.fixTransactions.filter((t) =>
-      codeLike(t.fixtureCode, q) || (t.fixtureName || '').toLowerCase().includes(q) || (t.operator || '').toLowerCase().includes(q)
+      codeLike(t.fixtureCode, q)
+      || (t.fixtureName || '').toLowerCase().includes(q)
+      || (t.operator || '').toLowerCase().includes(q)
+      /* v5.6.0：经办位取消后，流水里唯一的「人」是领用人 / 退库人（counterparty），必须能搜到 */
+      || (t.counterparty || '').toLowerCase().includes(q)
     ) : state.fixTransactions;
     renderAllRecords(filtered);
   };
@@ -3723,11 +3809,13 @@
    * 业务规则：一张卡只能登记一个人（卡号归一化后唯一）；停用比删除更安全。
    * 卡号来源：USB 读卡器（键盘模拟，末尾自动回车）或手工输入。
    * ============================================================ */
-  const STAFF_ROLE_LABEL = { borrower: '领用人', operator: '经办人', both: '两者皆可' };
+  const STAFF_ROLE_LABEL = { borrower: '领用人', operator: '经办人（历史）', both: '两者皆可' };
+  /* v5.6.0：经办位整块取消，刷卡位不再按角色设限 —— 已登记且启用的卡都能刷领用/退库位。
+   * 角色字段保留只为兼容历史数据与台账标注，不再参与刷卡校验。 */
   const STAFF_ROLE_HINT = {
-    borrower: '只能刷在「领用人 / 退库人」位',
-    operator: '只能刷在「经办人」位',
-    both: '领用位与经办位都可以刷'
+    borrower: '可刷「领用人 / 退库人」位',
+    operator: '历史角色，刷卡时按「领用人 / 退库人」对待',
+    both: '所有刷卡位通用'
   };
   const STAFF_IMPORT_HEADERS = ['卡号', '姓名', '部门', '角色', '状态', '备注'];
   const STAFF_IMPORT_ALIAS = {
@@ -3829,7 +3917,8 @@
         </div>
         <div id="staff_table_box">${staffTableHtml()}</div>
         <div class="tip">
-          角色决定这张卡能刷在哪：<b>领用人</b>只能刷「领用人 / 退库人」位，<b>经办人</b>只能刷「经办人」位，<b>两者皆可</b>两边都能刷。
+          <b>v5.6.0 起出入库只刷一张卡</b>：出库刷「领用人」、回库刷「退库人」，不再要求第二个经办人。
+          卡片上的<b>角色</b>现仅作台账标注，不再限制能刷哪个位（任何已登记且启用的卡都能刷）。
           离职或丢卡请用<b>停用</b>而不是删除 —— 停用后刷卡会被拒绝，历史流水仍可追溯到人。
         </div>
       </div>`;
@@ -4010,7 +4099,7 @@
     if (!cardNo) return { ok: false, reason: '卡号为空' };
     if (!name) return { ok: false, reason: '姓名为空' };
     const role = parseStaffRole(get('role'));
-    if (!role) return { ok: false, reason: '角色无法识别（可填 领用人 / 经办人 / 两者皆可）' };
+    if (!role) return { ok: false, reason: '角色无法识别（可填 领用人 / 两者皆可）' };
     if (!DB.isValidCardNo(cardNo)) return { ok: false, reason: '卡号含竖线/逗号或超长' };
     if (!DB.isValidStaffName(name)) return { ok: false, reason: '姓名超长或含非法字符' };
     return {
@@ -4603,8 +4692,7 @@
           maxlength="${MAX_LOCATION}" value="${esc(f.location || '')}">
         <datalist id="fix_return_loc_list">${locList}</datalist>
         <small class="hint">默认预填出库前的库位，可改为实际归还位置（改则写回并留痕流水）</small></div>
-      ${swipeFieldHtml('rdlg', 'party')}
-      ${swipeFieldHtml('rdlg', 'operator')}
+      ${swipeFieldHtml('rdlg')}
       <div class="form-group"><label>回库时间</label><input type="datetime-local" id="fix_return_time" value="${nowInput()}"></div>
       <div class="form-group"><label>备注</label><input type="text" id="fix_return_remark" placeholder="可选备注"></div>
       <div class="form-actions">
@@ -4614,20 +4702,20 @@
     `;
     openModal(`回库 — ${f.serialNo || f.code} ${f.name}`, html);
     /* 弹窗渲染完再绑刷卡（openModal 会整体替换 modalBody） */
-    state.swipePick.rdlg = { party: 0, operator: 0 };
-    bindSwipe('rdlg', 'party');
-    bindSwipe('rdlg', 'operator');
+    state.swipePick.rdlg = { party: 0 };
+    bindSwipe('rdlg');
     const partyEl = $('#swipe_rdlg_party');
     if (partyEl) partyEl.focus();
   };
 
   window.submitFixtureReturn = async function (id) {
-    /* v5.1.0 严格校验：退库人与经办人都必须刷已登记且启用的卡，且不能同卡 */
-    const v = validateSwipePair('rdlg');
+    /* v5.6.0 校验：退库人必须刷已登记且启用的卡 */
+    const v = validateSwipe('rdlg');
     if (!v.ok) { toast(v.msg, 'err'); return; }
-    const operator = v.operator.name;
+    /* v5.6.0：经办位取消，只记一个人；operator / operatorCard 留空以兼容历史字段与旧流水 */
+    const operator = '';
+    const operatorCard = '';
     const counterparty = v.party.name;
-    const operatorCard = normCard(v.operator.cardNo);
     const partyCard = normCard(v.party.cardNo);
     const time = inputToMs($('#fix_return_time').value);
     const remark = ($('#fix_return_remark') || {}).value.trim();
@@ -4650,7 +4738,6 @@
     if (!f) { toast('夹具不存在', 'err'); return; }
     const html = `
       <div class="form-group"><label>夹具</label><input type="text" value="${esc(f.serialNo || '')} ${esc(f.name)}（序号 ${esc(f.code)}）" disabled></div>
-      <div class="form-group"><label>经办人</label><input type="text" id="fix_repair_op" placeholder="经办人"></div>
       <div class="form-group"><label>维修类型</label>
         <select id="fix_repair_type" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
           <option value="repair">普通维修</option>
@@ -4669,10 +4756,9 @@
   };
 
   window.submitFixtureRepair = async function (id) {
-    const operator = ($('#fix_repair_op') || {}).value.trim();
     const type = ($('#fix_repair_type') || {}).value;
     const remark = ($('#fix_repair_remark') || {}).value.trim();
-    if (!operator) { toast('请填写经办人', 'err'); return; }
+    const operator = '';   // v5.6.0：不再采集经办人
     try {
       // repairType 独立保存维修子类型，避免填写说明后子类型丢失
       await DB.fixtureAddTransaction({ fixtureId: id, type: 'repair', operator, repairType: type, remark: remark, time: Date.now() });
@@ -4692,7 +4778,6 @@
     if (f.status !== 'repair') { toast('夹具不在维修中状态', 'err'); return; }
     openModal(`维修完成 — ${f.serialNo || (f.code)} ${f.name}`, `
       <div class="form-group"><label>夹具</label><input type="text" value="${esc(f.serialNo || '')} ${esc(f.name)}（序号 ${esc(f.code)}）" disabled></div>
-      <div class="form-group"><label>经办人</label><input type="text" id="fix_rdone_op" placeholder="经办人"></div>
       <div class="form-group"><label>完成时间</label><input type="datetime-local" id="fix_rdone_time" value="${nowInput()}"></div>
       <div class="form-group"><label>维修说明</label><input type="text" id="fix_rdone_remark" placeholder="处理结果（可选）"></div>
       <div class="form-actions">
@@ -4703,10 +4788,9 @@
   };
 
   window.submitFixtureRepairComplete = async function (id) {
-    const operator = (($('#fix_rdone_op') || {}).value || '').trim();
     const time = inputToMs($('#fix_rdone_time').value);
     const remark = (($('#fix_rdone_remark') || {}).value || '').trim();
-    if (!operator) { toast('请填写经办人', 'err'); return; }
+    const operator = '';   // v5.6.0：不再采集经办人
     try {
       await DB.fixtureAddTransaction({ fixtureId: id, type: 'repair_done', operator, time, remark: remark || '维修完成' });
       closeModal();

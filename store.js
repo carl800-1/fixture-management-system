@@ -318,12 +318,35 @@ function validateFixture(f, opts) {
   if (cat.length > MAX_CATEGORY || /[|\r\n]/.test(cat)) bad('分类名称最多 ' + MAX_CATEGORY + ' 字符，且不能含 | 或换行');
 }
 
-function addFixture(fixture) {
+/* 批量落库专用编号分配器（v5.6.0）
+ * ⚠️ 原实现每条夹具都调一次 nextFreeCode()，而它每次都 `new Set(全表 code)`（O(n)）；
+ *    批量导入 N 条就是 O(n·N)，9000 条库 + 4000 行导入 ≈ 3600 万次字符串比较。
+ *    这里改成「一次建 Set + 游标顺延」，整批只付一次代价。 */
+function makeCodeAllocator() {
   load();
+  const used = new Set((data.fixtures || []).map((f) => String(f.code)));
+  let cursor = 1001;
+  return {
+    has(code) { return used.has(String(code)); },
+    take() {
+      while (used.has(String(cursor))) cursor++;
+      const code = String(cursor);
+      used.add(code);
+      return code;
+    }
+  };
+}
+
+/* 建档核心：归一化 + 校验，返回**未入库**的夹具对象（不 push、不落盘）
+ * 抽出来是为了让「单条 addFixture」与「批量 addFixturesBatch」共用同一套校验，
+ * 避免两条路径的规则漂移（历史上 app.js / db.js / store.js 三处手写校验已经漂过几次）。 */
+function buildFixture(fixture, alloc) {
   const f = Object.assign({}, fixture);
   // 桥梁编号由系统分配；入参给了且未被占用则沿用（导入场景需要保留指定编号）
-  if (!isBridgeCode(f.code)) f.code = nextFreeCode();
-  else if (data.fixtures.some((x) => String(x.code) === String(f.code))) bad('编号已存在', 'ConstraintError');
+  if (!isBridgeCode(f.code)) f.code = alloc ? alloc.take() : nextFreeCode();
+  else if (alloc ? alloc.has(f.code) : data.fixtures.some((x) => String(x.code) === String(f.code))) {
+    bad('编号已存在', 'ConstraintError');
+  }
 
   f.serialNo = String(f.serialNo == null ? '' : f.serialNo).trim();
   f.name = String(f.name == null ? '' : f.name).trim();
@@ -345,9 +368,44 @@ function addFixture(fixture) {
   f.repairCount = 0;
   f.createdAt = Date.now();
   f.updatedAt = Date.now();
+  return f;
+}
+
+function addFixture(fixture) {
+  load();
+  const f = buildFixture(fixture, makeCodeAllocator());
   data.fixtures.push(f);
   save();
   return f.id;
+}
+
+/* 批量建档（v5.6.0）：整批只写一次盘
+ *
+ * 背景（BUG-014）：原导入流程逐条 await DB.fixtureAdd ⇒ 每条都 fs.writeFileSync 整个
+ * fixture-data.json。9000 条库 + 4114 行导入时，单次写盘实测 ~50ms，累计要写十几 GB，
+ * 窗口几分钟无响应，用户以为卡死就反复重试，数据越滚越多（实测被重试出 8999 条）。
+ *
+ * 口径：先全部校验通过再入内存，最后统一 save()；个别行失败不影响其它行，
+ * 失败明细按 {index,message} 回传，由调用方计入「失败 N 条」。
+ * ⚠️ 一定要在**整批校验循环结束后**才 save()，中途抛错不能留下半批内存脏数据。 */
+function addFixturesBatch(list) {
+  load();
+  const alloc = makeCodeAllocator();
+  const ids = [];
+  const failed = [];
+  const staged = [];
+  (Array.isArray(list) ? list : []).forEach((item, i) => {
+    try {
+      staged.push(buildFixture(item, alloc));
+    } catch (e) {
+      failed.push({ index: i, message: e && e.message ? e.message : String(e) });
+    }
+  });
+  if (staged.length) {
+    staged.forEach((f) => { data.fixtures.push(f); ids.push(f.id); });
+    save();
+  }
+  return { ids, added: ids.length, failed };
 }
 
 function dedupeStrings(arr) {
@@ -658,6 +716,7 @@ module.exports = {
   getByIndex, getByRange, getMeta, setMeta,
   // 夹具管理
   addFixture, updateFixture, delFixture, findFixtureByCode,
+  addFixturesBatch, buildFixture, makeCodeAllocator,
   addFixTransaction,
   // 人员卡库（v5.1.0）
   addStaff, updateStaff, delStaff, findStaffByCard,

@@ -1,5 +1,5 @@
 /* ============================================================
- * db.js v5.5.0 — 工装夹具管理程序数据层
+ * db.js v5.6.0 — 工装夹具管理程序数据层
  *
  * 双后端：
  *   ① Electron：全部走 IPC（主进程 store.js 读写 fixture-data.json）
@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '5.5.0';
+  const APP_VERSION = '5.6.0';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
@@ -39,6 +39,7 @@ const DB = (function () {
       setMeta: (key, value) => invoke('db-setMeta', { key, value }),
       // 夹具管理
       fixtureAdd: (fixture) => invoke('fixture-add', fixture),
+      fixtureAddBatch: (list) => invoke('fixture-addBatch', list),
       fixtureUpdate: (fixture) => invoke('fixture-update', fixture),
       fixtureDel: (id) => invoke('fixture-del', id),
       fixtureGetAll: () => invoke('fixture-getAll'),
@@ -250,11 +251,28 @@ const DB = (function () {
     if (cat.length > MAX_CATEGORY || /[|\r\n]/.test(cat)) bad('分类名称最多 ' + MAX_CATEGORY + ' 字符，且不能含 | 或换行');
   }
 
-  async function fixtureAdd(fixture) {
-    const fixtures = lsRead(LS_FIXTURES, []);
+  /* 批量建档专用编号分配器：一次建 Set + 游标顺延，避免每条都全表扫描（v5.6.0） */
+  function makeLocalCodeAlloc() {
+    const used = new Set(lsRead(LS_FIXTURES, []).map((f) => String(f.code)));
+    let cursor = 1001;
+    return {
+      has: (c) => used.has(String(c)),
+      take: () => {
+        while (used.has(String(cursor))) cursor++;
+        const c = String(cursor);
+        used.add(c);
+        return c;
+      }
+    };
+  }
+
+  /* 建档核心（浏览器模式）：归一化 + 校验，返回**未入库**对象（不写 localStorage） */
+  function buildFixtureLocal(fixture, alloc, id) {
     const f = Object.assign({}, fixture);
-    if (!isBridgeCode(f.code)) f.code = nextFreeCodeSync();
-    else if (fixtures.some((x) => String(x.code) === String(f.code))) bad('编号已存在', 'ConstraintError');
+    if (!isBridgeCode(f.code)) f.code = alloc ? alloc.take() : nextFreeCodeSync();
+    else if (alloc ? alloc.has(f.code) : lsRead(LS_FIXTURES, []).some((x) => String(x.code) === String(f.code))) {
+      bad('编号已存在', 'ConstraintError');
+    }
     f.serialNo = String(f.serialNo == null ? '' : f.serialNo).trim();
     f.name = String(f.name == null ? '' : f.name).trim();
     const rawLms = dedupeStrings(f.lineModels);
@@ -266,16 +284,44 @@ const DB = (function () {
     f.category = String(f.category == null ? '' : f.category).trim();
     f.remark = String(f.remark == null ? '' : f.remark).trim();
     validateFixture(f);
-    f.id = lsSeq();
+    f.id = id == null ? lsSeq() : id;
     f.status = 'stocked';
     f.totalOutCount = 0;
     f.totalReturnCount = 0;
     f.repairCount = 0;
     f.createdAt = Date.now();
     f.updatedAt = Date.now();
+    return f;
+  }
+
+  async function fixtureAdd(fixture) {
+    const fixtures = lsRead(LS_FIXTURES, []);
+    const f = buildFixtureLocal(fixture, makeLocalCodeAlloc());
     fixtures.push(f);
     lsWrite(LS_FIXTURES, fixtures);
     return f.id;
+  }
+
+  /* 批量建档（v5.6.0）：整批一次写 localStorage，语义同 store.addFixturesBatch */
+  async function fixtureAddBatch(list) {
+    const fixtures = lsRead(LS_FIXTURES, []);
+    const alloc = makeLocalCodeAlloc();
+    let seq = Number(lsRead(LS_SEQ, 0)) || 0;
+    const staged = [];
+    const failed = [];
+    (Array.isArray(list) ? list : []).forEach((item, i) => {
+      try {
+        staged.push(buildFixtureLocal(item, alloc, seq + i + 1));
+      } catch (e) {
+        failed.push({ index: i, message: e && e.message ? e.message : String(e) });
+      }
+    });
+    if (staged.length) {
+      staged.forEach((f) => fixtures.push(f));
+      lsWrite(LS_FIXTURES, fixtures);
+      lsWrite(LS_SEQ, seq + staged.length);
+    }
+    return { ids: staged.map((f) => f.id), added: staged.length, failed };
   }
 
   async function fixtureUpdate(fixture) {
@@ -472,6 +518,7 @@ const DB = (function () {
     open, getAll, get, add, put, del, getMeta, setMeta,
     clear: clearColl,
     fixtureAdd, fixtureUpdate, fixtureDel,
+    fixtureAddBatch,
     fixtureGetAll, fixtureGetTransactions, fixtureAddTransaction,
     nextFreeCode,
     lineDel, productionDel, productionRename,

@@ -1,11 +1,11 @@
 'use strict';
 /* ============================================================
- * preload.js — 渲染进程桥（v5.5.0）
+ * preload.js — 渲染进程桥（v5.6.0）
  * ============================================================ */
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  version: '5.5.0',
+  version: '5.6.0',
   invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
   // 打印：opts = { pageSize, copies, landscape, margins }，返回 { ok, reason? }
   printLabels: (opts) => ipcRenderer.invoke('print-labels', opts),
@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   readSpreadsheet: (bytes) => ipcRenderer.invoke('read-spreadsheet', bytes),
   // 夹具管理
   fixtureAdd: (fixture) => ipcRenderer.invoke('fixture-add', fixture),
+  fixtureAddBatch: (list) => ipcRenderer.invoke('fixture-addBatch', list),
   fixtureUpdate: (fixture) => ipcRenderer.invoke('fixture-update', fixture),
   fixtureDel: (id) => ipcRenderer.invoke('fixture-del', id),
   fixtureGetAll: () => ipcRenderer.invoke('fixture-getAll'),

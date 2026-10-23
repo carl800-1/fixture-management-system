@@ -820,6 +820,39 @@ ok('取消全选后数量归 0、不被强行补成 1 套（syncQtyToPick 允许
   /function syncQtyToPick\(prefix\) \{[\s\S]{0,560}if \(isNaN\(n\) \|\| n < 0\) n = 0;/.test(appJs)
   && !/if \(isNaN\(n\) \|\| n < 1\) \{ input\.value/.test(appJs));
 
+/* ---------- v5.6.0：导入卡死（BUG-014）与去经办人 ---------- */
+ok('夹具列表有渲染上限常量 FIX_RENDER_LIMIT', /const FIX_RENDER_LIMIT = \d+;/.test(appJs));
+ok('renderFixtureArea 按上限切片后再渲染',
+  /function renderFixtureArea\(container, fixtures, selectedId = 0\) \{[\s\S]{0,600}fixtures\.slice\(0, limit\)/.test(appJs));
+ok('超出上限时给出「显示更多」按钮（不再一次性塞上万张卡片）',
+  appJs.includes('showMoreFixtures') && appJs.includes('render-more'));
+ok('夹具搜索会重置已渲染条数（换关键字回到首页上限）',
+  /state\.fixShown = FIX_RENDER_LIMIT;/.test(appJs));
+ok('CSS 有 .render-more 样式', /\.render-more\s*\{/.test(css));
+
+ok('导入按 IMPORT_CHUNK 分片落库（不再逐条全量重写数据文件）',
+  /const IMPORT_CHUNK = \d+;/.test(appJs)
+  && /for \(let base = 0; base < effective\.length; base \+= IMPORT_CHUNK\)/.test(appJs));
+ok('分片走 DB.fixtureAddBatch 批量通道', appJs.includes('DB.fixtureAddBatch(payload)'));
+ok('老 preload 无批量通道时有逐条兜底', appJs.includes("typeof DB.fixtureAddBatch === 'function'"));
+ok('导入期间显示进度（imp_done / imp_bar）',
+  appJs.includes("id=\"imp_done\"") && appJs.includes("id=\"imp_bar\"")
+  && appJs.includes('function showImportProgress') && appJs.includes('function setImportProgress'));
+ok('每片之间让出一帧（否则主进程同步写盘会冻住进度条）',
+  /await new Promise\(\(r\) => setTimeout\(r, 0\)\);/.test(appJs));
+
+ok('buildImportPlan 预计算同编号统计（不再每行 filter 全表）',
+  appJs.includes('const serialStat = new Map();') && !appJs.includes('const sameNo = (c.fixtures || []).filter'));
+ok('buildImportPlan 产线 id→名称 只建一次 Map',
+  appJs.includes('const lineNameById = new Map((c.lines || []).map((l) => [l.id, l.name]));')
+  && !/\(c\.fixtures \|\| \[\]\)\.forEach\(\(f\) => \{\s*\n\s*const sig = _sigOfFixture/.test(appJs));
+
+ok('刷卡组件只剩单人版 validateSwipe（无 validateSwipePair）',
+  appJs.includes('function validateSwipe(ctx)') && !appJs.includes('validateSwipePair'));
+ok('SWIPE_CTX 四个上下文都不再带 operatorLabel',
+  !/SWIPE_CTX[\s\S]{0,900}operatorLabel/.test(appJs));
+ok('流水表仍保留「经办人」列（只看历史值，新流水为空）', appJs.includes('<div>经办人</div>'));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

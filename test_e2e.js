@@ -473,39 +473,30 @@ async function main() {
     if (!btn) return { err:'卡片无出库按钮' };
     btn.click(); await sleep(300);
     const out = {};   // 刷卡校验用例的容器
-    const hasOp = !!$('#swipe_dlg_operator');
+    const hasOp = !!$('#swipe_dlg_operator');   // v5.6.0：应为 false
     const hasLocInput = !!$('#fix_out_loc');
-    if (hasOp) {
-      /* ① 未登记的卡 → 必须被拒 */
-      swipe('#swipe_dlg_party','NOCARD-X'); swipe('#swipe_dlg_operator','OP-0001');
-      btnByText('确认出库').click(); await sleep(350);
-      out.unknownBlocked = ('#modalOverlay' && !$('#modalOverlay').hidden) && /未登记/.test((($('#toast')||{}).textContent||''));
-      out.unknownToast = (($('#toast')||{}).textContent||'');
-      /* ② 同一张卡刷两个位 → 必须被拒（用「两者皆可」的卡，否则会先被角色校验拦下） */
-      swipe('#swipe_dlg_party','BOTH01'); swipe('#swipe_dlg_operator','BOTH01');
-      btnByText('确认出库').click(); await sleep(350);
-      out.sameCardBlocked = /同一个人（同一张卡）/.test((($('#toast')||{}).textContent||''));
-      /* ③ 角色不符：领用位刷「经办人」角色的卡 */
-      swipe('#swipe_dlg_party','OP-0001');
-      out.roleBlocked = /不能作为领用人/.test((($('#swipe_dlg_party_tip')||{}).textContent||''));
-      out.roleTip = (($('#swipe_dlg_party_tip')||{}).textContent||'');
-      /* ④ 正常刷卡：领用人 BR-0001 + 经办人 OP-0001 */
-      swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
-      out.partyState = (($('#swipe_dlg_party_state')||{}).textContent||'');
-      out.opState = (($('#swipe_dlg_operator_state')||{}).textContent||'');
-      setV('#fix_out_remark','首次领用');
-      btnByText('确认出库').click();
-    }
+    /* ① 未登记的卡 → 必须被拒 */
+    swipe('#swipe_dlg_party','NOCARD-X');
+    btnByText('确认出库').click(); await sleep(350);
+    out.unknownBlocked = ('#modalOverlay' && !$('#modalOverlay').hidden) && /未登记/.test((($('#toast')||{}).textContent||''));
+    out.unknownToast = (($('#toast')||{}).textContent||'');
+    /* ② v5.6.0：不再按角色限制 —— 「经办人」角色的卡也能刷领用位 */
+    swipe('#swipe_dlg_party','OP-0001');
+    out.roleState = (($('#swipe_dlg_party_state')||{}).textContent||'');
+    out.roleNoLongerBlocks = /王经办/.test(out.roleState);
+    /* ③ 正常：只刷领用人一张卡 */
+    swipe('#swipe_dlg_party','BR-0001');
+    out.partyState = (($('#swipe_dlg_party_state')||{}).textContent||'');
+    setV('#fix_out_remark','首次领用');
+    btnByText('确认出库').click();
     await sleep(650);
     return Object.assign({ hasOp, hasLocInput }, out);
   })()`);
-  ok('出库弹窗打开且字段存在', outRes.hasOp === true, JSON.stringify(outRes));
+  ok('v5.6.0：出库弹窗只剩一个刷卡位（经办位已取消）', outRes.hasOp === false, String(outRes.hasOp));
   ok('建档已填库位 → 出库弹窗无需补填库位', outRes.hasLocInput === false, String(outRes.hasLocInput));
   ok('v5.1.0：未登记卡号被拒（弹窗未提交）', outRes.unknownBlocked === true, outRes.unknownToast);
-  ok('v5.1.0：同一张卡刷两个位被拒', outRes.sameCardBlocked === true);
-  ok('v5.1.0：角色不符被拒（领用位刷「经办人」的卡）', outRes.roleBlocked === true, outRes.roleTip);
-  ok('v5.1.0：刷卡成功后领用人位显示姓名', /李领用/.test(outRes.partyState || ''), outRes.partyState);
-  ok('v5.1.0：刷卡成功后经办人位显示姓名', /王经办/.test(outRes.opState || ''), outRes.opState);
+  ok('v5.6.0：刷卡位不再按角色限制（「经办人」角色的卡也能刷领用位）', outRes.roleNoLongerBlocks === true, outRes.roleState);
+  ok('v5.6.0：刷一张卡即带出领用人姓名', /李领用/.test(outRes.partyState || ''), outRes.partyState);
   ok('数据文件已生成于隔离目录', fs.existsSync(dataFile), dataFile);
 
   const db4 = readDb();
@@ -515,8 +506,8 @@ async function main() {
   ok('出库冻结库位（location 不变）', outFix && outFix.location === 'ZP1-U-1-1', outFix && outFix.location);
   const txOut = db4.fixTransactions.find((t) => t.fixtureCode === String(codeOf['ZP1-U-1-1']) && t.type === 'out');
   ok('出库流水已写入', !!txOut);
-  ok('流水经办人 = 王经办（刷卡带出，非手填）', txOut && txOut.operator === '王经办', txOut && txOut.operator);
-  ok('流水经办人卡号 = OP0001（归一化后落库）', txOut && txOut.operatorCard === 'OP0001', txOut && txOut.operatorCard);
+  ok('v5.6.0：流水不再记经办人（operator 为空串）', txOut && txOut.operator === '', txOut && JSON.stringify(txOut.operator));
+  ok('v5.6.0：经办人卡号为空串', txOut && txOut.operatorCard === '', txOut && JSON.stringify(txOut.operatorCard));
   ok('流水领用人 = 李领用（刷卡带出）', txOut && txOut.counterparty === '李领用', txOut && txOut.counterparty);
   ok('流水领用人卡号 = BR0001（归一化后落库）', txOut && txOut.partyCard === 'BR0001', txOut && txOut.partyCard);
   ok('流水状态迁移 stocked → checked_out', txOut && txOut.fromStatus === 'stocked' && txOut.toStatus === 'checked_out');
@@ -547,7 +538,7 @@ async function main() {
     rb.click(); await sleep(320);
     const hasLocField = !!$('#fix_return_loc');
     if (hasLocField) setV('#fix_return_loc','ZP1-U-2-2');
-    swipe('#swipe_rdlg_party','BR-0001'); swipe('#swipe_rdlg_operator','OP-0001');
+    swipe('#swipe_rdlg_party','BR-0001');
     const btn=btnByText('确认回库');
     if (btn) btn.click();
     await sleep(800);
@@ -563,7 +554,7 @@ async function main() {
   ok('回库后状态 = stocked', retFix && retFix.status === 'stocked', retFix && retFix.status);
   ok('回库次数 = 1', retFix && retFix.totalReturnCount === 1, retFix && String(retFix.totalReturnCount));
   ok('回库库位写回 location（ZP1-U-1-1 → ZP1-U-2-2）', retFix && retFix.location === 'ZP1-U-2-2', retFix && retFix.location);
-  const txRet = db5.fixTransactions.find((t) => t.type === 'return' && t.operator === '王经办');
+  const txRet = db5.fixTransactions.find((t) => t.type === 'return' && t.counterparty === '李领用');
   ok('回库流水已写入', !!txRet);
   ok('流水记录库位变更 from ZP1-U-1-1 → to ZP1-U-2-2',
     txRet && txRet.fromLocation === 'ZP1-U-1-1' && txRet.toLocation === 'ZP1-U-2-2', txRet && [txRet.fromLocation, txRet.toLocation]);
@@ -575,7 +566,7 @@ async function main() {
     const ob=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
     if (!ob) return false;
     ob.click(); await sleep(300);
-    swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
+    swipe('#swipe_dlg_party','BR-0001');
     btnByText('确认出库').click(); await sleep(600);
     /* 再以非法库位回库（卡片弹窗路径，v4.0.4 改库位入口） */
     card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
@@ -585,7 +576,7 @@ async function main() {
     const loc=$('#fix_return_loc');
     const hadField = !!loc;
     if (loc) setV('#fix_return_loc','BAD');
-    swipe('#swipe_rdlg_party','BR-0001'); swipe('#swipe_rdlg_operator','OP-0001');
+    swipe('#swipe_rdlg_party','BR-0001');
     btnByText('确认回库').click(); await sleep(650);
     /* 校验失败时弹窗保持打开，关闭后继续后续流程 */
     if (window.closeModal) { window.closeModal(); await sleep(150); }
@@ -603,7 +594,7 @@ async function main() {
     const box=$('#return_code'); box.value='XXK-D10VG-002'; box.dispatchEvent(new Event('input')); await sleep(400);
     $$('.return-pick').forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
     await sleep(150);
-    swipe('#swipe_ret_party','BR-0001'); swipe('#swipe_ret_operator','OP-0001');
+    swipe('#swipe_ret_party','BR-0001');
     btnByText('提交回库').click(); await sleep(650);
   })()`);
 
@@ -616,7 +607,7 @@ async function main() {
       const card=$$('.fixture-card').find(c=>c.textContent.includes('DH40MC-921-001-001'));
       [...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库').click();
       await sleep(280);
-      swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
+      swipe('#swipe_dlg_party','BR-0001');
       btnByText('确认出库').click();
       await sleep(550);
       window.showView('return'); await sleep(300);
@@ -628,7 +619,7 @@ async function main() {
       if (!picks.length) throw new Error('第 ' + ${i + 1} + ' 轮未渲染出回库候选');
       picks.forEach(c=>{ c.checked=true; c.dispatchEvent(new Event('change')); });
       await sleep(150);
-      swipe('#swipe_ret_party','BR-0001'); swipe('#swipe_ret_operator','OP-0001');
+      swipe('#swipe_ret_party','BR-0001');
       const rbtn=btnByText('提交回库');
       if (!rbtn) throw new Error('第 ' + ${i + 1} + ' 轮未找到提交回库按钮');
       rbtn.click();
@@ -723,7 +714,7 @@ async function main() {
     const box = $('#out_pick_all');
     box.checked = true; box.dispatchEvent(new Event('change')); await sleep(220);
     r.selected = $$('.out-pick').filter(c=>c.checked).length;
-    swipe('#swipe_out_party','BR-0001'); swipe('#swipe_out_operator','OP-0001'); await sleep(180);
+    swipe('#swipe_out_party','BR-0001'); await sleep(180);
     const b = btnByText('提交出库');
     if (!b) return Object.assign(r, { err: '无提交出库按钮' });
     b.click(); await sleep(1800);
@@ -736,8 +727,8 @@ async function main() {
   const bulkOut = db65.fixtures.filter((f) => /^ZP1-U-1-/.test(f.location || ''));
   ok('一键出库：3 套状态全部 = checked_out', bulkOut.length === 3 && bulkOut.every((f) => f.status === 'checked_out'),
     JSON.stringify(bulkOut.map((f) => [f.location, f.status])));
-  ok('一键出库：3 条出库流水都带刷卡姓名（批量共用同一组经办人）',
-    db65.fixTransactions.filter((t) => t.type === 'out' && t.operator === '王经办' && t.counterparty === '李领用').length >= 3,
+  ok('一键出库：3 条出库流水都带刷卡领用人（批量共用同一人）',
+    db65.fixTransactions.filter((t) => t.type === 'out' && t.counterparty === '李领用' && t.partyCard === 'BR0001').length >= 3,
     String(db65.fixTransactions.filter((t) => t.type === 'out').length));
 
   const oneClickRet = await wc.executeJavaScript(`(async () => {
@@ -750,7 +741,7 @@ async function main() {
     box.checked = true; box.dispatchEvent(new Event('change')); await sleep(220);
     r.selected = $$('.return-pick').filter(c=>c.checked).length;
     r.text = (($('#return_pick_all_text')||{}).textContent||'').trim();
-    swipe('#swipe_ret_party','BR-0001'); swipe('#swipe_ret_operator','OP-0001'); await sleep(180);
+    swipe('#swipe_ret_party','BR-0001'); await sleep(180);
     const b = btnByText('提交回库');
     if (!b) return Object.assign(r, { err: '无提交回库按钮' });
     b.click(); await sleep(1800);
@@ -778,10 +769,10 @@ async function main() {
     const btn=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('送修'));
     if(!btn) return {err:'无送修按钮', btns:[...card.querySelectorAll('button')].map(b=>b.textContent)};
     btn.click(); await sleep(300);
+    /* v5.6.0：弹窗不再有「经办人」输入框 */
     const hasOp=!!$('#fix_repair_op');
     const hasType=!!$('#fix_repair_type');
-    if(hasOp&&hasType){
-      setV('#fix_repair_op','赵六');
+    if(hasType){
       $('#fix_repair_type').value='calibrate';
       setV('#fix_repair_remark','精度校准');
       btnByText('确认送修').click();
@@ -789,7 +780,7 @@ async function main() {
     await sleep(650);
     return {hasOp, hasType};
   })()`);
-  ok('送修弹窗字段齐全', repRes.hasOp === true && repRes.hasType === true, JSON.stringify(repRes));
+  ok('v5.6.0：送修弹窗无「经办人」、有维修类型', repRes.hasOp === false && repRes.hasType === true, JSON.stringify(repRes));
   const db7 = readDb();
   const rFix = db7.fixtures.find((f) => f.serialNo === 'XXK-D10VG-002');
   ok('状态 = repair', rFix.status === 'repair', rFix.status);
@@ -806,15 +797,13 @@ async function main() {
     if(!btn) return {err:'无维修完成按钮', btns:[...card.querySelectorAll('button')].map(b=>b.textContent)};
     btn.click(); await sleep(350);
     const hasOp = !!$('#fix_rdone_op');
-    if (hasOp) {
-      setV('#fix_rdone_op','赵六');
-      setV('#fix_rdone_remark','更换定位销，校准合格');
-      btnByText('确认完成并回库').click();
-    }
+    const hasTime = !!$('#fix_rdone_time');
+    setV('#fix_rdone_remark','更换定位销，校准合格');
+    btnByText('确认完成并回库').click();
     await sleep(700);
-    return {hasOp};
+    return {hasOp, hasTime};
   })()`);
-  ok('维修完成弹窗字段存在', compRes.hasOp === true, JSON.stringify(compRes));
+  ok('v5.6.0：维修完成弹窗无「经办人」、有完成时间', compRes.hasOp === false && compRes.hasTime === true, JSON.stringify(compRes));
   const db8 = readDb();
   const rFix2 = db8.fixtures.find((f) => f.serialNo === 'XXK-D10VG-002');
   ok('维修完成后回到 stocked', rFix2.status === 'stocked', rFix2.status);
@@ -837,15 +826,12 @@ async function main() {
     [...card.querySelectorAll('button')].find(b=>b.textContent.includes('报废')).click();
     await sleep(350);
     const hasOp = !!$('#fix_retire_op');
-    if (hasOp) {
-      setV('#fix_retire_op','管理员');
-      setV('#fix_retire_remark','精度超差无法修复');
-      btnByText('确认报废').click();
-    }
+    setV('#fix_retire_remark','精度超差无法修复');
+    btnByText('确认报废').click();
     await sleep(700);
     return {hasOp};
   })()`);
-  ok('报废弹窗字段存在', retireRes.hasOp === true, JSON.stringify(retireRes));
+  ok('v5.6.0：报废弹窗无「经办人」字段', retireRes.hasOp === false, JSON.stringify(retireRes));
   const db9 = readDb();
   const cFix = db9.fixtures.find((f) => f.serialNo === 'SN-C-003');
   ok('状态 = retired', cFix.status === 'retired', cFix.status);
@@ -999,7 +985,8 @@ async function main() {
       sample: rows.length>1 ? rows[1].textContent.replace(/\\s+/g,' ').trim().slice(0,60) : ''
     };
     const box=$('#rec_search');
-    box.value='王经办'; box.dispatchEvent(new Event('input')); await sleep(300);
+    /* v5.6.0：经办位取消，改按刷卡带出的「领用人 / 退库人」姓名搜索 */
+    box.value='李领用'; box.dispatchEvent(new Event('input')); await sleep(300);
     out.n1=$$('#rec_list .tx-row').filter(r=>!r.classList.contains('tx-header')).length;
     box.value=''; box.dispatchEvent(new Event('input')); await sleep(300);
     out.n2=$$('#rec_list .tx-row').filter(r=>!r.classList.contains('tx-header')).length;
@@ -1009,7 +996,7 @@ async function main() {
   ok('流水记录含表头', recRes.hasHeader === true);
   ok('流水记录有数据行', recRes.rows > 0, String(recRes.rows));
   console.log('     示例行：' + recRes.sample);
-  ok('流水按经办人搜索生效', recRes.n1 > 0 && recRes.n1 < recRes.n2, JSON.stringify([recRes.n1, recRes.n2]));
+  ok('v5.6.0：流水按领用人姓名搜索生效', recRes.n1 > 0 && recRes.n1 < recRes.n2, JSON.stringify([recRes.n1, recRes.n2]));
 
   /* 数据备份页 + 仪表盘 */
   ok('数据备份页可渲染', await wc.executeJavaScript(`(async () => {
@@ -1257,13 +1244,13 @@ async function main() {
     const ob = pickBtn(cardOf(), '出库');
     if (!ob) return { err:'卡片无出库按钮', made: out.made };
     ob.click(); await sleep(320);
-    swipe('#swipe_dlg_party','BR-0001'); swipe('#swipe_dlg_operator','OP-0001');
+    swipe('#swipe_dlg_party','BR-0001');
     btnByText('确认出库').click(); await waitModal();
 
     const rb = pickBtn(cardOf(), '回库');
     if (!rb) return { err:'卡片无回库按钮', made: out.made };
     rb.click(); await sleep(320);
-    swipe('#swipe_rdlg_party','BR-0001'); swipe('#swipe_rdlg_operator','OP-0001');
+    swipe('#swipe_rdlg_party','BR-0001');
     btnByText('确认回库').click(); await waitModal();
 
     const delBtn2 = pickBtn(cardOf(), '删除');

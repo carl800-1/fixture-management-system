@@ -495,15 +495,16 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
       const outBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
       if(!outBtn) return JSON.stringify({step:'no-out-btn'});
       outBtn.click(); await sleep(500);
-      if(!$('#swipe_dlg_operator')) return JSON.stringify({step:'no-swipe-form'});
+      /* v5.6.0：只剩一个刷卡位（经办位已取消） */
+      if(!$('#swipe_dlg_party')) return JSON.stringify({step:'no-swipe-form'});
+      if($('#swipe_dlg_operator')) return JSON.stringify({step:'operator-swipe-still-exists'});
       /* 刷卡：读卡器 = 键盘 —— 写入卡号后派发 Enter */
       const swipe=(sel,card)=>{ const el=$(sel); if(!el) return false;
         el.focus(); el.value=card; el.dispatchEvent(new Event('input'));
         el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
         return true; };
       const sParty = swipe('#swipe_dlg_party','SMOKE-BR-01');
-      const sOp = swipe('#swipe_dlg_operator','SMOKE-OP-01');
-      if(!sParty || !sOp) return JSON.stringify({step:'no-swipe-field'});
+      if(!sParty) return JSON.stringify({step:'no-swipe-field'});
       const locInput=$('#fix_out_loc')||$('#out_location');
       if(locInput && !locInput.value) locInput.value='ZP1-U-1-1';
       const okBtn=[...document.querySelectorAll('button')].find(b=>/确认出库/.test(b.textContent));

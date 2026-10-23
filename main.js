@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 工装夹具管理程序主进程（v5.5.0）
+ * main.js — 工装夹具管理程序主进程（v5.6.0）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -58,6 +58,8 @@ const handlers = {
   'db-setMeta': (e, p) => store.setMeta(p.key, p.value),
   // 夹具管理
   'fixture-add': (e, fixture) => store.addFixture(fixture),
+  /* 批量建档（v5.6.0）：整批一次落盘，避免导入时几千次全量重写数据文件 */
+  'fixture-addBatch': (e, list) => store.addFixturesBatch(list),
   'fixture-update': (e, fixture) => store.updateFixture(fixture),
   'fixture-del': (e, id) => store.delFixture(id),
   'fixture-getAll': () => store.getAll('fixtures'),

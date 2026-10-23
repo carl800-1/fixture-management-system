@@ -365,26 +365,30 @@ eq(withBlank.skipped.length, 0, '空行不计入跳过明细', withBlank.skipped
 section('C. 静态守卫（刷卡前缀 / 旧字段清除 / 打印接线 / 版本）');
 
 /* --- 刷卡组件存在 --- */
-['swipeFieldHtml', 'bindSwipe', 'resolveSwipe', 'validateSwipePair'].forEach((fn) => {
+['swipeFieldHtml', 'bindSwipe', 'resolveSwipe', 'validateSwipe'].forEach((fn) => {
   ok(appJs.indexOf('function ' + fn) >= 0, 'app.js 定义 ' + fn);
 });
 ['printLineQueryList', 'lineQueryRows'].forEach((fn) => {
   ok(appJs.indexOf('function ' + fn) >= 0 || appJs.indexOf('window.' + fn + ' = function') >= 0, 'app.js 定义 ' + fn);
 });
 
-/* --- 三处刷卡位都接上了 --- */
-ok(/swipeFieldHtml\('out', 'party'\)/.test(appJs), '出库页有领用人刷卡位');
-ok(/swipeFieldHtml\('out', 'operator'\)/.test(appJs), '出库页有经办人刷卡位');
-ok(/swipeFieldHtml\('ret', 'party'\)/.test(appJs), '回库页有退库人刷卡位');
-ok(/swipeFieldHtml\('ret', 'operator'\)/.test(appJs), '回库页有经办人刷卡位');
-ok(/swipeFieldHtml\('dlg', 'party'\)/.test(appJs), '单件出库弹窗有领用人刷卡位');
-ok(/swipeFieldHtml\('dlg', 'operator'\)/.test(appJs), '单件出库弹窗有经办人刷卡位');
-ok(/swipeFieldHtml\('rdlg', 'party'\)/.test(appJs), '单件回库弹窗有退库人刷卡位');
-ok(/swipeFieldHtml\('rdlg', 'operator'\)/.test(appJs), '单件回库弹窗有经办人刷卡位');
-ok(/bindSwipe\('out', 'party'\)/.test(appJs) && /bindSwipe\('out', 'operator'\)/.test(appJs), '出库页刷卡位已绑定');
-ok(/bindSwipe\('ret', 'party'\)/.test(appJs) && /bindSwipe\('ret', 'operator'\)/.test(appJs), '回库页刷卡位已绑定');
-ok(/bindSwipe\('dlg', 'party'\)/.test(appJs) && /bindSwipe\('dlg', 'operator'\)/.test(appJs), '出库弹窗刷卡位已绑定');
-ok(/bindSwipe\('rdlg', 'party'\)/.test(appJs) && /bindSwipe\('rdlg', 'operator'\)/.test(appJs), '回库弹窗刷卡位已绑定');
+/* --- v5.6.0：每个上下文只有一个刷卡位（经办位整块取消） --- */
+ok(/swipeFieldHtml\('out'\)/.test(appJs), '出库页有领用人刷卡位');
+ok(/swipeFieldHtml\('ret'\)/.test(appJs), '回库页有退库人刷卡位');
+ok(/swipeFieldHtml\('dlg'\)/.test(appJs), '单件出库弹窗有领用人刷卡位');
+ok(/swipeFieldHtml\('rdlg'\)/.test(appJs), '单件回库弹窗有退库人刷卡位');
+ok(/bindSwipe\('out'\)/.test(appJs), '出库页刷卡位已绑定');
+ok(/bindSwipe\('ret'\)/.test(appJs), '回库页刷卡位已绑定');
+ok(/bindSwipe\('dlg'\)/.test(appJs), '出库弹窗刷卡位已绑定');
+ok(/bindSwipe\('rdlg'\)/.test(appJs), '回库弹窗刷卡位已绑定');
+/* 经办位必须彻底消失：不能再出现 operator 刷卡位 / 经办人输入框 */
+ok(appJs.indexOf('swipe_out_operator') < 0 && appJs.indexOf('swipe_ret_operator') < 0
+  && appJs.indexOf('swipe_dlg_operator') < 0 && appJs.indexOf('swipe_rdlg_operator') < 0,
+  '四个上下文的「经办人」刷卡位已全部移除');
+['fix_retire_op', 'fix_repair_op', 'fix_rdone_op'].forEach((id) => {
+  ok(appJs.indexOf('id="' + id + '"') < 0, '弹窗字段 #' + id + '（经办人）已移除');
+});
+ok(!/经办人<\/label>/.test(appJs), 'app.js 里不再渲染「经办人」输入框');
 
 /* --- 旧的手填字段必须彻底消失（否则会绕过刷卡校验） --- */
 const legacyIds = ['out_party', 'out_operator', 'return_party', 'return_operator', 'fix_out_op', 'fix_out_party', 'fix_return_op'];
@@ -394,19 +398,20 @@ legacyIds.forEach((id) => {
 });
 
 /* --- 刷卡框前缀与回车保护 --- */
-const swipeIds = (appJs.match(/'#swipe_(out|ret|dlg)_(party|operator)'/g) || []).length;
-ok(swipeIds >= 6, '三个上下文共 6 个 swipe_ 前缀的刷卡框定义', swipeIds);
+const swipeIds = (appJs.match(/'#swipe_(out|ret|dlg|rdlg)_party'/g) || []).length;
+ok(swipeIds >= 4, '四个上下文共 4 个 swipe_ 前缀的刷卡框定义（v5.6.0 单人版）', swipeIds);
 ok(appJs.indexOf('data-swipe=') >= 0, '刷卡框带 data-swipe 标记');
 ok(/dataset\.swipe\)\s*return/.test(appJs), 'handleKeyDown 里对 data-swipe 做了回车拦截（防刷卡直接出库）');
 ok(/stopPropagation\(\)/.test(appJs), 'bindSwipe 里 stopPropagation 阻断冒泡');
 
-/* --- 提交时必须走成对校验 --- */
-ok(/const v = validateSwipePair\('out'\)/.test(appJs), 'submitOutDo 调用 validateSwipePair("out")');
-ok(/const v = validateSwipePair\('ret'\)/.test(appJs), 'submitReturnDo 调用 validateSwipePair("ret")');
-ok(/const v = validateSwipePair\('dlg'\)/.test(appJs), 'submitFixtureOut 调用 validateSwipePair("dlg")');
-ok(/const v = validateSwipePair\('rdlg'\)/.test(appJs), 'submitFixtureReturn 调用 validateSwipePair("rdlg")');
-ok(appJs.indexOf('不能是同一个人（同一张卡）') >= 0, '有「两人不得同卡」的校验文案');
-ok(appJs.indexOf('operatorCard') >= 0 && appJs.indexOf('partyCard') >= 0, '流水写入卡号快照字段');
+/* --- 提交时必须走单人校验 --- */
+ok(/const v = validateSwipe\('out'\)/.test(appJs), 'submitOutDo 调用 validateSwipe("out")');
+ok(/const v = validateSwipe\('ret'\)/.test(appJs), 'submitReturnDo 调用 validateSwipe("ret")');
+ok(/const v = validateSwipe\('dlg'\)/.test(appJs), 'submitFixtureOut 调用 validateSwipe("dlg")');
+ok(/const v = validateSwipe\('rdlg'\)/.test(appJs), 'submitFixtureReturn 调用 validateSwipe("rdlg")');
+ok(appJs.indexOf('validateSwipePair') < 0, '双人成对校验 validateSwipePair 已删除');
+ok(appJs.indexOf('不能是同一个人（同一张卡）') < 0, '「两人不得同卡」文案已随之删除');
+ok(appJs.indexOf('operatorCard') >= 0 && appJs.indexOf('partyCard') >= 0, '流水仍写卡号快照字段（历史兼容）');
 eq((appJs.match(/operatorCard, partyCard/g) || []).length, 4, '四处提交都带 operatorCard/partyCard', (appJs.match(/operatorCard, partyCard/g) || []).length);
 
 /* --- 人员卡库页面 --- */

@@ -479,6 +479,15 @@ tbody tr.selected { background: var(--primary-soft); }
 .pick-code:hover { border-color: var(--primary); background: var(--primary-soft); }
 .pick-code-no { font-weight: 600; color: var(--primary); }
 
+/* v5.6.0 夹具列表渲染限流提示（一次只渲染前 300 条，底部给「显示更多」） */
+.render-more {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--border);
+  border-radius: 8px; background: #fafbfc; font-size: 12px; color: var(--text);
+}
+.render-more .btn { flex: 0 0 auto; }
+.render-more .muted { margin-left: auto; }
+
 .picked-summary {
   margin-top: 10px; padding: 10px 12px; background: var(--primary-soft);
   border: 1px solid #c7dbff; border-radius: 8px; font-size: 13px;

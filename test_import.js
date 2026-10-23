@@ -53,6 +53,7 @@ const sandbox = {
   console,
   DB: { fixtureAdd: async () => 1, fixtureDel: async () => {}, lineDel: async () => {}, add: async () => 1 },
   esc: (s) => String(s == null ? '' : s),
+  $: () => null,          // v5.6.0：导入进度条会读 #imp_done / #imp_bar
   openModal: () => {},
   toast: () => {},
   reloadAll: async () => {},
@@ -60,6 +61,7 @@ const sandbox = {
   renderFixtures: () => {},
   closeModal: () => {},
   confirm: () => true,
+  setTimeout,             // v5.6.0：分片落库之间会 await 一帧让进度条刷新
   download: (name, content) => { sandbox.__downloaded = { name, content }; }
 };
 sandbox.global = sandbox;
@@ -508,8 +510,40 @@ function splitCsvLine(line) {
   await M.__export_confirmImportPlan('skip');
   ok(db.fixtures.length === 2, '默认「跳过重复」后库内仍 2 套（未翻倍）', db.fixtures.length);
 
-  /* ---------- 汇总 ---------- */
-  console.log('\n' + '='.repeat(50));
+  /* ---------- v5.6.0 批量落库（BUG-014：导入卡死） ---------- */
+  section('v5.6.0 批量落库：分片写入，不再逐条全量落盘');
+  const db2 = { fixtures: [], lines: [{ id: 11, name: 'L1 线' }], seq: 1000 };
+  let batchCalls = 0, perRowCalls = 0, savedTotal = 0;
+  sandbox.state.lines = db2.lines;
+  sandbox.state.fixtures = db2.fixtures;
+  sandbox.DB.add = async (name, obj) => {
+    const id = db2.seq++;
+    if (name === 'lines') db2.lines.push(Object.assign({ id }, obj));
+    return id;
+  };
+  sandbox.DB.fixtureAdd = async () => { perRowCalls++; return 1; };
+  sandbox.DB.fixtureAddBatch = async (list) => {
+    batchCalls++; savedTotal += list.length;
+    list.forEach((obj) => db2.fixtures.push(Object.assign({ id: db2.seq++, status: 'stocked' }, obj)));
+    return { ids: [], added: list.length, failed: [] };
+  };
+  const manyRows = [HDR];
+  for (let i = 0; i < 1200; i++) {
+    manyRows.push(mkRow({
+      serialNo: 'SN-B' + i, name: '批量件' + i, lm1: 'M1', category: '金属',
+      location: 'ZP1-U-' + (i % 9 + 1) + '-1', line1: 'L1 线'
+    }));
+  }
+  const planMany = M.buildImportPlan(manyRows, { fixtures: [], lines: db2.lines });
+  ok(planMany.ok && planMany.plan.length === 1200, '造出 1200 行待导入', planMany.plan.length);
+  sandbox.__importPlan = planMany.plan;
+  await M.__export_confirmImportPlan('all');
+  ok(perRowCalls === 0, '不再逐条调用 fixtureAdd（0 次 → 不再 1200 次全量重写数据文件）', perRowCalls);
+  ok(batchCalls === 3, '1200 行按 500 一片 → 3 次批量落盘', batchCalls);
+  ok(savedTotal === 1200, '分片累计条数 = 1200（一行不漏）', savedTotal);
+  ok(db2.fixtures.length === 1200, '库内实际写入 1200 条', db2.fixtures.length);
+
+  /* ---------- 汇总 ---------- */  console.log('\n' + '='.repeat(50));
   console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);
   if (fail > 0) { console.log('\n失败项：'); failures.forEach((f) => console.log('  - ' + f)); }
   console.log('='.repeat(50));

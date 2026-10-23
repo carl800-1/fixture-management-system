@@ -366,6 +366,53 @@ store.delFixture(idBatch);
 ok('删除后该批次为空（撤销本次导入即可整体回滚）',
   store.getAll('fixtures').filter((f) => f.importBatch === 'bTEST-1').length === 0);
 
+/* ---------- v5.6.0 批量建档（BUG-014：导入卡死的根治点） ---------- */
+section('v5.6.0 批量建档 addFixturesBatch（整批只落一次盘）');
+const beforeBatch = store.getAll('fixtures').length;
+const batchList = [];
+for (let i = 0; i < 50; i++) {
+  batchList.push({
+    serialNo: 'BULK-' + String(i).padStart(3, '0'),
+    name: '批量件' + i,
+    lineModels: ['M1'],
+    category: '金属',
+    location: 'ZP1-U-' + (i % 5 + 1) + '-1',
+    lines: [lineA],
+    remark: '',
+    importBatch: 'bBULK-1'
+  });
+}
+const bulkRes = store.addFixturesBatch(batchList);
+ok('返回 added = 50', bulkRes.added === 50, bulkRes.added);
+ok('返回 failed 为空', Array.isArray(bulkRes.failed) && bulkRes.failed.length === 0, JSON.stringify(bulkRes.failed));
+ok('库内增加 50 条', store.getAll('fixtures').length === beforeBatch + 50, store.getAll('fixtures').length);
+const bulkCodes = store.getAll('fixtures').filter((f) => f.importBatch === 'bBULK-1').map((f) => f.code);
+ok('每条都分到 4 位桥梁编号', bulkCodes.length === 50 && bulkCodes.every((c) => /^\d{4}$/.test(c)), JSON.stringify(bulkCodes.slice(0, 3)));
+ok('同批编号互不重复', new Set(bulkCodes).size === 50, new Set(bulkCodes).size);
+ok('批量记录默认状态 = stocked',
+  store.getAll('fixtures').filter((f) => f.importBatch === 'bBULK-1').every((f) => f.status === 'stocked'));
+ok('批量记录计数归零',
+  store.getAll('fixtures').filter((f) => f.importBatch === 'bBULK-1')
+    .every((f) => f.totalOutCount === 0 && f.totalReturnCount === 0 && f.repairCount === 0));
+
+/* 个别行非法 → 只跳过该行，其余照落，不让整批回滚 */
+const beforeBad = store.getAll('fixtures').length;
+const badRes = store.addFixturesBatch([
+  { serialNo: 'GOOD-1', name: '合格行', lineModels: ['M1'], location: 'ZP1-U-7-1', lines: [lineA] },
+  { serialNo: 'BAD-1', name: '库位不合法', lineModels: ['M1'], location: 'X1', lines: [lineA] },
+  { serialNo: 'BAD-2', name: '', lineModels: ['M1'], location: 'ZP1-U-7-2', lines: [lineA] },
+  { serialNo: 'GOOD-2', name: '合格行2', lineModels: ['M1'], location: 'ZP1-U-7-3', lines: [lineA] }
+]);
+ok('坏行计入 failed（2 条）', badRes.failed.length === 2, JSON.stringify(badRes.failed));
+ok('好行照常落库（2 条）', badRes.added === 2 && store.getAll('fixtures').length === beforeBad + 2,
+  badRes.added + '/' + (store.getAll('fixtures').length - beforeBad));
+ok('failed 带行下标与原因', badRes.failed.every((f) => typeof f.index === 'number' && !!f.message),
+  JSON.stringify(badRes.failed));
+ok('兜底：空数组安全返回', store.addFixturesBatch([]).added === 0);
+ok('兜底：非数组安全返回', store.addFixturesBatch(null).added === 0);
+/* 把批量写入的数据清掉，避免影响后面的持久化断言 */
+store.getAll('fixtures').filter((f) => f.importBatch === 'bBULK-1').forEach((f) => store.delFixture(f.id));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);
