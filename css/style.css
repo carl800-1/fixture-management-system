@@ -444,7 +444,7 @@ tbody tr.selected { background: var(--primary-soft); }
 .btn-scan:hover { background: var(--primary-soft); }
 
 .stock-bar {
-  display: flex; align-items: center; gap: 8px; background: var(--bg);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; background: var(--bg);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
   font-size: 13px; margin: 12px 0;
 }
@@ -456,6 +456,20 @@ tbody tr.selected { background: var(--primary-soft); }
 .pick-group:last-child { border-bottom: none; }
 .pick-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pick-all { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+/* v5.5.0 顶栏「全选」：靠右，选中态高亮 */
+.stock-bar .pick-all-bar {
+  margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: #fff; font-size: 12px; cursor: pointer; white-space: nowrap;
+  user-select: none; transition: border-color .15s, background .15s, color .15s;
+}
+.stock-bar .pick-all-bar:hover { border-color: var(--primary); background: var(--primary-soft); }
+.stock-bar .pick-all-bar.is-on {
+  border-color: var(--primary); background: var(--primary-soft);
+  color: var(--primary); font-weight: 600;
+}
+.stock-bar .pick-all-bar.is-disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.stock-bar .pick-all-bar input { margin: 0; cursor: inherit; }
 .pick-group-count { font-size: 12px; color: var(--muted); }
 .pick-codes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px 24px; }
 .pick-code {

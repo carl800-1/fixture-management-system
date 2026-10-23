@@ -781,6 +781,45 @@ ok('模板示例行按表头位置生成（不再手写固定列数数组）',
     a === '12' && d === '12' && st === '12', [a, d, st]);
 }
 
+/* ---------- 18. 出库/回库页顶栏「全选」（v5.5.0 一键批量） ---------- */
+section('18. 出库 / 回库页顶栏「全选」（一键批量）');
+ok('出库页状态栏右侧有全选复选框（#out_pick_all + wrap + 文案 span）',
+  appJs.includes('id="out_pick_all_wrap"') && appJs.includes('id="out_pick_all"')
+  && appJs.includes('id="out_pick_all_text"'));
+ok('回库页状态栏右侧有全选复选框（#return_pick_all + wrap + 文案 span）',
+  appJs.includes('id="return_pick_all_wrap"') && appJs.includes('id="return_pick_all"')
+  && appJs.includes('id="return_pick_all_text"'));
+ok('顶栏全选放在 .stock-bar 内且靠右（class="pick-all-bar"）',
+  /可出库：<b id="out_avail">0<\/b> 套[\s\S]{0,400}class="pick-all-bar"/.test(appJs)
+  && /待回库：<b id="return_avail">0<\/b> 套[\s\S]{0,400}class="pick-all-bar"/.test(appJs));
+ok('顶栏全选回调已挂 window（内联 onchange 能拿到）',
+  appJs.includes('window.outToggleAll = function') && appJs.includes('window.returnToggleAll = function'));
+ok('全选作用于当前检索结果的全部勾选框（跨分组，不是只选一组）',
+  /function togglePickAll\(prefix, checked\) \{[\s\S]{0,300}\$\$\('\.' \+ prefix \+ '-pick'\)/.test(appJs));
+ok('顶栏用 id、分组头用 class，两套全选不互相干扰',
+  /class="\$\{prefix\}-pick-all"/.test(appJs) && !/class="(out|return)-pick-all"/.test(appJs));
+ok('全选 / 半选 / 未选三态与文案联动（syncPickAll）',
+  appJs.includes('box.indeterminate = on > 0 && on < total')
+  && appJs.includes('已全选 ${total} 套') && appJs.includes('已选 ${on} / ${total}'));
+ok('勾选 → 数量 → 顶栏单一同步出口（syncPickToQty 末尾调 syncPickAll）',
+  /function syncPickToQty\(prefix\) \{[\s\S]{0,260}syncPickAll\(prefix\);/.test(appJs));
+ok('清空选择时同步复位顶栏全选（clearPickState 调 syncPickAll）',
+  /function clearPickState\(prefix\) \{[\s\S]{0,400}syncPickAll\(prefix\);/.test(appJs));
+ok('无候选时全选禁用（disabled + is-disabled）',
+  appJs.includes('box.disabled = total === 0')
+  && appJs.includes("wrap.classList.toggle('is-disabled', total === 0)"));
+ok('未检索时也复位顶栏状态（outSearch / returnSearch 空查询分支）',
+  /renderPickedSummary\('out'\);\s*\n\s*syncPickAll\('out'\);/.test(appJs)
+  && /renderPickedSummary\('return'\);\s*\n\s*syncPickAll\('return'\);/.test(appJs));
+ok('CSS：全选控件靠右 + 选中高亮 + 禁用态',
+  /\.stock-bar \.pick-all-bar\s*\{[^}]*margin-left:\s*auto/.test(css)
+  && /\.stock-bar \.pick-all-bar\.is-on\s*\{/.test(css)
+  && /\.stock-bar \.pick-all-bar\.is-disabled\s*\{/.test(css));
+ok('CSS：状态栏允许换行（窄屏不挤压全选）', /\.stock-bar\s*\{[^}]*flex-wrap:\s*wrap/.test(css));
+ok('取消全选后数量归 0、不被强行补成 1 套（syncQtyToPick 允许 0 套）',
+  /function syncQtyToPick\(prefix\) \{[\s\S]{0,560}if \(isNaN\(n\) \|\| n < 0\) n = 0;/.test(appJs)
+  && !/if \(isNaN\(n\) \|\| n < 1\) \{ input\.value/.test(appJs));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

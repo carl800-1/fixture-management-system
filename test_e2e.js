@@ -643,6 +643,131 @@ async function main() {
   ok('该夹具流水累计 8 条', db6.fixTransactions.filter((t) => t.fixtureId === cyc.id).length === 8,
     String(db6.fixTransactions.filter((t) => t.fixtureId === cyc.id).length));
 
+  /* ---------- 6.5 出入库页顶栏「全选」（v5.5.0 一键批量） ---------- */
+  section('6.5 出入库页顶栏「全选」（一键批量出库 / 回库）');
+  const allBox = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const r = {};
+    window.showView('outbound'); await sleep(350);
+    r.hasOutBox = !!$('#out_pick_all');
+    r.emptyDisabled = !!($('#out_pick_all') && $('#out_pick_all').disabled);
+    r.emptyText = (($('#out_pick_all_text')||{}).textContent||'').trim();
+    setV('#out_location','ZP1-U-1'); await sleep(450);
+    r.candidates = $$('.out-pick').length;
+    r.groupHeads = $$('.out-pick-all').length;
+    r.textIdle = (($('#out_pick_all_text')||{}).textContent||'').trim();
+    const box = $('#out_pick_all');
+    r.disabledAfterSearch = box.disabled;
+    /* ① 一键全选 */
+    box.checked = true; box.dispatchEvent(new Event('change')); await sleep(220);
+    r.checkedAll = $$('.out-pick').filter(c=>c.checked).length;
+    r.qty = String(($('#out_qty')||{}).value||'');
+    r.summary = (($('#out_picked_summary')||{}).textContent||'');
+    r.textAll = (($('#out_pick_all_text')||{}).textContent||'').trim();
+    r.onClass = ($('#out_pick_all_wrap')||{}).className || '';
+    r.groupHeadsAll = $$('.out-pick-all').filter(c=>c.checked).length;
+    /* ② 取消一个 → 顶栏转半选 */
+    const one = $$('.out-pick')[0];
+    one.checked = false; one.dispatchEvent(new Event('change')); await sleep(180);
+    r.indeterminate = box.indeterminate;
+    r.checkedPartial = $$('.out-pick').filter(c=>c.checked).length;
+    r.textPartial = (($('#out_pick_all_text')||{}).textContent||'').trim();
+    /* ③ 再点全选 → 恢复；④ 取消全选 → 清空 */
+    box.checked = true; box.dispatchEvent(new Event('change')); await sleep(160);
+    r.rechecked = $$('.out-pick').filter(c=>c.checked).length;
+    box.checked = false; box.dispatchEvent(new Event('change')); await sleep(160);
+    r.cleared = $$('.out-pick').filter(c=>c.checked).length;
+    r.textCleared = (($('#out_pick_all_text')||{}).textContent||'').trim();
+    r.qtyCleared = String(($('#out_qty')||{}).value||'');
+    /* ⑤ 取消全选后直接提交 → 必须被拦（数量归 0 不得被补成 1 套） */
+    window.submitOutDo(); await sleep(450);
+    r.blockedToast = (($('#toast')||{}).textContent||'');
+    r.checkedAfterBlock = $$('.out-pick').filter(c=>c.checked).length;
+    /* ⑥ 未检索时全选必须回到禁用（容器换成空提示） */
+    setV('#out_location',''); await sleep(400);
+    r.backToEmptyDisabled = !!$('#out_pick_all').disabled;
+    return r;
+  })()`);
+  ok('出库页顶栏存在「全选」复选框（#out_pick_all）', allBox.hasOutBox === true);
+  ok('未检索时全选禁用（无可选对象）', allBox.emptyDisabled === true, String(allBox.emptyDisabled));
+  ok('检索 ZP1-U-1 命中 3 套在库夹具（A 已在回库时改到 ZP1-U-2-2）', allBox.candidates === 3, String(allBox.candidates));
+  ok('检索后全选解禁', allBox.disabledAfterSearch === false, String(allBox.disabledAfterSearch));
+  ok('顶栏与分组各有一套全选（class 前缀不同，互不冲突）', allBox.groupHeads >= 1, String(allBox.groupHeads));
+  ok('未勾选时文案为「全选 3 套」', allBox.textIdle === '全选 3 套', allBox.textIdle);
+  ok('一键全选：3 套全部勾上', allBox.checkedAll === 3, String(allBox.checkedAll));
+  ok('一键全选：出库数量自动回填为 3', allBox.qty === '3', allBox.qty);
+  ok('一键全选：分组头复选框同步勾上', allBox.groupHeadsAll === allBox.groupHeads,
+    JSON.stringify([allBox.groupHeadsAll, allBox.groupHeads]));
+  ok('一键全选：已选摘要显示 3 套', /已选\s*3\s*套/.test(allBox.summary || ''), allBox.summary);
+  ok('一键全选：顶栏文案变「已全选 3 套」', allBox.textAll === '已全选 3 套', allBox.textAll);
+  ok('一键全选：控件加 is-on 高亮', /is-on/.test(allBox.onClass || ''), allBox.onClass);
+  ok('取消其中一个 → 顶栏转半选（indeterminate）', allBox.indeterminate === true, String(allBox.indeterminate));
+  ok('取消其中一个 → 数量与文案同步为 2', allBox.checkedPartial === 2 && allBox.textPartial === '已选 2 / 3',
+    JSON.stringify([allBox.checkedPartial, allBox.textPartial]));
+  ok('再点全选 → 恢复 3 套', allBox.rechecked === 3, String(allBox.rechecked));
+  ok('取消全选 → 全部清空', allBox.cleared === 0, String(allBox.cleared));
+  ok('取消全选 → 文案回到「全选 3 套」', allBox.textCleared === '全选 3 套', allBox.textCleared);
+  ok('取消全选 → 数量框归 0（不残留上一次的 3）', allBox.qtyCleared === '0', allBox.qtyCleared);
+  ok('取消全选后直接提交被拦（不得凭数量旧值提交 1 套）',
+    /请先勾选/.test(allBox.blockedToast || '') && allBox.checkedAfterBlock === 0,
+    JSON.stringify([allBox.blockedToast, allBox.checkedAfterBlock]));
+  ok('清空检索词后全选重新禁用', allBox.backToEmptyDisabled === true, String(allBox.backToEmptyDisabled));
+
+  /* 真正走一次「全选 → 提交」：3 套一次性出库，随后立刻全部回库复原状态 */
+  const oneClick = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const r = {};
+    window.showView('outbound'); await sleep(350);
+    setV('#out_location','ZP1-U-1'); await sleep(450);
+    r.candidates = $$('.out-pick').length;
+    const box = $('#out_pick_all');
+    box.checked = true; box.dispatchEvent(new Event('change')); await sleep(220);
+    r.selected = $$('.out-pick').filter(c=>c.checked).length;
+    swipe('#swipe_out_party','BR-0001'); swipe('#swipe_out_operator','OP-0001'); await sleep(180);
+    const b = btnByText('提交出库');
+    if (!b) return Object.assign(r, { err: '无提交出库按钮' });
+    b.click(); await sleep(1800);
+    r.toast = (($('#toast')||{}).textContent||'');
+    return r;
+  })()`);
+  ok('一键出库：全选得到 3 套选择', oneClick.selected === 3, JSON.stringify(oneClick));
+  ok('一键出库：一次提交出库 3 套（提示正确）', /出库成功 3 套/.test(oneClick.toast || ''), oneClick.toast);
+  const db65 = readDb();
+  const bulkOut = db65.fixtures.filter((f) => /^ZP1-U-1-/.test(f.location || ''));
+  ok('一键出库：3 套状态全部 = checked_out', bulkOut.length === 3 && bulkOut.every((f) => f.status === 'checked_out'),
+    JSON.stringify(bulkOut.map((f) => [f.location, f.status])));
+  ok('一键出库：3 条出库流水都带刷卡姓名（批量共用同一组经办人）',
+    db65.fixTransactions.filter((t) => t.type === 'out' && t.operator === '王经办' && t.counterparty === '李领用').length >= 3,
+    String(db65.fixTransactions.filter((t) => t.type === 'out').length));
+
+  const oneClickRet = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    window.showView('return'); await sleep(350);
+    const r = { hasRetBox: !!$('#return_pick_all') };
+    setV('#return_location','ZP1-U-1'); await sleep(450);
+    r.candidates = $$('.return-pick').length;
+    const box = $('#return_pick_all');
+    box.checked = true; box.dispatchEvent(new Event('change')); await sleep(220);
+    r.selected = $$('.return-pick').filter(c=>c.checked).length;
+    r.text = (($('#return_pick_all_text')||{}).textContent||'').trim();
+    swipe('#swipe_ret_party','BR-0001'); swipe('#swipe_ret_operator','OP-0001'); await sleep(180);
+    const b = btnByText('提交回库');
+    if (!b) return Object.assign(r, { err: '无提交回库按钮' });
+    b.click(); await sleep(1800);
+    r.toast = (($('#toast')||{}).textContent||'');
+    return r;
+  })()`);
+  ok('回库页顶栏同样有「全选」复选框（#return_pick_all）', oneClickRet.hasRetBox === true);
+  ok('一键回库：待回库命中 3 套并全选', oneClickRet.candidates === 3 && oneClickRet.selected === 3,
+    JSON.stringify([oneClickRet.candidates, oneClickRet.selected]));
+  ok('一键回库：顶栏文案「已全选 3 套」', oneClickRet.text === '已全选 3 套', oneClickRet.text);
+  ok('一键回库：一次提交回库 3 套（提示正确）', /回库成功 3 套/.test(oneClickRet.toast || ''), oneClickRet.toast);
+  const db65b = readDb();
+  const bulkRet = db65b.fixtures.filter((f) => /^ZP1-U-1-/.test(f.location || ''));
+  ok('一键回库：3 套状态全部回到 stocked（后续用例状态未被污染）',
+    bulkRet.length === 3 && bulkRet.every((f) => f.status === 'stocked'),
+    JSON.stringify(bulkRet.map((f) => [f.location, f.status])));
+
   /* ---------- 7. 送修 / 维修完成 ---------- */
   section('7. 送修与维修完成');
   const repRes = await wc.executeJavaScript(`(async () => {

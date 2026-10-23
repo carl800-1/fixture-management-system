@@ -358,6 +358,14 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
+      version: '5.5.0', date: '2026-10-23', items: [
+        '【新增】出库页「可出库」、回库页「待回库」状态条的<b>右侧各增加一个「全选」开关</b>：勾上即把<b>当前检索结果里的全部夹具</b>一次性选中（跨分组），出库 / 回库数量自动回填为总套数，已选摘要与各分组头的复选框同步更新，随后回车或点「提交出库 / 提交回库」即完成<b>一键批量提交</b>',
+        '【新增】顶栏开关与结果区<b>双向联动</b>：显示「全选 N 套 / 已选 n / N / 已全选 N 套」三种文案，手动取消其中一套时开关自动转为<b>半选</b>态，再点一下即全部取消，状态不会与结果区脱节',
+        '【保障】<b>没有检索结果时开关自动禁用</b>（灰显且不可点），避免出现「点了全选却没对象」的假状态；清空检索词后也会立即复位为禁用',
+        '【说明】仍然是<b>一次提交多套、每套各出/回库 1 件</b>，共用同一组经办人 / 领用人 / 时间 / 用途 / 备注；刷卡严格校验（两人必刷、不同卡）不变，因此「一键」只省去逐个勾选，不降低记录完整性'
+      ]
+    },
+    {
       version: '5.4.0', date: '2026-10-21', items: [
         '【新增】单件夹具可关联的<b>机种数由 7 个提升到 12 个</b>：建档 / 编辑表单的机种标签区上限同步放宽，计数显示为 <code>n / 12</code>，达到 12 个才提示已满',
         '【调整】夹具导入 / 导出模板由 <b>17 列改为 22 列</b>：<code>夹具编号 | 名称 | 机种名称1…机种名称12 | 分类 | 库位 | 产线1…产线5 | 备注</code>。分类 / 库位移到第 14 / 15 列，产线1~5 为第 16~20 列，备注为第 21 列',
@@ -2320,6 +2328,10 @@
           <div class="stock-bar">可出库：<b id="out_avail">0</b> 套
             <span class="muted">同一夹具编号可能有多套，下方按「名称 + 机种」分组，勾选具体序号区分</span>
             <span class="muted" id="out_loc_tip"></span>
+            <label class="pick-all-bar" id="out_pick_all_wrap" title="全选当前检索到的可出库夹具，回车即提交出库">
+              <input type="checkbox" id="out_pick_all" onchange="outToggleAll(this)">
+              <span id="out_pick_all_text">全选</span>
+            </label>
           </div>
           <div id="out_candidates" class="pick-list"></div>
           <div id="out_picked_summary" class="picked-summary"><span class="muted">未选择夹具</span></div>
@@ -2400,6 +2412,10 @@
           <div class="stock-bar">待回库：<b id="return_avail">0</b> 套
             <span class="muted">同一夹具编号可能有多套，下方按「名称 + 机种」分组，勾选具体序号区分</span>
             <span class="muted" id="return_loc_tip"></span>
+            <label class="pick-all-bar" id="return_pick_all_wrap" title="全选当前检索到的待回库夹具，回车即提交回库">
+              <input type="checkbox" id="return_pick_all" onchange="returnToggleAll(this)">
+              <span id="return_pick_all_text">全选</span>
+            </label>
           </div>
           <div id="return_candidates" class="pick-list"></div>
           <div id="return_picked_summary" class="picked-summary"><span class="muted">未选择夹具</span></div>
@@ -2570,6 +2586,38 @@
     });
   }
 
+  /* v5.5.0 顶栏「全选」：作用于当前检索结果的全部夹具（跨分组），配合回车即一键出库/回库 */
+  function togglePickAll(prefix, checked) {
+    $$('.' + prefix + '-pick').forEach((c) => { c.checked = !!checked; });
+    syncGroupHead(prefix);
+    syncPickToQty(prefix);
+  }
+
+  /* 顶栏全选框状态与结果区联动（全选 / 半选 / 未选），无候选时禁用 */
+  function syncPickAll(prefix) {
+    const box = $('#' + prefix + '_pick_all');
+    const wrap = $('#' + prefix + '_pick_all_wrap');
+    const textEl = $('#' + prefix + '_pick_all_text');
+    const items = $$('.' + prefix + '-pick');
+    const total = items.length;
+    const on = items.filter((c) => c.checked).length;
+    if (box) {
+      box.checked = total > 0 && on === total;
+      box.indeterminate = on > 0 && on < total;
+      box.disabled = total === 0;
+    }
+    if (wrap) {
+      wrap.classList.toggle('is-disabled', total === 0);
+      wrap.classList.toggle('is-on', total > 0 && on === total);
+    }
+    if (textEl) {
+      if (!total) textEl.textContent = '全选';
+      else if (on === total) textEl.textContent = `已全选 ${total} 套`;
+      else if (on > 0) textEl.textContent = `已选 ${on} / ${total}`;
+      else textEl.textContent = `全选 ${total} 套`;
+    }
+  }
+
   /* 已选摘要：自动带出所选夹具的关联字段（名称 / 机种 / 库位），避免“选了却看不到值” */
   function renderPickedSummary(prefix) {
     const el = $('#' + prefix + '_picked_summary');
@@ -2599,6 +2647,7 @@
     const n = pickedIds(prefix).length;
     const input = $('#' + prefix + '_qty'); if (input) input.value = String(n);
     renderPickedSummary(prefix);
+    syncPickAll(prefix);
   }
 
   /* 数量输入 → 自动勾选前 N 台（超上限归正到上限并提示） */
@@ -2608,7 +2657,9 @@
     if (!input || !items.length) return;
     const max = items.length;
     let n = parseInt(input.value, 10);
-    if (isNaN(n) || n < 1) { input.value = String(Math.min(1, max)); n = 1; }
+    /* v5.5.0：0 / 负数 / 空串 = 「一套都不选」，即「取消全选」后的正常状态。
+       旧实现会强行补成 1 套 ⇒ 用户取消全选后直接回车会莫名提交 1 套。 */
+    if (isNaN(n) || n < 0) n = 0;
     if (n > max) {
       input.value = String(max);
       toast(`数量不能超过当前可操作 ${max} 套`, 'warn');
@@ -2623,6 +2674,7 @@
     $$('.' + prefix + '-pick-all').forEach((c) => { c.checked = false; c.indeterminate = false; });
     const input = $('#' + prefix + '_qty'); if (input) input.value = '1';
     renderPickedSummary(prefix);
+    syncPickAll(prefix);
   }
 
   /* ============================================================
@@ -2650,6 +2702,7 @@
     if (!code && !name && !lm && !location) {
       container.innerHTML = '<div class="empty-tip">在上方任一栏输入即可检索在库夹具</div>';
       renderPickedSummary('out');
+      syncPickAll('out');
       return;
     }
     renderPickGroups(container, filtered, 'out', '未找到匹配的在库夹具', '台在库');
@@ -2664,6 +2717,9 @@
     syncGroupHead('out');
     syncPickToQty('out');
   };
+
+  /* 顶栏全选：一次勾上当前检索结果的全部在库夹具 ⇒ 回车（或点「提交出库」）即一键出库 */
+  window.outToggleAll = function (el) { togglePickAll('out', el.checked); };
 
   window.outQtyChange = function () {
     syncQtyToPick('out');
@@ -2742,6 +2798,7 @@
     if (!code && !name && !lm && !location) {
       container.innerHTML = '<div class="empty-tip">在上方任一栏输入即可检索已出库夹具</div>';
       renderPickedSummary('return');
+      syncPickAll('return');
       return;
     }
     renderPickGroups(container, filtered, 'return', '未找到匹配的已出库夹具', '台待回库');
@@ -2756,6 +2813,9 @@
     syncGroupHead('return');
     syncPickToQty('return');
   };
+
+  /* 顶栏全选：一次勾上当前检索结果的全部待回库夹具 ⇒ 回车（或点「提交回库」）即一键回库 */
+  window.returnToggleAll = function (el) { togglePickAll('return', el.checked); };
 
   window.returnQtyChange = function () {
     syncQtyToPick('return');
