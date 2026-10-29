@@ -187,6 +187,23 @@ async function main() {
   ok('点击出库页「清除已选内容」不报错', svRes.btnClick === 'OK', svRes.btnClick);
   ok('旧视图名 showView(\'prodquery\') 平滑落到机种管理', svRes.aliasProdQuery === 'OK', svRes.aliasProdQuery);
 
+  /* v5.8.0：异常工装视图（侧边栏新增，渲染真实数据不崩溃） */
+  const anomRes = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    window.showView('fixanomaly'); await sleep(250);
+    const c = $('#content');
+    const title = (($('#viewTitle') || {}).textContent) || '';
+    return {
+      ok: title.includes('异常工装'),
+      panel: !!c.querySelector('.anom-table'),
+      secs: c.querySelectorAll('.anom-section').length,
+      unify: typeof window.fixAnomalyUnifyName === 'function' && typeof window.fixAnomalyUnifyLoc === 'function'
+    };
+  })()`);
+  ok('showView(fixanomaly) 标题为「异常工装」', anomRes.ok, JSON.stringify(anomRes));
+  ok('异常工装页渲染出表格分区（无崩溃）', anomRes.secs >= 4 && anomRes.panel, 'secs=' + anomRes.secs + ' panel=' + anomRes.panel);
+  ok('异常工装页暴露「统一名称 / 统一库位」入口', anomRes.unify);
+
   /* ---------- 2. 产线配置（v5：只有线体，工位模型已移除） ---------- */
   section('2. 产线配置（仅线体）');
   const cfgRes = await wc.executeJavaScript(`(async () => {

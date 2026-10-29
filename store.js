@@ -425,11 +425,10 @@ function dedupeNumbers(arr) {
   return out;
 }
 
-function updateFixture(fixture) {
-  load();
-  const i = data.fixtures.findIndex((f) => f.id === fixture.id);
-  if (i < 0) bad('夹具不存在', 'NotFoundError');
-  const old = data.fixtures[i];
+/* 更新归一化核心（v5.8.0 抽出）：让「单条 updateFixture」与「批量 updateFixturesBatch」
+ * 共用同一套校验与字段清洗，避免两条路径的规则漂移。
+ * 返回**未写回**的新夹具对象；old 必须存在。 */
+function applyFixturePatch(old, fixture) {
   const f = Object.assign({}, old, fixture);
   // code 不可改：改则断流水与绑定
   f.code = old.code;
@@ -445,9 +444,41 @@ function updateFixture(fixture) {
   f.remark = String(f.remark == null ? '' : f.remark).trim();
   validateFixture(f, { skipCode: true });
   f.updatedAt = Date.now();
+  return f;
+}
+
+function updateFixture(fixture) {
+  load();
+  const i = data.fixtures.findIndex((f) => f.id === fixture.id);
+  if (i < 0) bad('夹具不存在', 'NotFoundError');
+  const f = applyFixturePatch(data.fixtures[i], fixture);
   data.fixtures[i] = f;
   save();
   return f.id;
+}
+
+/* 批量更新（v5.8.0）：异常工装「统一名称 / 统一库位」一次改多套，整批只写一次盘。
+ * 入参：list = [{ id, patch }]（patch 即 updateFixture 的负载，只带要改的字段）。
+ * 与 addFixturesBatch 同口径：先整批校验，全部通过才统一 save；个别失败不影响其它行。 */
+function updateFixturesBatch(list) {
+  load();
+  const staged = [];
+  const failed = [];
+  (Array.isArray(list) ? list : []).forEach((item, i) => {
+    try {
+      const old = data.fixtures.find((f) => f.id === item.id);
+      if (!old) bad('夹具不存在', 'NotFoundError');
+      staged.push(applyFixturePatch(old, item.patch || {}));
+    } catch (e) {
+      failed.push({ index: i, message: e && e.message ? e.message : String(e) });
+    }
+  });
+  if (staged.length) {
+    const byId = new Map(staged.map((f) => [f.id, f]));
+    data.fixtures = data.fixtures.map((f) => byId.get(f.id) || f);
+    save();
+  }
+  return { updated: staged.length, failed };
 }
 
 /* 删除夹具（用于录错 / 重复建档的纠正）。
@@ -715,7 +746,7 @@ module.exports = {
   setDataDir, open, getAll, get, add, put, del, clear, count,
   getByIndex, getByRange, getMeta, setMeta,
   // 夹具管理
-  addFixture, updateFixture, delFixture, findFixtureByCode,
+  addFixture, updateFixture, updateFixturesBatch, delFixture, findFixtureByCode,
   addFixturesBatch, buildFixture, makeCodeAllocator,
   addFixTransaction,
   // 人员卡库（v5.1.0）

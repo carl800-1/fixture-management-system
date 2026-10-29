@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '5.7.1';
+  const APP_VERSION = '5.8.0';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
@@ -41,6 +41,7 @@ const DB = (function () {
       fixtureAdd: (fixture) => invoke('fixture-add', fixture),
       fixtureAddBatch: (list) => invoke('fixture-addBatch', list),
       fixtureUpdate: (fixture) => invoke('fixture-update', fixture),
+      fixtureUpdateBatch: (list) => invoke('fixture-updateBatch', list),
       fixtureDel: (id) => invoke('fixture-del', id),
       fixtureGetAll: () => invoke('fixture-getAll'),
       fixtureAddTransaction: (tx) => invoke('fixture-addTransaction', tx),
@@ -347,6 +348,41 @@ const DB = (function () {
     return f.id;
   }
 
+  /* 批量更新（v5.8.0）：浏览器分支语义同 store.updateFixturesBatch，一次写 localStorage */
+  async function fixtureUpdateBatch(list) {
+    const fixtures = lsRead(LS_FIXTURES, []);
+    const staged = [];
+    const failed = [];
+    (Array.isArray(list) ? list : []).forEach((item, i) => {
+      try {
+        const old = fixtures.find((f) => f.id === item.id);
+        if (!old) bad('夹具不存在', 'NotFoundError');
+        const f = Object.assign({}, old, item.patch || {});
+        f.code = old.code;
+        f.serialNo = String(f.serialNo == null ? '' : f.serialNo).trim();
+        f.name = String(f.name == null ? '' : f.name).trim();
+        const rawLms = dedupeStrings(f.lineModels);
+        if (rawLms.length > MAX_LINE_MODELS) bad('机种名称最多 ' + MAX_LINE_MODELS + ' 个');
+        f.lineModels = rawLms.slice(0, MAX_LINE_MODELS);
+        f.lines = dedupeNumbers(f.lines);
+        if (f.stations !== undefined) delete f.stations;
+        f.location = String(f.location == null ? '' : f.location).trim();
+        f.category = String(f.category == null ? '' : f.category).trim();
+        validateFixture(f);
+        f.updatedAt = Date.now();
+        staged.push(f);
+      } catch (e) {
+        failed.push({ index: i, message: e && e.message ? e.message : String(e) });
+      }
+    });
+    if (staged.length) {
+      const byId = new Map(staged.map((f) => [f.id, f]));
+      const next = fixtures.map((f) => byId.get(f.id) || f);
+      lsWrite(LS_FIXTURES, next);
+    }
+    return { updated: staged.length, failed };
+  }
+
   /* 删除夹具：连带清除其流水（与主进程 store.delFixture 口径一致） */
   async function fixtureDel(id) {
     lsWrite(LS_FIXTURES, lsRead(LS_FIXTURES, []).filter((f) => f.id !== id));
@@ -517,7 +553,7 @@ const DB = (function () {
     MAX_CARD_NO, MAX_STAFF_NAME, MAX_STAFF_DEPT, STAFF_ROLES,
     open, getAll, get, add, put, del, getMeta, setMeta,
     clear: clearColl,
-    fixtureAdd, fixtureUpdate, fixtureDel,
+    fixtureAdd, fixtureUpdate, fixtureUpdateBatch, fixtureDel,
     fixtureAddBatch,
     fixtureGetAll, fixtureGetTransactions, fixtureAddTransaction,
     nextFreeCode,

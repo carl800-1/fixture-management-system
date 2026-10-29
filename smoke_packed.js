@@ -310,9 +310,9 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     ok('品牌栏为程序名（v4.0.4 起不再带版本号）', info.brand.trim() === '工装夹具管理程序', info.brand);
     ok('页脚版本号 = v' + VERSION, info.foot.indexOf('v' + VERSION) >= 0, info.foot);
     const EX_VIEWS = ['dashboard', 'fixtures', 'outbound', 'return', 'location', 'records',
-      'query', 'prod', 'linequery', 'linecfg', 'staff', 'data'];
+      'query', 'prod', 'linequery', 'linecfg', 'staff', 'fixanomaly', 'data'];
     const missView = EX_VIEWS.filter((v) => !info.views.includes(v));
-    ok('12 个导航项齐备（v5.1.0 增加「人员卡库」）', info.navCount >= EX_VIEWS.length && missView.length === 0,
+    ok('13 个导航项齐备（v5.1.0 增加「人员卡库」、v5.8.0 增加「异常工装」）', info.navCount >= EX_VIEWS.length && missView.length === 0,
       'count=' + info.navCount + ' missing=' + missView.join(','));
     ok('CSS 已生效', info.bg !== 'rgba(0, 0, 0, 0)' && info.bg !== 'transparent', info.bg);
 

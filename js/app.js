@@ -21,6 +21,12 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+  /* 属性值转义：esc 已含引号转义，别名便于语义区分（用于 value="..." / onclick 参数）。
+   * 挂 window 只为通过 test_render 的 onclick 函数名一致性校验（它把模板插值 ${escAttr(...)}
+   * 也当事件引用收集），实际只在渲染期调用，不参与点击事件。 */
+  const escAttr = (s) => esc(s);
+  window.escAttr = escAttr;
+
   const num = (v, fallback = 0) => {
     if (v == null) return fallback;
     let s = String(v);
@@ -358,6 +364,19 @@
 
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
+    {
+      version: '5.8.0', date: '2026-10-29', items: [
+        '<b>【新增】侧边栏「⚠️ 异常工装」页（修改导入的数据）</b>：数据治理（按「工装号-套号」规则套号唯一化 + 去重）后剩 3911 条，'
+          + '同工装号下仍存在名称 / 库位不一致等异常，但没有专用修改入口。'
+          + '本页按工装号聚合实时列出四类异常：① <b>名称不一致</b>（154 组）—— 每行「⚡ 统一名称」一键把该工装号全部套改成选定主名称；'
+          + '② <b>库位不一致</b>（218 组）—— 「⚡ 统一库位」一键统一为 4 段式库位；'
+          + '③ <b>编号格式异常</b>（3 条）—— 复用编辑表单修正；'
+          + '④ <b>套号缺失</b>（4 组，仅多套工装号）—— 跳「夹具管理」核对。'
+          + '机种不一致属正常设计（一工装多机种），不列异常',
+        '<b>【改进】批量修改走新增 fixture-updateBatch 通道</b>：整批一次写盘，避免逐套落库时反复全量重写数据文件；'
+          + 'store 层把单条与批量更新抽到同一个 applyFixturePatch 归一化函数，防止两条路径的校验规则漂移'
+      ]
+    },
     {
       version: '5.7.1', date: '2026-10-29', items: [
         '<b>【修复】出库 / 回库会出库「错件」（BUG-017）</b>：旧版在点「提交」的一瞬间，会按数量框把候选列表<b>前 N 件</b>重新勾一遍，'
@@ -707,6 +726,7 @@
     linequery: '产线使用',
     linecfg: '产线配置',
     staff: '人员卡库',
+    fixanomaly: '⚠️ 异常工装',
     data: '数据备份'
   };
   const RENDERERS = {
@@ -721,6 +741,7 @@
     linequery: renderLineQuery,
     linecfg: renderLineConfig,
     staff: renderStaff,
+    fixanomaly: renderFixAnomaly,
     data: renderData
   };
 
@@ -4387,6 +4408,253 @@
     ]);
     download('人员卡库_' + new Date().toISOString().slice(0, 10) + '.csv', buildCsvText(STAFF_IMPORT_HEADERS, rows));
     toast(`已导出 ${rows.length} 人（列结构与导入模板一致）`, 'ok');
+  };
+
+  /* ============================================================
+   * 异常工装（v5.8.0）
+   *
+   * 背景：一次导入 4114 条后，按「工装号-套号」规则治理（套号唯一化 + 去重），
+   * 剩 3911 条。用户确认的异常口径：
+   *   - 一工装多机种是正常设计（机种不一致不列异常）；
+   *   - 名称应一致（不一致 = 异常，标红，人工确认/修改）；
+   *   - 一套工装一个库位，多套应同库位（不一致 = 异常，需人工修改）。
+   * 本页用于**修改导入的数据**：统一名称 / 统一库位 / 修正编号（复用编辑表单）。
+   * ============================================================ */
+
+  /* 与 clean_fixture_data.py 的 SERIAL_RE 同源：工装号-3位套号 */
+  const FIX_SERIAL_RE = /^(.+?)-(\d{3})$/;
+  function parseFixSerial(serialNo) {
+    const m = FIX_SERIAL_RE.exec(String(serialNo == null ? '' : serialNo).trim());
+    return m ? { base: m[1], seq: Number(m[2]) } : null;
+  }
+
+  function renderFixAnomaly() {
+    const list = state.fixtures || [];
+
+    /* ---- 聚合：按工装号分组（格式异常单独列出） ---- */
+    const groups = new Map();      // base -> fixtures[]
+    const unparsed = [];           // serialNo 无法解析
+    list.forEach((f) => {
+      const p = parseFixSerial(f.serialNo);
+      if (!p) { unparsed.push(f); return; }
+      if (!groups.has(p.base)) groups.set(p.base, []);
+      groups.get(p.base).push(f);
+    });
+
+    /* ---- 异常判定 ---- */
+    const nameAnoms = [];       // 名称不一致组
+    const locAnoms = [];        // 库位不一致组
+    const missingAnoms = [];    // 套号缺失组
+    groups.forEach((items, base) => {
+      const names = uniqueSorted(items.map((f) => f.name).filter(Boolean));
+      const locs = uniqueSorted(items.map((f) => f.location).filter(Boolean));
+      if (names.length > 1) nameAnoms.push({ base, items, names });
+      if (locs.length > 1) locAnoms.push({ base, items, locs });
+      // 套号缺失：**多套**工装号下套号不连续（1..max 中有空洞）→ 标黄待确认。
+      // 仅建 1 套且套号非 001（如 C9U3-921-030 只有 -002）不算缺号：该工装确实只建了那一套。
+      if (items.length < 2) return;
+      const seqs = items.map((f) => parseFixSerial(f.serialNo).seq).sort((a, b) => a - b);
+      const max = seqs[seqs.length - 1];
+      const miss = [];
+      for (let s = 1; s < max; s++) if (!seqs.includes(s)) miss.push(s);
+      if (miss.length) missingAnoms.push({ base, items, miss });
+    });
+    /* 按问题严重度排序：套数多/问题多的组靠前 */
+    nameAnoms.sort((a, b) => b.items.length - a.items.length);
+    locAnoms.sort((a, b) => b.items.length - a.items.length);
+    missingAnoms.sort((a, b) => b.items.length - a.items.length);
+
+    /* ---- 概览 ---- */
+    const totalAnom = nameAnoms.length + locAnoms.length + unparsed.length + missingAnoms.length;
+    const summary = `
+      <div class="info-tip">
+        <b>异常工装（修改导入数据）</b>：按「工装号-套号」规则核对。<br>
+        ① 名称不一致 <b class="stat-danger">${nameAnoms.length}</b> 组 · ② 库位不一致 <b class="stat-danger">${locAnoms.length}</b> 组
+        · ③ 编号格式异常 <b class="stat-danger">${unparsed.length}</b> 条 · ④ 套号缺失 <b class="stat-warn">${missingAnoms.length}</b> 组<br>
+        共 <b>${totalAnom}</b> 项待处理。机种不一致属正常设计（一工装多机种），不列异常。
+        修改后即时写回 <code>fixture-data.json</code>。
+      </div>`;
+
+    /* ---- 名称不一致 ---- */
+    const nameRows = nameAnoms.length
+      ? nameAnoms.map((g) => {
+          const listHtml = g.names.map((n) => `<span class="anom-val">${esc(n)}</span>`).join('');
+          const count = g.items.length;
+          return `<tr>
+            <td class="mono">${esc(g.base)}</td>
+            <td>${count} 套</td>
+            <td>${listHtml}</td>
+            <td class="anom-ops">
+              <button class="btn sm primary" onclick="fixAnomalyUnifyName('${escAttr(g.base)}')">⚡ 统一名称</button>
+            </td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="empty">无名称不一致的工装</td></tr>';
+
+    /* ---- 库位不一致 ---- */
+    const locRows = locAnoms.length
+      ? locAnoms.map((g) => {
+          const listHtml = g.locs.map((n) => `<span class="anom-val">${esc(n)}</span>`).join('');
+          const count = g.items.length;
+          return `<tr>
+            <td class="mono">${esc(g.base)}</td>
+            <td>${count} 套</td>
+            <td>${listHtml}</td>
+            <td class="anom-ops">
+              <button class="btn sm primary" onclick="fixAnomalyUnifyLoc('${escAttr(g.base)}')">⚡ 统一库位</button>
+            </td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="empty">无库位不一致的工装</td></tr>';
+
+    /* ---- 格式异常 ---- */
+    const fmtRows = unparsed.length
+      ? unparsed.map((f) => `<tr>
+          <td class="mono">${esc(f.code)}</td>
+          <td class="mono anom-bad">${esc(f.serialNo)}</td>
+          <td>${esc(f.name)}</td>
+          <td>${esc(f.location)}</td>
+          <td class="anom-ops">
+            <button class="btn sm" onclick="fixtureEdit(${f.id})">✏️ 修正编号</button>
+          </td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="empty">无编号格式异常</td></tr>';
+
+    /* ---- 套号缺失 ---- */
+    const missRows = missingAnoms.length
+      ? missingAnoms.map((g) => `<tr>
+          <td class="mono">${esc(g.base)}</td>
+          <td>${g.items.length} 套</td>
+          <td>现有 ${g.items.map((f) => String(parseFixSerial(f.serialNo).seq).padStart(3, '0')).join('、')}</td>
+          <td class="anom-bad">缺 ${g.miss.map((m) => String(m).padStart(3, '0')).join('、')}</td>
+          <td class="anom-ops">
+            <button class="btn sm" onclick="fixAnomalyJumpFixtures('${escAttr(g.base)}')">🔍 去夹具管理核对</button>
+          </td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="empty">无套号缺失的工装</td></tr>';
+
+    $('#content').innerHTML = `
+      <div class="panel">
+        <div class="panel-title">⚠️ 异常工装
+          <span class="panel-actions">
+            <button class="btn sm" onclick="renderFixAnomaly()">🔄 刷新</button>
+          </span>
+        </div>
+        ${summary}
+        <div class="anom-section">
+          <div class="anom-sec-title">① 名称不一致（同工装号下多套名称不同，需人工确认主名称）</div>
+          <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有名称</th><th>操作</th></tr></thead><tbody>${nameRows}</tbody></table>
+        </div>
+        <div class="anom-section">
+          <div class="anom-sec-title">② 库位不一致（一套工装一个库位，多套应同库位，需人工统一）</div>
+          <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有库位</th><th>操作</th></tr></thead><tbody>${locRows}</tbody></table>
+        </div>
+        <div class="anom-section">
+          <div class="anom-sec-title">③ 编号格式异常（末尾不是 3 位套号，无法套用「工装号-套号」规则，请人工修正）</div>
+          <table class="anom-table"><thead><tr><th>序号</th><th>编号</th><th>名称</th><th>库位</th><th>操作</th></tr></thead><tbody>${fmtRows}</tbody></table>
+        </div>
+        <div class="anom-section">
+          <div class="anom-sec-title">④ 套号缺失（同工装号下套号不连续，可能漏建档或另套编号体系，请人工核对）</div>
+          <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有套号</th><th>缺失套号</th><th>操作</th></tr></thead><tbody>${missRows}</tbody></table>
+        </div>
+        <div class="tip">
+          修改后请到「夹具管理」核对；若整套名称/库位确实录错，也可在该页用「编辑」逐套修正。
+          机种不一致不在此列（一工装多机种是正常设计）。
+        </div>
+      </div>`;
+  }
+  window.renderFixAnomaly = renderFixAnomaly;
+
+  /* 「统一名称」：该工装号下所有套批量改成指定名称 */
+  window.fixAnomalyUnifyName = function (base) {
+    const items = (state.fixtures || []).filter((f) => {
+      const p = parseFixSerial(f.serialNo);
+      return p && p.base === base;
+    });
+    if (!items.length) { toast('未找到该工装号', 'err'); return; }
+    const cur = uniqueSorted(items.map((f) => f.name).filter(Boolean));
+    const opts = cur.map((n) => `<option value="${escAttr(n)}">${esc(n)}（${items.filter((f) => f.name === n).length} 套）</option>`).join('');
+    openModal('统一名称 · ' + base, `
+      <div class="form-group"><label>选择主名称（该工装号全部 ${items.length} 套将统一为此名称）</label>
+        <select id="anom_unify_name_sel">${opts}</select>
+        <small class="hint">也可在下框直接输入新名称</small></div>
+      <div class="form-group"><label>或输入新名称</label>
+        <input type="text" id="anom_unify_name_new" maxlength="64" placeholder="留空则用上方下拉所选"></div>
+      <div class="form-actions">
+        <button class="btn primary" onclick="fixAnomalyDoUnifyName('${escAttr(base)}')">✔ 统一修改</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>`);
+  };
+
+  window.fixAnomalyDoUnifyName = async function (base) {
+    const sel = $('#anom_unify_name_sel');
+    const inp = $('#anom_unify_name_new');
+    const name = (inp && String(inp.value).trim()) || (sel && sel.value) || '';
+    if (!name) { toast('请选择或输入名称', 'err'); return; }
+    const items = (state.fixtures || []).filter((f) => {
+      const p = parseFixSerial(f.serialNo);
+      return p && p.base === base && f.name !== name;
+    });
+    if (!items.length) { toast('无需修改（名称已一致）', 'ok'); closeModal(); return; }
+    try {
+      const res = await DB.fixtureUpdateBatch(items.map((f) => ({ id: f.id, patch: { name } })));
+      if (res && res.failed && res.failed.length) { toast('部分失败：' + res.failed[0].message, 'err'); return; }
+      await reloadAll();
+      closeModal();
+      renderFixAnomaly();
+      toast(`已将 ${items.length} 套名称统一为「${name}」`, 'ok');
+    } catch (e) { toast('统一失败：' + (e && e.message ? e.message : e), 'err'); }
+  };
+
+  /* 「统一库位」：该工装号下所有套批量改成指定库位 */
+  window.fixAnomalyUnifyLoc = function (base) {
+    const items = (state.fixtures || []).filter((f) => {
+      const p = parseFixSerial(f.serialNo);
+      return p && p.base === base;
+    });
+    if (!items.length) { toast('未找到该工装号', 'err'); return; }
+    const cur = uniqueSorted(items.map((f) => f.location).filter(Boolean));
+    const opts = cur.map((n) => `<option value="${escAttr(n)}">${esc(n)}（${items.filter((f) => f.location === n).length} 套）</option>`).join('');
+    const locList = locationCandidates().map((v) => `<option value="${escAttr(v)}"></option>`).join('');
+    openModal('统一库位 · ' + base, `
+      <div class="form-group"><label>选择主库位（该工装号全部 ${items.length} 套将统一为此库位）</label>
+        <select id="anom_unify_loc_sel">${opts}</select>
+        <small class="hint">也可在下框直接输入 4 段式库位号</small></div>
+      <div class="form-group"><label>或输入新库位</label>
+        <input type="text" id="anom_unify_loc_new" list="anom_unify_loc_list" maxlength="64" placeholder="如 ZP1-U-1-1（4 段式）">
+        <datalist id="anom_unify_loc_list">${locList}</datalist></div>
+      <div class="form-actions">
+        <button class="btn primary" onclick="fixAnomalyDoUnifyLoc('${escAttr(base)}')">✔ 统一修改</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>`);
+  };
+
+  window.fixAnomalyDoUnifyLoc = async function (base) {
+    const sel = $('#anom_unify_loc_sel');
+    const inp = $('#anom_unify_loc_new');
+    const location = (inp && String(inp.value).trim()) || (sel && sel.value) || '';
+    if (!location) { toast('请选择或输入库位', 'err'); return; }
+    if (!isValidLocation(location)) { toast('库位号需为 4 段式（如 ZP1-U-1-1）', 'err'); return; }
+    const items = (state.fixtures || []).filter((f) => {
+      const p = parseFixSerial(f.serialNo);
+      return p && p.base === base && f.location !== location;
+    });
+    if (!items.length) { toast('无需修改（库位已一致）', 'ok'); closeModal(); return; }
+    try {
+      const res = await DB.fixtureUpdateBatch(items.map((f) => ({ id: f.id, patch: { location } })));
+      if (res && res.failed && res.failed.length) { toast('部分失败：' + res.failed[0].message, 'err'); return; }
+      await reloadAll();
+      closeModal();
+      renderFixAnomaly();
+      toast(`已将 ${items.length} 套库位统一为「${location}」`, 'ok');
+    } catch (e) { toast('统一失败：' + (e && e.message ? e.message : e), 'err'); }
+  };
+
+  /* 「去夹具管理核对」：跳转到夹具管理并按工装号检索 */
+  window.fixAnomalyJumpFixtures = function (base) {
+    showView('fixtures');
+    const kw = $('#fix_search');
+    if (kw) { kw.value = base; fixtureSearch(); }
   };
 
   /* ============================================================

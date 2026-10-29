@@ -1,6 +1,6 @@
 # 工装夹具管理程序（桌面版 / 独立 exe）
 
-**v5.7.1 是一个打包好的桌面程序**（基于 Electron）。双击 `工装夹具管理程序.exe` 即可使用，**无需安装、无需联网、无需浏览器**，所有数据保存在本机文件里。
+**v5.8.0 是一个打包好的桌面程序**（基于 Electron）。双击 `工装夹具管理程序.exe` 即可使用，**无需安装、无需联网、无需浏览器**，所有数据保存在本机文件里。
 
 > 系统覆盖夹具从建档、出库、回库、送修、维修完成到报废的全生命周期管理，并支持二维码标签、扫码作业、流水追溯与数据备份。
 >
@@ -34,6 +34,16 @@
 > 同时修掉：扫码选中会清空此前勾选（连扫多件只剩最后一件）；
 > 流水「夹具」列增加**实物编号副行**（4 位序号与 G10BP5-… 并排）；
 > 移除出库页那个点了没反应的「📷 批量扫码出库」按钮。
+>
+> **v5.8.0 是一次 MINOR 升级（侧边栏新增「异常工装」页，用于修改导入的数据）**：
+> 数据治理（按「工装号-套号」规则套号唯一化 + 去重）后剩 3911 条，同工装号下仍存在
+> 名称 / 库位不一致等异常，但系统没有专用修改入口。现在侧边栏在「人员卡库」下新增 **⚠️ 异常工装**，
+> 按工装号聚合实时列出四类异常：① **名称不一致**（154 组）—— 每行「⚡ 统一名称」一键把该工装号
+> 全部套改成选定主名称；② **库位不一致**（218 组）—— 「⚡ 统一库位」一键统一为 4 段式库位；
+> ③ **编号格式异常**（3 条）—— 复用编辑表单修正；④ **套号缺失**（4 组，仅多套工装号）
+> —— 跳「夹具管理」核对。机种不一致属正常设计（一工装多机种），不列异常。
+> 批量修改走新增 **`fixture-updateBatch`** 通道（整批一次写盘），store 层把单条与批量更新
+> 抽到同一 `applyFixturePatch` 归一化函数，防两条路径规则漂移。
 >
 > **v5.7.0 是一次 MINOR 升级（新增「未导入明细」记录与导出）**：
 > 导入完成后，结果窗口会**逐行列出本次没有进库的数据** —— 行号 / 夹具编号 / 名称 / 库位 / 未导入原因，
@@ -562,16 +572,16 @@ fixtures/v1.0/
 │  └─ vendor/
 │     ├─ qrcode-generator.js      离线二维码生成库（MIT）
 │     └─ jsQR.js                  离线二维码解码库（MIT）
-├─ test_store.js                  数据层功能测试（155 项，Node）
-├─ test_render.js                 渲染层静态检查（258 项，Node，含版本号一致性、MAX_LINE_MODELS 三处同源、出入库「全选」守卫）
+├─ test_store.js                  数据层功能测试（175 项，Node）
+├─ test_render.js                 渲染层静态检查（297 项，Node，含版本号一致性、MAX_LINE_MODELS 三处同源、出入库「全选」守卫、异常工装视图守卫）
 ├─ test_xlsx.js                   xlsx 解析器测试（57 项，Node；含 22 列表头与「12 机种填满」行）
 ├─ test_make_xlsx.py              生成真实 xlsx 测试夹具（Python，辅助脚本）
-├─ test_import.js                 导入映射逻辑测试（137 项，Node，vm 沙箱；含 22 列表头、导出往返、重复导入判定与批次撤销）
+├─ test_import.js                 导入映射逻辑测试（162 项，Node，vm 沙箱；含 22 列表头、导出往返、重复导入判定与批次撤销、未导入明细）
 ├─ test_e2e_import.js             导入端到端验证（73 项，Node，真实 xlsx → 落库；含满机种 12 个不漏）
 ├─ test_line.js                   产线 / 机种模块测试（194 项，Node，含线体↔机种派生列 K 段、BUG-012 筛选回归 L 段）
 ├─ test_migrate_id.js             缺 id 旧数据迁移测试（10 项，Node，幂等校验）
-├─ test_staff.js                  人员卡库 / 刷卡 / 清单打印 / 关于面板鸣谢测试（202 项，Node）
-├─ test_e2e.js                    真实运行测试（293 项，Electron，含刷卡校验、清单打印、派生列互逆、机种下拉筛选、关于面板鸣谢、出入库全选一键批量、删除夹具与导入回收用例）
+├─ test_staff.js                  人员卡库 / 刷卡 / 清单打印 / 关于面板鸣谢测试（204 项，Node）
+├─ test_e2e.js                    真实运行测试（304 项，Electron，含刷卡校验、清单打印、派生列互逆、机种下拉筛选、关于面板鸣谢、出入库全选一键批量、删除夹具与导入回收、异常工装视图用例）
 ├─ smoke_packed.js                打包产物冒烟测试（自包含，直连真实 exe）
 ├─ 修改日志.md                     版本变更记录
 ├─ 问题清单.md                     已知缺陷 / 待确认事项 / 设计代价 / 环境限制
@@ -623,15 +633,15 @@ npm run build
 
 ## 自动化测试
 
-九套测试，共 **1432 项**，全部通过（含真实 Electron 端到端 + 打包产物冒烟）：
+九套测试，共 **1530 项**，全部通过（含真实 Electron 端到端 + 打包产物冒烟）：
 
 ```bash
 cd fixtures/v1.0
 
-# 1. 数据层功能测试（155 项）— 纯 Node，无需 Electron
+# 1. 数据层功能测试（175 项）— 纯 Node，无需 Electron
 node test_store.js
 
-# 2. 渲染层静态检查（258 项）— 纯 Node，含 7 处版本号一致性校验
+# 2. 渲染层静态检查（297 项）— 纯 Node，含 7 处版本号一致性校验
 node test_render.js
 
 # 3. xlsx 解析器测试（57 项）— 纯 Node
@@ -639,7 +649,7 @@ node test_render.js
 python test_make_xlsx.py test_fixture.xlsx
 node test_xlsx.js
 
-# 4. 导入映射逻辑测试（137 项）— 纯 Node，vm 沙箱抽取 app.js 纯函数
+# 4. 导入映射逻辑测试（162 项）— 纯 Node，vm 沙箱抽取 app.js 纯函数
 node test_import.js
 
 # 5. 导入端到端验证（73 项）— 真实 xlsx → 解析 → 落库
@@ -651,11 +661,11 @@ node test_line.js
 # 7. id 跨进程稳定性（10 项）
 node test_migrate_id.js
 
-# 8. 人员卡库与刷卡 / 打印静态守卫（188 项）— v5.1.0 新增
+# 8. 人员卡库与刷卡 / 打印静态守卫（204 项）— v5.1.0 新增
 #    数据层（卡号归一化 / 唯一性 / 停用 / 流水快照）+ 导入纯函数 + 静态守卫
 node test_staff.js
 
-# 9. 真实运行测试（293 项）— 启动真实 Electron 窗口驱动 UI
+# 9. 真实运行测试（304 项）— 启动真实 Electron 窗口驱动 UI
 #    ⚠️ 必须先清除 ELECTRON_RUN_AS_NODE，否则 Electron 会退化成 Node
 unset ELECTRON_RUN_AS_NODE
 <electron.exe> test_e2e.js
@@ -664,10 +674,10 @@ unset ELECTRON_RUN_AS_NODE
 #     需先打包并部署，再执行（同样必须先清 ELECTRON_RUN_AS_NODE）
 node smoke_packed.js
 #     也可显式指定被测 exe：
-#     node smoke_packed.js "D:/project/fixture/v5.7.1/工装夹具管理程序.exe"
+#     node smoke_packed.js "D:/project/fixture/v5.8.0/工装夹具管理程序.exe"
 ```
 
-> 第 1~8 项为**纯 Node** 测试，合计 **1149 项**；第 9 项 `test_e2e.js` 启动真实 Electron 窗口驱动 UI，**301 项**；第 10 项 `smoke_packed.js` 直连真实 exe 的调试端口，**53 项**。本次 v5.7.1 实测：纯 Node 1149 + E2E 301 + 打包冒烟 53，总计 **1503 项，零失败**。
+> 第 1~8 项为**纯 Node** 测试，合计 **1172 项**；第 9 项 `test_e2e.js` 启动真实 Electron 窗口驱动 UI，**304 项**；第 10 项 `smoke_packed.js` 直连真实 exe 的调试端口，**54 项**。本次 v5.8.0 实测：纯 Node 1172 + E2E 304 + 打包冒烟 54，总计 **1530 项，零失败**。
 >
 > 注意：`test_xlsx.js` 与 `test_e2e_import.js` 依赖 `test_fixture.xlsx`，需先执行上面的 `python test_make_xlsx.py test_fixture.xlsx` 生成。
 >

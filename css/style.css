@@ -711,3 +711,15 @@ tbody tr.pick-row:hover > td { background: var(--primary-soft); }
 
 /* v5.2.0：线体 ↔ 机种 派生列（多值用 / 分隔）。允许在「/」前后自然换行，长清单不会把表格撑爆 */
 .slash-text { display: inline-block; line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; }
+
+/* v5.8.0：异常工装视图 */
+.anom-section { margin-top: 18px; }
+.anom-sec-title { font-weight: 600; color: var(--primary-dark); margin-bottom: 8px; font-size: 13px; }
+.anom-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.anom-table th { background: var(--bg); color: var(--muted); font-weight: 600; font-size: 12px; }
+.anom-table td { font-size: 13px; white-space: normal; word-break: break-word; }
+.anom-table .anom-bad { color: var(--danger); font-weight: 600; }
+.anom-table .anom-ops { white-space: nowrap; }
+.anom-table .empty { color: var(--muted); text-align: center; padding: 14px; }
+.anom-val { display: inline-block; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; margin: 2px 3px 2px 0; font-size: 12px; }
+.anom-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

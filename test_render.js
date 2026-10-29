@@ -208,9 +208,10 @@ ok('artifactName 含 v' + ver, an.indexOf('v' + ver) >= 0, an);
 /* ---------- 9. 显示层表格列序：序号 排在 夹具编号 之前 ---------- */
 section('9. 显示层表格列序（序号 → 夹具编号）');
 /* 显示层表格都应有「序号」表头：
- *   夹具列表 / 库位明细 / 查询结果 / 产线使用 / 产线夹具清单打印页（v5.1.0 新增）= 5 */
+ *   夹具列表 / 库位明细 / 查询结果 / 产线使用 / 产线夹具清单打印页（v5.1.0 新增）
+ *   + 异常工装格式异常表（v5.8.0，序号即 4 位桥梁编号）= 6 */
 const seqThCount = (appJs.match(/<th[^>]*>序号<\/th>/g) || []).length;
-ok('5 个表格含「序号」表头（v5.1.0 增加产线清单打印页）', seqThCount === 5, String(seqThCount));
+ok('6 个表格含「序号」表头（v5.1.0 产线清单打印页 + v5.8.0 异常工装）', seqThCount === 6, String(seqThCount));
 /* 表头不得再出现「夹具编号 … 序号」的旧列序 */
 const badHead = (appJs.match(/<th[^>]*>夹具编号<\/th>\s*<th[^>]*>序号<\/th>/g) || []).length;
 ok('表头无「夹具编号 在前、序号 在后」的旧列序', badHead === 0, String(badHead));
@@ -879,6 +880,34 @@ ok('已失效的「批量扫码出库」入口已移除（容器从未存在、�
 ok('流水「夹具」列副行显示实物编号（序号与出厂编号并排）',
   appJs.includes('${t.fixtureSerialNo ? `<span class="tx-serial">') 
   && /\.tx-fixture \.tx-serial\s*\{/.test(css));
+
+/* ---------- 9. 异常工装视图（v5.8.0） ---------- */
+section('9. 异常工装视图');
+ok('侧边栏含「异常工装」导航入口', /data-view="fixanomaly"/.test(html) && /异常工装/.test(html));
+ok('VIEW_TITLES 含 fixanomaly', /fixanomaly:\s*'⚠️ 异常工装'/.test(appJs));
+ok('RENDERERS 含 fixanomaly -> renderFixAnomaly', /fixanomaly:\s*renderFixAnomaly/.test(appJs));
+ok('renderFixAnomaly 已定义', appJs.indexOf('function renderFixAnomaly(') >= 0);
+ok('异常聚合正则与清理脚本同源（工装号-3位套号）',
+  appJs.includes('const FIX_SERIAL_RE = /^(.+?)-(\\d{3})$/;'));
+ok('仅多套工装号才算套号缺失（单套 -002 不算缺号）',
+  appJs.includes("if (items.length < 2) return;") && appJs.includes('套号缺失'));
+ok('统一名称入口存在', /window\.fixAnomalyUnifyName = function/.test(appJs) && /window\.fixAnomalyDoUnifyName = async function/.test(appJs));
+ok('统一库位入口存在', /window\.fixAnomalyUnifyLoc = function/.test(appJs) && /window\.fixAnomalyDoUnifyLoc = async function/.test(appJs));
+ok('批量修改走 fixtureUpdateBatch 通道', appJs.includes('DB.fixtureUpdateBatch('));
+ok('修正编号复用编辑表单（fixtureEdit）', appJs.includes('onclick="fixtureEdit(') && appJs.includes('fixAnomalyJumpFixtures'));
+ok('CSS 含异常工装表格样式', /\.anom-table\s*\{/.test(css) && /\.anom-val\s*\{/.test(css));
+ok('统一库位提交校验 4 段式', /isValidLocation\(location\).*库位号需为 4 段式/s.test(appJs));
+ok('批量更新通道在 store/main/preload/db 四层均暴露',
+  storeJs.indexOf('function updateFixturesBatch(') >= 0
+  && storeJs.indexOf('updateFixturesBatch,') >= 0
+  && mainJs.indexOf("'fixture-updateBatch'") >= 0
+  && preloadJs.indexOf('fixtureUpdateBatch:') >= 0
+  && dbJs.indexOf('fixtureUpdateBatch:') >= 0
+  && dbJs.indexOf('async function fixtureUpdateBatch(') >= 0);
+ok('applyFixturePatch 被单条与批量共用（防规则漂移）',
+  storeJs.indexOf('function applyFixturePatch(') >= 0
+  && storeJs.indexOf('applyFixturePatch(data.fixtures[i], fixture)') >= 0
+  && storeJs.indexOf('applyFixturePatch(old, item.patch') >= 0);
 
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));

@@ -413,6 +413,46 @@ ok('兜底：非数组安全返回', store.addFixturesBatch(null).added === 0);
 /* 把批量写入的数据清掉，避免影响后面的持久化断言 */
 store.getAll('fixtures').filter((f) => f.importBatch === 'bBULK-1').forEach((f) => store.delFixture(f.id));
 
+/* ---------- 12. 批量更新（v5.8.0 异常工装） ---------- */
+section('12. 批量更新 updateFixturesBatch');
+const u1 = store.addFixture(fix({ serialNo: 'UP-921-001-001', name: '原名1', location: 'ZP1-U-9-1', lineModels: ['UP'], lines: [lineA] }));
+const u2 = store.addFixture(fix({ serialNo: 'UP-921-001-002', name: '原名2', location: 'ZP1-U-9-2', lineModels: ['UP'], lines: [lineA] }));
+const u3 = store.addFixture(fix({ serialNo: 'UP-921-001-003', name: '原名3', location: 'ZP1-U-9-3', lineModels: ['UP'], lines: [lineA] }));
+const ucode1 = store.getAll('fixtures').find((f) => f.id === u1).code;
+
+const ubRes = store.updateFixturesBatch([
+  { id: u1, patch: { name: '统一名' } },
+  { id: u2, patch: { name: '统一名' } },
+  { id: u3, patch: { name: '统一名' } },
+]);
+ok('批量改名全部成功（updated=3）', ubRes.updated === 3 && ubRes.failed.length === 0, JSON.stringify(ubRes));
+ok('批量改名后三套名称一致', store.getAll('fixtures').filter((f) => f.id === u1 || f.id === u2 || f.id === u3).every((f) => f.name === '统一名'));
+
+const ubLoc = store.updateFixturesBatch([
+  { id: u1, patch: { location: 'ZP1-U-8-8' } },
+  { id: u2, patch: { location: 'ZP1-U-8-8' } },
+  { id: u3, patch: { location: 'ZP1-U-8-8' } },
+]);
+ok('批量改库位全部成功', ubLoc.updated === 3 && ubLoc.failed.length === 0);
+ok('批量改库位后三套库位一致', store.getAll('fixtures').filter((f) => f.id === u1 || f.id === u2 || f.id === u3).every((f) => f.location === 'ZP1-U-8-8'));
+
+store.updateFixturesBatch([{ id: u1, patch: { code: '9999' } }]);
+ok('code 不可改（patch 里的 code 被强制保留旧值）', store.getAll('fixtures').find((f) => f.id === u1).code === ucode1);
+
+const ubMix = store.updateFixturesBatch([
+  { id: u1, patch: { location: 'BAD' } },          // 非法，应失败
+  { id: u2, patch: { name: '合法改名' } },          // 合法，应生效
+]);
+ok('部分失败：failed=1 且合法行仍生效',
+  ubMix.updated === 1 && ubMix.failed.length === 1
+  && store.getAll('fixtures').find((f) => f.id === u2).name === '合法改名'
+  && store.getAll('fixtures').find((f) => f.id === u1).location === 'ZP1-U-8-8',
+  JSON.stringify(ubMix));
+ok('不存在 id 进 failed', store.updateFixturesBatch([{ id: 9999999, patch: { name: 'x' } }]).failed.length === 1);
+ok('空数组安全返回', store.updateFixturesBatch([]).updated === 0);
+/* 清掉测试数据，避免影响后面持久化断言 */
+store.getAll('fixtures').filter((f) => String(f.serialNo).startsWith('UP-')).forEach((f) => store.delFixture(f.id));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

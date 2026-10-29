@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  version: '5.7.1',
+  version: '5.8.0',
   invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
   // 打印：opts = { pageSize, copies, landscape, margins }，返回 { ok, reason? }
   printLabels: (opts) => ipcRenderer.invoke('print-labels', opts),
@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   fixtureAdd: (fixture) => ipcRenderer.invoke('fixture-add', fixture),
   fixtureAddBatch: (list) => ipcRenderer.invoke('fixture-addBatch', list),
   fixtureUpdate: (fixture) => ipcRenderer.invoke('fixture-update', fixture),
+  fixtureUpdateBatch: (list) => ipcRenderer.invoke('fixture-updateBatch', list),
   fixtureDel: (id) => ipcRenderer.invoke('fixture-del', id),
   fixtureGetAll: () => ipcRenderer.invoke('fixture-getAll'),
   fixtureAddTransaction: (tx) => ipcRenderer.invoke('fixture-addTransaction', tx),
