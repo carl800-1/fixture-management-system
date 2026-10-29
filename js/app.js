@@ -365,6 +365,15 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
+      version: '5.8.1', date: '2026-10-29', items: [
+        '<b>【规则调整】库位按「套」管理，多套可不同库位（不再误报异常）</b>：'
+          + '此前把「库位不一致」列为异常（同工装号多套应同库位），但 FMS 是单件追踪、每条记录=一套实物，'
+          + '库位是<b>每套自己的属性</b>，同一工装号的多套散放在不同库位属正常存储 —— 原规则误报 166 组 / 623 条。'
+          + '现改为库位不一致<b>不再标红异常</b>，异常工装页只保留三类真正的数据问题：名称不一致 / 编号格式异常 / 套号缺失；'
+          + '「⚡ 统一库位」入口移除，改为「库位分布」信息展示（同工装号多套分布在各库位及套数，便于快速找套，不作告警）'
+      ]
+    },
+    {
       version: '5.8.0', date: '2026-10-29', items: [
         '<b>【新增】侧边栏「⚠️ 异常工装」页（修改导入的数据）</b>：数据治理（按「工装号-套号」规则套号唯一化 + 去重）后剩 3911 条，'
           + '同工装号下仍存在名称 / 库位不一致等异常，但没有专用修改入口。'
@@ -4442,14 +4451,16 @@
     });
 
     /* ---- 异常判定 ---- */
-    const nameAnoms = [];       // 名称不一致组
-    const locAnoms = [];        // 库位不一致组
-    const missingAnoms = [];    // 套号缺失组
+    // 库位按「套」管理：同一工装号多套可分布在多个库位（正常存储），不再视为异常；
+    // 此处仅把多库位工装号收进 locInfo 作「库位分布」信息展示（便于快速找套）。
+    const nameAnoms = [];       // 名称不一致组（异常）
+    const missingAnoms = [];    // 套号缺失组（异常）
+    const locInfo = [];         // 库位分布组（信息，非异常）
     groups.forEach((items, base) => {
       const names = uniqueSorted(items.map((f) => f.name).filter(Boolean));
       const locs = uniqueSorted(items.map((f) => f.location).filter(Boolean));
       if (names.length > 1) nameAnoms.push({ base, items, names });
-      if (locs.length > 1) locAnoms.push({ base, items, locs });
+      if (locs.length > 1) locInfo.push({ base, items, locs });
       // 套号缺失：**多套**工装号下套号不连续（1..max 中有空洞）→ 标黄待确认。
       // 仅建 1 套且套号非 001（如 C9U3-921-030 只有 -002）不算缺号：该工装确实只建了那一套。
       if (items.length < 2) return;
@@ -4461,16 +4472,17 @@
     });
     /* 按问题严重度排序：套数多/问题多的组靠前 */
     nameAnoms.sort((a, b) => b.items.length - a.items.length);
-    locAnoms.sort((a, b) => b.items.length - a.items.length);
     missingAnoms.sort((a, b) => b.items.length - a.items.length);
+    locInfo.sort((a, b) => b.items.length - a.items.length);
 
     /* ---- 概览 ---- */
-    const totalAnom = nameAnoms.length + locAnoms.length + unparsed.length + missingAnoms.length;
+    const totalAnom = nameAnoms.length + unparsed.length + missingAnoms.length;
     const summary = `
       <div class="info-tip">
         <b>异常工装（修改导入数据）</b>：按「工装号-套号」规则核对。<br>
-        ① 名称不一致 <b class="stat-danger">${nameAnoms.length}</b> 组 · ② 库位不一致 <b class="stat-danger">${locAnoms.length}</b> 组
-        · ③ 编号格式异常 <b class="stat-danger">${unparsed.length}</b> 条 · ④ 套号缺失 <b class="stat-warn">${missingAnoms.length}</b> 组<br>
+        ① 名称不一致 <b class="stat-danger">${nameAnoms.length}</b> 组 · ② 编号格式异常 <b class="stat-danger">${unparsed.length}</b> 条
+        · ③ 套号缺失 <b class="stat-warn">${missingAnoms.length}</b> 组<br>
+        库位分布 <b>${locInfo.length}</b> 个工装号（信息：同一工装号多套分布在多个库位属正常存储，不作异常）。
         共 <b>${totalAnom}</b> 项待处理。机种不一致属正常设计（一工装多机种），不列异常。
         修改后即时写回 <code>fixture-data.json</code>。
       </div>`;
@@ -4491,21 +4503,22 @@
         }).join('')
       : '<tr><td colspan="4" class="empty">无名称不一致的工装</td></tr>';
 
-    /* ---- 库位不一致 ---- */
-    const locRows = locAnoms.length
-      ? locAnoms.map((g) => {
-          const listHtml = g.locs.map((n) => `<span class="anom-val">${esc(n)}</span>`).join('');
-          const count = g.items.length;
+    /* ---- 库位分布（信息，非异常） ---- */
+    const locRows = locInfo.length
+      ? locInfo.map((g) => {
+          const locCount = new Map();
+          g.items.forEach((f) => { const l = f.location || ''; locCount.set(l, (locCount.get(l) || 0) + 1); });
+          const listHtml = [...locCount.entries()].map(([l, c]) => `<span class="anom-val">${esc(l)}（${c}套）</span>`).join('');
           return `<tr>
             <td class="mono">${esc(g.base)}</td>
-            <td>${count} 套</td>
+            <td>${g.items.length} 套</td>
             <td>${listHtml}</td>
             <td class="anom-ops">
-              <button class="btn sm primary" onclick="fixAnomalyUnifyLoc('${escAttr(g.base)}')">⚡ 统一库位</button>
+              <button class="btn sm" onclick="fixAnomalyJumpFixtures('${escAttr(g.base)}')">🔍 去夹具管理核对</button>
             </td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="4" class="empty">无库位不一致的工装</td></tr>';
+      : '<tr><td colspan="4" class="empty">无多库位工装</td></tr>';
 
     /* ---- 格式异常 ---- */
     const fmtRows = unparsed.length
@@ -4546,20 +4559,20 @@
           <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有名称</th><th>操作</th></tr></thead><tbody>${nameRows}</tbody></table>
         </div>
         <div class="anom-section">
-          <div class="anom-sec-title">② 库位不一致（一套工装一个库位，多套应同库位，需人工统一）</div>
-          <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有库位</th><th>操作</th></tr></thead><tbody>${locRows}</tbody></table>
-        </div>
-        <div class="anom-section">
-          <div class="anom-sec-title">③ 编号格式异常（末尾不是 3 位套号，无法套用「工装号-套号」规则，请人工修正）</div>
+          <div class="anom-sec-title">② 编号格式异常（末尾不是 3 位套号，无法套用「工装号-套号」规则，请人工修正）</div>
           <table class="anom-table"><thead><tr><th>序号</th><th>编号</th><th>名称</th><th>库位</th><th>操作</th></tr></thead><tbody>${fmtRows}</tbody></table>
         </div>
         <div class="anom-section">
-          <div class="anom-sec-title">④ 套号缺失（同工装号下套号不连续，可能漏建档或另套编号体系，请人工核对）</div>
+          <div class="anom-sec-title">③ 套号缺失（同工装号下套号不连续，可能漏建档或另套编号体系，请人工核对）</div>
           <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有套号</th><th>缺失套号</th><th>操作</th></tr></thead><tbody>${missRows}</tbody></table>
         </div>
+        <div class="anom-section">
+          <div class="anom-sec-title">库位分布（信息）：同一工装号多套分布在多个库位属正常存储，此处仅便于快速找套，不作异常</div>
+          <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>库位分布</th><th>操作</th></tr></thead><tbody>${locRows}</tbody></table>
+        </div>
         <div class="tip">
-          修改后请到「夹具管理」核对；若整套名称/库位确实录错，也可在该页用「编辑」逐套修正。
-          机种不一致不在此列（一工装多机种是正常设计）。
+          修改后请到「夹具管理」核对；若整套名称确实录错，也可在该页用「编辑」逐套修正。
+          机种不一致不在此列（一工装多机种是正常设计）；库位按套管理，多套散放不同库位属正常。
         </div>
       </div>`;
   }
@@ -4603,50 +4616,6 @@
       closeModal();
       renderFixAnomaly();
       toast(`已将 ${items.length} 套名称统一为「${name}」`, 'ok');
-    } catch (e) { toast('统一失败：' + (e && e.message ? e.message : e), 'err'); }
-  };
-
-  /* 「统一库位」：该工装号下所有套批量改成指定库位 */
-  window.fixAnomalyUnifyLoc = function (base) {
-    const items = (state.fixtures || []).filter((f) => {
-      const p = parseFixSerial(f.serialNo);
-      return p && p.base === base;
-    });
-    if (!items.length) { toast('未找到该工装号', 'err'); return; }
-    const cur = uniqueSorted(items.map((f) => f.location).filter(Boolean));
-    const opts = cur.map((n) => `<option value="${escAttr(n)}">${esc(n)}（${items.filter((f) => f.location === n).length} 套）</option>`).join('');
-    const locList = locationCandidates().map((v) => `<option value="${escAttr(v)}"></option>`).join('');
-    openModal('统一库位 · ' + base, `
-      <div class="form-group"><label>选择主库位（该工装号全部 ${items.length} 套将统一为此库位）</label>
-        <select id="anom_unify_loc_sel">${opts}</select>
-        <small class="hint">也可在下框直接输入 4 段式库位号</small></div>
-      <div class="form-group"><label>或输入新库位</label>
-        <input type="text" id="anom_unify_loc_new" list="anom_unify_loc_list" maxlength="64" placeholder="如 ZP1-U-1-1（4 段式）">
-        <datalist id="anom_unify_loc_list">${locList}</datalist></div>
-      <div class="form-actions">
-        <button class="btn primary" onclick="fixAnomalyDoUnifyLoc('${escAttr(base)}')">✔ 统一修改</button>
-        <button class="btn ghost" onclick="closeModal()">取消</button>
-      </div>`);
-  };
-
-  window.fixAnomalyDoUnifyLoc = async function (base) {
-    const sel = $('#anom_unify_loc_sel');
-    const inp = $('#anom_unify_loc_new');
-    const location = (inp && String(inp.value).trim()) || (sel && sel.value) || '';
-    if (!location) { toast('请选择或输入库位', 'err'); return; }
-    if (!isValidLocation(location)) { toast('库位号需为 4 段式（如 ZP1-U-1-1）', 'err'); return; }
-    const items = (state.fixtures || []).filter((f) => {
-      const p = parseFixSerial(f.serialNo);
-      return p && p.base === base && f.location !== location;
-    });
-    if (!items.length) { toast('无需修改（库位已一致）', 'ok'); closeModal(); return; }
-    try {
-      const res = await DB.fixtureUpdateBatch(items.map((f) => ({ id: f.id, patch: { location } })));
-      if (res && res.failed && res.failed.length) { toast('部分失败：' + res.failed[0].message, 'err'); return; }
-      await reloadAll();
-      closeModal();
-      renderFixAnomaly();
-      toast(`已将 ${items.length} 套库位统一为「${location}」`, 'ok');
     } catch (e) { toast('统一失败：' + (e && e.message ? e.message : e), 'err'); }
   };
 

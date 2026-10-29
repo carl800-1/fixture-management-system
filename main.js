@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
- * main.js — 工装夹具管理程序主进程（v5.8.0）
+ * main.js — 工装夹具管理程序主进程（v5.8.1）
  * ============================================================ */
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
@@ -61,7 +61,7 @@ const handlers = {
   /* 批量建档（v5.6.0）：整批一次落盘，避免导入时几千次全量重写数据文件 */
   'fixture-addBatch': (e, list) => store.addFixturesBatch(list),
   'fixture-update': (e, fixture) => store.updateFixture(fixture),
-  /* 批量更新（v5.8.0）：异常工装「统一名称 / 统一库位」一次改多套，整批一次落盘 */
+  /* 批量更新（v5.8.0）：异常工装「统一名称」一次改多套，整批一次落盘 */
   'fixture-updateBatch': (e, list) => store.updateFixturesBatch(list),
   'fixture-del': (e, id) => store.delFixture(id),
   'fixture-getAll': () => store.getAll('fixtures'),

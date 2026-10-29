@@ -197,12 +197,12 @@ async function main() {
       ok: title.includes('异常工装'),
       panel: !!c.querySelector('.anom-table'),
       secs: c.querySelectorAll('.anom-section').length,
-      unify: typeof window.fixAnomalyUnifyName === 'function' && typeof window.fixAnomalyUnifyLoc === 'function'
+      unify: typeof window.fixAnomalyUnifyName === 'function' && typeof window.fixAnomalyUnifyLoc === 'undefined'
     };
   })()`);
   ok('showView(fixanomaly) 标题为「异常工装」', anomRes.ok, JSON.stringify(anomRes));
   ok('异常工装页渲染出表格分区（无崩溃）', anomRes.secs >= 4 && anomRes.panel, 'secs=' + anomRes.secs + ' panel=' + anomRes.panel);
-  ok('异常工装页暴露「统一名称 / 统一库位」入口', anomRes.unify);
+  ok('异常工装页暴露「统一名称」、已移除「统一库位」（v5.8.1 库位按套管理）', anomRes.unify);
 
   /* ---------- 2. 产线配置（v5：只有线体，工位模型已移除） ---------- */
   section('2. 产线配置（仅线体）');

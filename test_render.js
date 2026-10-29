@@ -892,11 +892,13 @@ ok('异常聚合正则与清理脚本同源（工装号-3位套号）',
 ok('仅多套工装号才算套号缺失（单套 -002 不算缺号）',
   appJs.includes("if (items.length < 2) return;") && appJs.includes('套号缺失'));
 ok('统一名称入口存在', /window\.fixAnomalyUnifyName = function/.test(appJs) && /window\.fixAnomalyDoUnifyName = async function/.test(appJs));
-ok('统一库位入口存在', /window\.fixAnomalyUnifyLoc = function/.test(appJs) && /window\.fixAnomalyDoUnifyLoc = async function/.test(appJs));
+ok('统一库位入口已移除（库位按套管理，多套可不同库位，v5.8.1）',
+  !appJs.includes('fixAnomalyUnifyLoc') && !appJs.includes('fixAnomalyDoUnifyLoc'));
 ok('批量修改走 fixtureUpdateBatch 通道', appJs.includes('DB.fixtureUpdateBatch('));
 ok('修正编号复用编辑表单（fixtureEdit）', appJs.includes('onclick="fixtureEdit(') && appJs.includes('fixAnomalyJumpFixtures'));
 ok('CSS 含异常工装表格样式', /\.anom-table\s*\{/.test(css) && /\.anom-val\s*\{/.test(css));
-ok('统一库位提交校验 4 段式', /isValidLocation\(location\).*库位号需为 4 段式/s.test(appJs));
+ok('库位分布信息展示（不再标红异常，v5.8.1）',
+  appJs.includes('库位分布') && appJs.includes('locInfo') && appJs.includes('库位按套管理'));
 ok('批量更新通道在 store/main/preload/db 四层均暴露',
   storeJs.indexOf('function updateFixturesBatch(') >= 0
   && storeJs.indexOf('updateFixturesBatch,') >= 0
