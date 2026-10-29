@@ -644,7 +644,7 @@ npm run build
 
 ## 自动化测试
 
-九套测试，共 **1530 项**，全部通过（含真实 Electron 端到端 + 打包产物冒烟）：
+九套测试，共 **1543 项**，全部通过（含真实 Electron 端到端 + 打包产物冒烟）：
 
 ```bash
 cd fixtures/v1.0
@@ -652,7 +652,7 @@ cd fixtures/v1.0
 # 1. 数据层功能测试（175 项）— 纯 Node，无需 Electron
 node test_store.js
 
-# 2. 渲染层静态检查（297 项）— 纯 Node，含 7 处版本号一致性校验
+# 2. 渲染层静态检查（309 项）— 纯 Node，含 7 处版本号一致性校验
 node test_render.js
 
 # 3. xlsx 解析器测试（57 项）— 纯 Node
@@ -676,7 +676,7 @@ node test_migrate_id.js
 #    数据层（卡号归一化 / 唯一性 / 停用 / 流水快照）+ 导入纯函数 + 静态守卫
 node test_staff.js
 
-# 9. 真实运行测试（304 项）— 启动真实 Electron 窗口驱动 UI
+# 9. 真实运行测试（305 项）— 启动真实 Electron 窗口驱动 UI
 #    ⚠️ 必须先清除 ELECTRON_RUN_AS_NODE，否则 Electron 会退化成 Node
 unset ELECTRON_RUN_AS_NODE
 <electron.exe> test_e2e.js
@@ -688,7 +688,7 @@ node smoke_packed.js
 #     node smoke_packed.js "D:/project/fixture/v5.8.1/工装夹具管理程序.exe"
 ```
 
-> 第 1~8 项为**纯 Node** 测试，合计 **1172 项**；第 9 项 `test_e2e.js` 启动真实 Electron 窗口驱动 UI，**304 项**；第 10 项 `smoke_packed.js` 直连真实 exe 的调试端口，**54 项**。本次 v5.8.1 实测：纯 Node 1172 + E2E 304 + 打包冒烟 54，总计 **1530 项，零失败**。
+> 第 1~8 项为**纯 Node** 测试，合计 **1184 项**；第 9 项 `test_e2e.js` 启动真实 Electron 窗口驱动 UI，**305 项**；第 10 项 `smoke_packed.js` 直连真实 exe 的调试端口，**54 项**。本次 v5.8.1 实测：纯 Node 1184 + E2E 305 + 打包冒烟 54，总计 **1543 项，零失败**。
 >
 > 注意：`test_xlsx.js` 与 `test_e2e_import.js` 依赖 `test_fixture.xlsx`，需先执行上面的 `python test_make_xlsx.py test_fixture.xlsx` 生成。
 >

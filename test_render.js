@@ -905,6 +905,44 @@ ok('逐条编辑：展开明细 / 就地图标编辑 / 跳卡片编辑（v5.8.1�
   && appJs.includes('anomExpanded') && appJs.includes('anomDetailRow'));
 ok('逐条编辑 CSS（.anom-detail / .anom-table.sub）',
   /\.anom-detail/.test(css) && /\.anom-table\.sub/.test(css));
+/* v5.8.1：异常工装页逐条编辑保存后必须重绘本页，否则仍显示改动前的旧名称/旧编号 */
+ok('逐条编辑保存后重绘异常工装页（v5.8.1）',
+  appJs.includes("state.view === 'fixanomaly'") && appJs.includes('renderFixAnomaly();'));
+
+/* ---- v5.8.1：名称末尾套号判定（编号套号 vs 名称尾号） ----
+   口径（用户 2026-10-29）：编号 G10BP5-921-025-001 的 001 = 第1套；名称是中文描述、
+   与工装编号无关；名称若自带末尾套号（定转子组合1），必须与编号套号一致才算正常。 */
+function extractFnSrc(src, name) {
+  const i = src.indexOf('function ' + name + '(');
+  if (i < 0) return '';
+  let depth = 0;
+  let j = src.indexOf('{', i);
+  for (; j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}') { depth--; if (depth === 0) { j++; break; } }
+  }
+  return src.slice(i, j);
+}
+const anomFns = (() => {
+  const src = extractFnSrc(appJs, 'fixNameSetNo') + '\n' + extractFnSrc(appJs, 'fixNameBase');
+  if (!src.trim()) return null;
+  try { return new Function(src + '\nreturn { fixNameSetNo, fixNameBase };')(); } catch (e) { return null; }
+})();
+ok('名称套号/主干辅助函数可执行（v5.8.1）', !!anomFns);
+if (anomFns) {
+  const { fixNameSetNo, fixNameBase } = anomFns;
+  ok('名称末尾套号：定转子组合1 → 1', fixNameSetNo('定转子组合1') === 1);
+  ok('名称末尾套号：定转子组合12 → 12', fixNameSetNo('定转子组合12') === 12);
+  ok('名称末尾套号：无数字 → null', fixNameSetNo('卡簧压入主轴-压头') === null);
+  ok('名称末尾套号：尺寸 50.5 不算套号 → null', fixNameSetNo('限高调整工装50.5') === null);
+  ok('名称主干：定转子组合2 → 定转子组合', fixNameBase('定转子组合2') === '定转子组合');
+  ok('名称主干：定转子组合1~5 主干一致（不报异常）',
+    ['定转子组合1', '定转子组合2', '定转子组合5'].map(fixNameBase).every((v) => v === '定转子组合'));
+  ok('名称主干：卡簧压入主轴-压头 与 含油轴承压入齿轮箱-底座 主干不同（报异常）',
+    fixNameBase('卡簧压入主轴-压头') !== fixNameBase('含油轴承压入齿轮箱-底座'));
+}
+ok('异常页含「名称套号不符」分区与判定（v5.8.1）',
+  appJs.includes('名称套号不符') && appJs.includes('seqNameAnoms') && appJs.includes('fixNameSetNo'));
 ok('批量更新通道在 store/main/preload/db 四层均暴露',
   storeJs.indexOf('function updateFixturesBatch(') >= 0
   && storeJs.indexOf('updateFixturesBatch,') >= 0

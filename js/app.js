@@ -369,13 +369,19 @@
         '<b>【规则调整】库位按「套」管理，多套可不同库位（不再误报异常）</b>：'
           + '此前把「库位不一致」列为异常（同工装号多套应同库位），但 FMS 是单件追踪、每条记录=一套实物，'
           + '库位是<b>每套自己的属性</b>，同一工装号的多套散放在不同库位属正常存储 —— 原规则误报 166 组 / 623 条。'
-          + '现改为库位不一致<b>不再标红异常</b>，异常工装页只保留三类真正的数据问题：名称不一致 / 编号格式异常 / 套号缺失；'
+          + '现改为库位不一致<b>不再标红异常</b>，异常工装页只保留名称 / 编号 / 套号三类真正的数据问题；'
           + '「⚡ 统一库位」入口移除，改为「库位分布」信息展示（同工装号多套分布在各库位及套数，便于快速找套，不作告警）',
         '<b>【改进】异常工装页支持「逐条编辑」每一条记录的完整信息</b>：'
-          + '名称不一致 / 库位分布 / 套号缺失的每个工装号下新增「📝 逐条编辑」—— 展开该工装号下所有记录'
+          + '名称套号不符 / 名称主干不同 / 库位分布 / 套号缺失的每个工装号下新增「📝 逐条编辑」—— 展开该工装号下所有记录'
           + '（套号 / 序号 / 编号 / 名称 / 库位 / 机种），每条可「✏️ 编辑」（就地弹窗改编号、名称、库位、机种、产线等完整字段）'
           + '或「🔍 卡片编辑」（跳到夹具管理定位该卡并打开编辑）。'
-          + '解决「工装号本身编错」（如 BM40M2-921 一个号下挂了 36 个不同夹具）时，系统只报名称错误、只给「统一名称」的误判'
+          + '解决「工装号本身编错」（如 BM40M2-921 一个号下挂了 36 个不同夹具）时，系统只报名称错误、只给「统一名称」的误判',
+        '<b>【规则细化】名称末尾套号必须与编号套号一致</b>：'
+          + '编号 <code>G10BP5-921-025-001</code> 的 <code>001</code> = 第 1 套；名称是中文描述，'
+          + '<b>与工装编号无关、不要求改成编号</b>。但名称自带末尾套号时（如「定转子组合1」）必须对上编号套号：'
+          + '不一致的（如 -001 配「定转子组合2」）单列「① 名称套号不符」共 167 条 / 97 组，用「逐条编辑」修正；'
+          + '同工装号下名称去掉末尾套号后仍不同的（61 组 / 227 条，如「卡簧压入主轴-压头」与「含油轴承压入齿轮箱-底座」）'
+          + '单列「② 名称主干不同」，供判断工装编号是否编错。尺寸结尾（限高调整工装50.5）不算套号，不参与比对'
       ]
     },
     {
@@ -1401,6 +1407,10 @@
       resetFixForm();
       await reloadAll();
       renderFixtures();
+      /* v5.8.1：从「异常工装」页逐条编辑保存后必须重绘异常页 ——
+         该页不在 renderFixtures() 的职责内，不重绘会继续显示改动前的旧名称/旧编号，
+         让用户误以为"没保存上"。 */
+      if (state.view === 'fixanomaly') renderFixAnomaly();
       toast(editId ? '夹具已更新' : '夹具建档成功', 'ok');
     } catch (e) { toast((editId ? '保存失败：' : '建档失败：') + (e && e.message ? e.message : e), 'err'); }
   };
@@ -4445,6 +4455,36 @@
   /* v5.8.1：异常工装页「逐条编辑」——展开的工装号集合（点击 toggle 时增删，重渲染） */
   const anomExpanded = new Set();
 
+  /* ============================================================
+   * v5.8.1：名称末尾套号 vs 编号套号
+   *
+   * 编号语义（用户 2026-10-29 再次确认）：
+   *   `G10BP5-921-025-001` = 工装编号 `G10BP5-921-025` + 套号 `001`（第 1 套）。
+   *   名称是**中文描述**（`定转子组合`、`卡簧压入主轴-压头`），与工装编号是两回事，
+   *   **不允许把名称改成工装编号**。
+   * 但名称若自带末尾套号（`定转子组合1` 对应第 1 套），就必须与编号套号一致：
+   *   `-001` 配 `定转子组合1` ✔ ；`-001` 配 `定转子组合2` ✘ → 异常，人工改。
+   *
+   * 两个辅助函数的分工：
+   *   fixNameSetNo() —— 取名称末尾套号；末尾是小数（`限高调整工装50.5`，50.5 是尺寸）不算套号，返回 null。
+   *   fixNameBase()  —— 去掉末尾套号后的「名称主干」，用于判断同工装号下名称是否真的不同
+   *                     （`定转子组合1/2/3` 主干都是 `定转子组合`，属正常，不报异常）。
+   * ============================================================ */
+  function fixNameSetNo(name) {
+    const s = String(name == null ? '' : name).trim();
+    if (!s) return null;
+    if (/\d+\.\d+$/.test(s)) return null;          // 50.5 / 1.25 这类尺寸，不是套号
+    const m = /(\d+)$/.exec(s);
+    return m ? Number(m[1]) : null;
+  }
+  function fixNameBase(name) {
+    return String(name == null ? '' : name)
+      .trim()
+      .replace(/[\d.]+$/, '')                      // 去掉末尾套号（含 50.5 这类尺寸尾巴）
+      .replace(/[\s\-_·、]+$/, '')                 // 去掉残留分隔符
+      .trim();
+  }
+
   function renderFixAnomaly() {
     const list = state.fixtures || [];
 
@@ -4461,13 +4501,23 @@
     /* ---- 异常判定 ---- */
     // 库位按「套」管理：同一工装号多套可分布在多个库位（正常存储），不再视为异常；
     // 此处仅把多库位工装号收进 locInfo 作「库位分布」信息展示（便于快速找套）。
-    const nameAnoms = [];       // 名称不一致组（异常）
+    const seqNameAnoms = [];    // 名称末尾套号 ≠ 编号套号（异常，v5.8.1）
+    const nameAnoms = [];       // 同工装号下名称主干不同（异常）
     const missingAnoms = [];    // 套号缺失组（异常）
     const locInfo = [];         // 库位分布组（信息，非异常）
     groups.forEach((items, base) => {
       const names = uniqueSorted(items.map((f) => f.name).filter(Boolean));
       const locs = uniqueSorted(items.map((f) => f.location).filter(Boolean));
-      if (names.length > 1) nameAnoms.push({ base, items, names });
+      /* A. 名称自带末尾套号、却与编号套号不一致（如编号 -001 配名称「定转子组合2」） */
+      const badSeq = [];
+      items.forEach((f) => {
+        const p = parseFixSerial(f.serialNo);
+        const no = fixNameSetNo(f.name);
+        if (p && no !== null && no !== p.seq) badSeq.push({ f, seq: p.seq, nameNo: no });
+      });
+      if (badSeq.length) seqNameAnoms.push({ base, items, bad: badSeq });
+      /* B. 去掉末尾套号后名称主干仍不同（「定转子组合1/2/3」主干一致 → 不报） */
+      if (uniqueSorted(names.map(fixNameBase).filter(Boolean)).length > 1) nameAnoms.push({ base, items, names });
       if (locs.length > 1) locInfo.push({ base, items, locs });
       // 套号缺失：**多套**工装号下套号不连续（1..max 中有空洞）→ 标黄待确认。
       // 仅建 1 套且套号非 001（如 C9U3-921-030 只有 -002）不算缺号：该工装确实只建了那一套。
@@ -4479,6 +4529,7 @@
       if (miss.length) missingAnoms.push({ base, items, miss });
     });
     /* 按问题严重度排序：套数多/问题多的组靠前 */
+    seqNameAnoms.sort((a, b) => b.bad.length - a.bad.length);
     nameAnoms.sort((a, b) => b.items.length - a.items.length);
     missingAnoms.sort((a, b) => b.items.length - a.items.length);
     locInfo.sort((a, b) => b.items.length - a.items.length);
@@ -4515,18 +4566,36 @@
       `<button class="btn sm" onclick="fixAnomalyToggleDetail('${escAttr(base)}')">${anomExpanded.has(base) ? '▲ 收起明细' : '📝 ' + label}</button>`;
 
     /* ---- 概览 ---- */
-    const totalAnom = nameAnoms.length + unparsed.length + missingAnoms.length;
+    const totalAnom = seqNameAnoms.length + nameAnoms.length + unparsed.length + missingAnoms.length;
+    const seqBadCount = seqNameAnoms.reduce((s, g) => s + g.bad.length, 0);
     const summary = `
       <div class="info-tip">
-        <b>异常工装（修改导入数据）</b>：按「工装号-套号」规则核对。<br>
-        ① 名称不一致 <b class="stat-danger">${nameAnoms.length}</b> 组 · ② 编号格式异常 <b class="stat-danger">${unparsed.length}</b> 条
-        · ③ 套号缺失 <b class="stat-warn">${missingAnoms.length}</b> 组<br>
+        <b>异常工装（修改导入数据）</b>：按「工装编号-套号」规则核对；名称是中文描述，与工装编号无关。<br>
+        ① 名称套号不符 <b class="stat-danger">${seqBadCount}</b> 条（${seqNameAnoms.length} 组）
+        · ② 名称主干不同 <b class="stat-danger">${nameAnoms.length}</b> 组
+        · ③ 编号格式异常 <b class="stat-danger">${unparsed.length}</b> 条
+        · ④ 套号缺失 <b class="stat-warn">${missingAnoms.length}</b> 组<br>
         库位分布 <b>${locInfo.length}</b> 个工装号（信息：同一工装号多套分布在多个库位属正常存储，不作异常）。
         共 <b>${totalAnom}</b> 项待处理。机种不一致属正常设计（一工装多机种），不列异常。
         修改后即时写回 <code>fixture-data.json</code>。
       </div>`;
 
-    /* ---- 名称不一致 ---- */
+    /* ---- ① 名称套号不符（编号套号 ≠ 名称末尾套号） ---- */
+    const seqRows = seqNameAnoms.length
+      ? seqNameAnoms.map((g) => {
+          const detail = g.bad.map(({ f, seq, nameNo }) =>
+            `<span class="anom-bad mono">${esc(f.serialNo)}</span> ${esc(f.name)}`
+            + `<span class="anom-val">套号 ${String(seq).padStart(3, '0')} ≠ 名称尾号 ${nameNo}</span>`).join('<br>');
+          return `<tr>
+            <td class="mono">${esc(g.base)}</td>
+            <td>${g.bad.length} 条 / 共 ${g.items.length} 套</td>
+            <td>${detail}</td>
+            <td class="anom-ops">${detailToggleBtn(g.base, '逐条编辑')}</td>
+          </tr>${anomDetailRow(g.base, 4)}`;
+        }).join('')
+      : '<tr><td colspan="4" class="empty">无名称套号不符的工装</td></tr>';
+
+    /* ---- ② 名称主干不同（去掉末尾套号后仍不同） ---- */
     const nameRows = nameAnoms.length
       ? nameAnoms.map((g) => {
           const listHtml = g.names.map((n) => `<span class="anom-val">${esc(n)}</span>`).join('');
@@ -4541,7 +4610,7 @@
             </td>
           </tr>${anomDetailRow(g.base, 4)}`;
         }).join('')
-      : '<tr><td colspan="4" class="empty">无名称不一致的工装</td></tr>';
+      : '<tr><td colspan="4" class="empty">无名称主干不同的工装</td></tr>';
 
     /* ---- 库位分布（信息，非异常） ---- */
     const locRows = locInfo.length
@@ -4597,15 +4666,19 @@
         </div>
         ${summary}
         <div class="anom-section">
-          <div class="anom-sec-title">① 名称不一致（同工装号下多套名称不同，需人工确认主名称）</div>
+          <div class="anom-sec-title">① 名称套号不符（编号套号与名称末尾套号不一致，如 -001 配「定转子组合2」，需人工修改）</div>
+          <table class="anom-table"><thead><tr><th>工装号</th><th>不符条数</th><th>明细（编号 · 名称 · 套号对比）</th><th>操作</th></tr></thead><tbody>${seqRows}</tbody></table>
+        </div>
+        <div class="anom-section">
+          <div class="anom-sec-title">② 名称主干不同（同工装号下名称去掉末尾套号后仍不同，可能是工装编号编错，需人工判断改编号还是改名称）</div>
           <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有名称</th><th>操作</th></tr></thead><tbody>${nameRows}</tbody></table>
         </div>
         <div class="anom-section">
-          <div class="anom-sec-title">② 编号格式异常（末尾不是 3 位套号，无法套用「工装号-套号」规则，请人工修正）</div>
+          <div class="anom-sec-title">③ 编号格式异常（末尾不是 3 位套号，无法套用「工装编号-套号」规则，请人工修正）</div>
           <table class="anom-table"><thead><tr><th>序号</th><th>编号</th><th>名称</th><th>库位</th><th>操作</th></tr></thead><tbody>${fmtRows}</tbody></table>
         </div>
         <div class="anom-section">
-          <div class="anom-sec-title">③ 套号缺失（同工装号下套号不连续，可能漏建档或另套编号体系，请人工核对）</div>
+          <div class="anom-sec-title">④ 套号缺失（同工装号下套号不连续，可能漏建档或另套编号体系，请人工核对）</div>
           <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>现有套号</th><th>缺失套号</th><th>操作</th></tr></thead><tbody>${missRows}</tbody></table>
         </div>
         <div class="anom-section">
@@ -4613,8 +4686,11 @@
           <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>库位分布</th><th>操作</th></tr></thead><tbody>${locRows}</tbody></table>
         </div>
         <div class="tip">
+          <b>编号语义</b>：<code>G10BP5-921-025-001</code> = 工装编号 <code>G10BP5-921-025</code> + 套号 001（第 1 套）；
+          名称是中文描述（定转子组合、卡簧压入主轴-压头），<b>与工装编号无关，不要改成编号</b>。
+          名称自带末尾套号时（如「定转子组合1」），必须与编号套号一致，不一致按 ① 处理。<br>
           「📝 逐条编辑」可展开该工装号下每条记录，直接改编号/名称/库位/机种等完整信息（✏️ 编辑就地弹窗；
-          🔍 卡片编辑跳到「夹具管理」定位该卡并打开编辑）；若整套名称确实录错，也可用「⚡ 统一名称」。
+          🔍 卡片编辑跳到「夹具管理」定位该卡并打开编辑）；若该组名称确实录错，也可用「⚡ 统一名称」。
           机种不一致不在此列（一工装多机种是正常设计）；库位按套管理，多套散放不同库位属正常。
         </div>
       </div>`;
