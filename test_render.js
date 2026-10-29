@@ -209,9 +209,10 @@ ok('artifactName 含 v' + ver, an.indexOf('v' + ver) >= 0, an);
 section('9. 显示层表格列序（序号 → 夹具编号）');
 /* 显示层表格都应有「序号」表头：
  *   夹具列表 / 库位明细 / 查询结果 / 产线使用 / 产线夹具清单打印页（v5.1.0 新增）
- *   + 异常工装格式异常表（v5.8.0，序号即 4 位桥梁编号）= 6 */
+ *   + 异常工装格式异常表（v5.8.0，序号即 4 位桥梁编号）
+ *   + 异常工装「逐条编辑」明细子表（v5.8.1，.anom-table.sub）= 7 */
 const seqThCount = (appJs.match(/<th[^>]*>序号<\/th>/g) || []).length;
-ok('6 个表格含「序号」表头（v5.1.0 产线清单打印页 + v5.8.0 异常工装）', seqThCount === 6, String(seqThCount));
+ok('7 个表格含「序号」表头（v5.1.0 产线清单打印页 + v5.8.0 异常工装 + v5.8.1 逐条编辑子表）', seqThCount === 7, String(seqThCount));
 /* 表头不得再出现「夹具编号 … 序号」的旧列序 */
 const badHead = (appJs.match(/<th[^>]*>夹具编号<\/th>\s*<th[^>]*>序号<\/th>/g) || []).length;
 ok('表头无「夹具编号 在前、序号 在后」的旧列序', badHead === 0, String(badHead));
@@ -899,6 +900,11 @@ ok('修正编号复用编辑表单（fixtureEdit）', appJs.includes('onclick="f
 ok('CSS 含异常工装表格样式', /\.anom-table\s*\{/.test(css) && /\.anom-val\s*\{/.test(css));
 ok('库位分布信息展示（不再标红异常，v5.8.1）',
   appJs.includes('库位分布') && appJs.includes('locInfo') && appJs.includes('库位按套管理'));
+ok('逐条编辑：展开明细 / 就地图标编辑 / 跳卡片编辑（v5.8.1）',
+  appJs.includes('fixAnomalyToggleDetail') && appJs.includes('fixAnomalyJumpCardEdit')
+  && appJs.includes('anomExpanded') && appJs.includes('anomDetailRow'));
+ok('逐条编辑 CSS（.anom-detail / .anom-table.sub）',
+  /\.anom-detail/.test(css) && /\.anom-table\.sub/.test(css));
 ok('批量更新通道在 store/main/preload/db 四层均暴露',
   storeJs.indexOf('function updateFixturesBatch(') >= 0
   && storeJs.indexOf('updateFixturesBatch,') >= 0

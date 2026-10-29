@@ -370,7 +370,12 @@
           + '此前把「库位不一致」列为异常（同工装号多套应同库位），但 FMS 是单件追踪、每条记录=一套实物，'
           + '库位是<b>每套自己的属性</b>，同一工装号的多套散放在不同库位属正常存储 —— 原规则误报 166 组 / 623 条。'
           + '现改为库位不一致<b>不再标红异常</b>，异常工装页只保留三类真正的数据问题：名称不一致 / 编号格式异常 / 套号缺失；'
-          + '「⚡ 统一库位」入口移除，改为「库位分布」信息展示（同工装号多套分布在各库位及套数，便于快速找套，不作告警）'
+          + '「⚡ 统一库位」入口移除，改为「库位分布」信息展示（同工装号多套分布在各库位及套数，便于快速找套，不作告警）',
+        '<b>【改进】异常工装页支持「逐条编辑」每一条记录的完整信息</b>：'
+          + '名称不一致 / 库位分布 / 套号缺失的每个工装号下新增「📝 逐条编辑」—— 展开该工装号下所有记录'
+          + '（套号 / 序号 / 编号 / 名称 / 库位 / 机种），每条可「✏️ 编辑」（就地弹窗改编号、名称、库位、机种、产线等完整字段）'
+          + '或「🔍 卡片编辑」（跳到夹具管理定位该卡并打开编辑）。'
+          + '解决「工装号本身编错」（如 BM40M2-921 一个号下挂了 36 个不同夹具）时，系统只报名称错误、只给「统一名称」的误判'
       ]
     },
     {
@@ -4427,7 +4432,7 @@
    *   - 一工装多机种是正常设计（机种不一致不列异常）；
    *   - 名称应一致（不一致 = 异常，标红，人工确认/修改）；
    *   - 一套工装一个库位，多套应同库位（不一致 = 异常，需人工修改）。
-   * 本页用于**修改导入的数据**：统一名称 / 统一库位 / 修正编号（复用编辑表单）。
+   * 本页用于**修改导入的数据**：统一名称 / 逐条编辑（复用编辑表单，改编号/名称/库位/机种）。
    * ============================================================ */
 
   /* 与 clean_fixture_data.py 的 SERIAL_RE 同源：工装号-3位套号 */
@@ -4436,6 +4441,9 @@
     const m = FIX_SERIAL_RE.exec(String(serialNo == null ? '' : serialNo).trim());
     return m ? { base: m[1], seq: Number(m[2]) } : null;
   }
+
+  /* v5.8.1：异常工装页「逐条编辑」——展开的工装号集合（点击 toggle 时增删，重渲染） */
+  const anomExpanded = new Set();
 
   function renderFixAnomaly() {
     const list = state.fixtures || [];
@@ -4475,6 +4483,37 @@
     missingAnoms.sort((a, b) => b.items.length - a.items.length);
     locInfo.sort((a, b) => b.items.length - a.items.length);
 
+    /* ---- v5.8.1「逐条编辑」：展开某工装号下所有记录，逐条编辑完整信息 ---- */
+    const anomDetailRow = (base, colspan) => {
+      if (!anomExpanded.has(base)) return '';
+      const items = (state.fixtures || []).filter((f) => {
+        const p = parseFixSerial(f.serialNo);
+        return p && p.base === base;
+      }).sort((a, b) => Number(a.code) - Number(b.code));
+      const sub = items.map((f) => {
+        const p = parseFixSerial(f.serialNo);
+        return `<tr>
+          <td class="mono">${p ? String(p.seq).padStart(3, '0') : ''}</td>
+          <td class="mono">${esc(f.code)}</td>
+          <td class="mono">${esc(f.serialNo)}</td>
+          <td>${esc(f.name)}</td>
+          <td>${esc(f.location)}</td>
+          <td>${esc((f.lineModels || []).join(' / '))}</td>
+          <td class="anom-ops">
+            <button class="btn sm" onclick="fixtureEdit(${f.id})">✏️ 编辑</button>
+            <button class="btn sm" onclick="fixAnomalyJumpCardEdit(${f.id})">🔍 卡片编辑</button>
+          </td>
+        </tr>`;
+      }).join('');
+      return `<tr class="anom-detail"><td colspan="${colspan}">
+        <table class="anom-table sub"><thead><tr>
+          <th>套号</th><th>序号</th><th>编号</th><th>名称</th><th>库位</th><th>机种</th><th>操作</th>
+        </tr></thead><tbody>${sub}</tbody></table>
+      </td></tr>`;
+    };
+    const detailToggleBtn = (base, label) =>
+      `<button class="btn sm" onclick="fixAnomalyToggleDetail('${escAttr(base)}')">${anomExpanded.has(base) ? '▲ 收起明细' : '📝 ' + label}</button>`;
+
     /* ---- 概览 ---- */
     const totalAnom = nameAnoms.length + unparsed.length + missingAnoms.length;
     const summary = `
@@ -4498,8 +4537,9 @@
             <td>${listHtml}</td>
             <td class="anom-ops">
               <button class="btn sm primary" onclick="fixAnomalyUnifyName('${escAttr(g.base)}')">⚡ 统一名称</button>
+              ${detailToggleBtn(g.base, '逐条编辑')}
             </td>
-          </tr>`;
+          </tr>${anomDetailRow(g.base, 4)}`;
         }).join('')
       : '<tr><td colspan="4" class="empty">无名称不一致的工装</td></tr>';
 
@@ -4515,8 +4555,9 @@
             <td>${listHtml}</td>
             <td class="anom-ops">
               <button class="btn sm" onclick="fixAnomalyJumpFixtures('${escAttr(g.base)}')">🔍 去夹具管理核对</button>
+              ${detailToggleBtn(g.base, '逐条编辑')}
             </td>
-          </tr>`;
+          </tr>${anomDetailRow(g.base, 4)}`;
         }).join('')
       : '<tr><td colspan="4" class="empty">无多库位工装</td></tr>';
 
@@ -4542,8 +4583,9 @@
           <td class="anom-bad">缺 ${g.miss.map((m) => String(m).padStart(3, '0')).join('、')}</td>
           <td class="anom-ops">
             <button class="btn sm" onclick="fixAnomalyJumpFixtures('${escAttr(g.base)}')">🔍 去夹具管理核对</button>
+            ${detailToggleBtn(g.base, '逐条编辑')}
           </td>
-        </tr>`).join('')
+        </tr>${anomDetailRow(g.base, 5)}`).join('')
       : '<tr><td colspan="5" class="empty">无套号缺失的工装</td></tr>';
 
     $('#content').innerHTML = `
@@ -4571,7 +4613,8 @@
           <table class="anom-table"><thead><tr><th>工装号</th><th>套数</th><th>库位分布</th><th>操作</th></tr></thead><tbody>${locRows}</tbody></table>
         </div>
         <div class="tip">
-          修改后请到「夹具管理」核对；若整套名称确实录错，也可在该页用「编辑」逐套修正。
+          「📝 逐条编辑」可展开该工装号下每条记录，直接改编号/名称/库位/机种等完整信息（✏️ 编辑就地弹窗；
+          🔍 卡片编辑跳到「夹具管理」定位该卡并打开编辑）；若整套名称确实录错，也可用「⚡ 统一名称」。
           机种不一致不在此列（一工装多机种是正常设计）；库位按套管理，多套散放不同库位属正常。
         </div>
       </div>`;
@@ -4624,6 +4667,22 @@
     showView('fixtures');
     const kw = $('#fix_search');
     if (kw) { kw.value = base; fixtureSearch(); }
+  };
+
+  /* v5.8.1「逐条编辑」：展开 / 收起某工装号的记录明细 */
+  window.fixAnomalyToggleDetail = function (base) {
+    if (anomExpanded.has(base)) anomExpanded.delete(base); else anomExpanded.add(base);
+    renderFixAnomaly();
+  };
+
+  /* v5.8.1「卡片编辑」：跳到夹具管理，定位该记录并直接打开其编辑表单 */
+  window.fixAnomalyJumpCardEdit = function (id) {
+    const f = (state.fixtures || []).find((x) => x.id === id);
+    if (!f) { toast('未找到该夹具', 'err'); return; }
+    showView('fixtures');
+    const kw = $('#fix_search');
+    if (kw) { kw.value = f.serialNo || String(f.code || ''); fixtureSearch(); }
+    fixtureEdit(id);
   };
 
   /* ============================================================

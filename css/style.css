@@ -723,3 +723,8 @@ tbody tr.pick-row:hover > td { background: var(--primary-soft); }
 .anom-table .empty { color: var(--muted); text-align: center; padding: 14px; }
 .anom-val { display: inline-block; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; margin: 2px 3px 2px 0; font-size: 12px; }
 .anom-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+/* v5.8.1 逐条编辑：展开的明细行 */
+.anom-table .anom-detail > td { background: var(--bg); padding: 10px; }
+.anom-table.sub { width: 100%; margin: 0; border: 1px solid var(--border); }
+.anom-table.sub th { background: var(--primary-dark); color: #fff; }
+.anom-table.sub td { font-size: 12px; padding: 4px 6px; }
