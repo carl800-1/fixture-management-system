@@ -359,6 +359,19 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
+      version: '5.7.1', date: '2026-10-29', items: [
+        '<b>【修复】出库 / 回库会出库「错件」（BUG-017）</b>：旧版在点「提交」的一瞬间，会按数量框把候选列表<b>前 N 件</b>重新勾一遍，'
+          + '把你手动勾选的夹具整片覆盖 —— 出库的、流水记录的都是列表最前面那几件，而界面没有任何提示。'
+          + '现在改为<b>勾选是唯一数据源</b>：提交只校验、不改写勾选；数量框自动跟随勾选回填，两者不一致时会明确提示「已按勾选提交」',
+        '【修复】扫码选中会清空此前的勾选：连扫多件时只剩最后一件，数量也退回 1。现在先记住已勾选项、重绘后恢复；'
+          + '被当前检索条件隐藏、确实无法保留的会明确提示「另有 N 套未计入本次勾选」',
+        '<b>【改进】流水「夹具」列增加实物编号副行</b>：4 位序号与出厂编号（如 G10BP5-921-012-001）并排可见，'
+          + '不必再靠记忆把「4166」和实物编号对应起来',
+        '【移除】出库页右上角「📷 批量扫码出库」按钮：它指向的区域从未出现在页面上，点击没有任何反应，且扫码器识别一次即停、本就不是批量。'
+          + '摄像头扫码统一走「夹具编号」栏右侧的 📷'
+      ]
+    },
+    {
       version: '5.7.0', date: '2026-10-23', items: [
         '<b>【新增】未导入明细记录</b>：导入完成后，结果窗口列出<b>每一行没进库的数据</b>——行号、夹具编号、名称、库位、未导入原因，按行号升序；表格内最多显示前 200 行，完整明细可一键导出 CSV',
         '【新增】未导入原因分四类并写明：<b>解析未通过</b>（名称为空 / 库位不合规 / 机种全空…）、<b>与库内记录完全一致</b>（选了「跳过重复」）、<b>产线未建档按选择跳过</b>、<b>落库失败</b>（附主进程返回的具体原因）',
@@ -2415,7 +2428,7 @@
           return `
             <div class="tx-row">
               <div class="tx-type">${tc.icon} ${tc.label}</div>
-              <div class="tx-fixture">${esc(t.fixtureCode)} ${esc(t.fixtureName)}</div>
+              <div class="tx-fixture">${esc(t.fixtureCode)} ${esc(t.fixtureName)}${t.fixtureSerialNo ? `<span class="tx-serial">${esc(t.fixtureSerialNo)}</span>` : ''}</div>
               <div class="tx-status">${fs.label} → ${ts.label}</div>
               <div class="tx-operator">${esc(t.operator || '-')}</div>
               <div class="tx-party">${esc(t.counterparty || '-')}</div>
@@ -2497,12 +2510,7 @@
           </ol>
         </aside>
         <div class="fix-out-col">
-          <div class="panel-title">
-            📤 夹具出库
-            <span class="panel-actions">
-              <button class="btn sm" onclick="scanForFixBatch()">📷 批量扫码出库</button>
-            </span>
-          </div>
+          <div class="panel-title">📤 夹具出库</div>
           <div class="info-tip">
             在「夹具编号 / 名称 / 机种名称 / 库位」任一栏输入即可互查；同一夹具编号下有多套时，
             在结果区<b>勾选具体序号</b>即可一次出库多套。
@@ -2840,7 +2848,28 @@
     syncPickAll(prefix);
   }
 
-  /* 数量输入 → 自动勾选前 N 台（超上限归正到上限并提示） */
+  /* v5.7.1（BUG-017）：提交前只校验、绝不改写勾选。
+     旧实现在 submitOutDo / submitReturnDo 里无条件调用 syncQtyToPick()，
+     那句会按「候选列表前 N 个」重勾 ⇒ 用户手勾的几件被整片抹掉，
+     出库的变成列表最前面那几件，而界面没有任何提示。
+     现在勾选是唯一数据源：数量框只跟随勾选回填，两者不一致时明确告知「按勾选提交」。 */
+  function prepareSubmitPicks(prefix) {
+    const ids = pickedIds(prefix);
+    const input = $('#' + prefix + '_qty');
+    const typed = input ? parseInt(input.value, 10) : NaN;
+    if (!ids.length) return ids;
+    if (input && !isNaN(typed) && typed !== ids.length) {
+      toast(`数量框填的是 ${typed} 套，实际勾选 ${ids.length} 套，已按勾选提交`, 'warn');
+    }
+    if (input) input.value = String(ids.length);
+    renderPickedSummary(prefix);
+    syncPickAll(prefix);
+    return ids;
+  }
+
+  /* 数量输入 → 自动勾选前 N 台（超上限归正到上限并提示）
+     ⚠️ 只允许在「用户主动改数量框」时调用（outQtyChange / returnQtyChange）。
+     提交路径**不得**调用本函数，否则会覆盖用户的手动勾选（BUG-017）。 */
   function syncQtyToPick(prefix) {
     const input = $('#' + prefix + '_qty');
     const items = $$('.' + prefix + '-pick');
@@ -2932,9 +2961,8 @@
 
   /* 一次提交多台：每台各出库 1 件，共用领用人/时间/备注 */
   window.submitOutDo = async function () {
-    // 提交前按数量框同步一次勾选，确保「数量 = 实际出库台数」且不超过可用库存
-    syncQtyToPick('out');
-    const ids = pickedIds('out');
+    /* v5.7.1：以勾选为唯一数据源，提交时不再按数量框反推勾选（BUG-017：曾把用户勾的件换成列表前 N 件） */
+    const ids = prepareSubmitPicks('out');
     if (!ids.length) { toast('请先勾选要出库的夹具，或填写出库数量', 'err'); return; }
     /* v5.6.0 校验：领用人必须刷已登记且启用的卡 */
     const v = validateSwipe('out');
@@ -3027,9 +3055,8 @@
   };
 
   window.submitReturnDo = async function () {
-    // 提交前按数量框同步一次勾选，确保「数量 = 实际回库台数」且不超过可回库台数
-    syncQtyToPick('return');
-    const ids = pickedIds('return');
+    /* v5.7.1：同出库，以勾选为唯一数据源，提交时不再按数量框反推勾选（BUG-017） */
+    const ids = prepareSubmitPicks('return');
     if (!ids.length) { toast('请先勾选要回库的夹具，或填写回库数量', 'err'); return; }
     /* v5.6.0 校验：退库人必须刷已登记且启用的卡 */
     const v = validateSwipe('ret');
@@ -3295,7 +3322,7 @@
           return `
             <div class="tx-row">
               <div class="tx-type">${tc.icon} ${tc.label}</div>
-              <div class="tx-fixture">${esc(t.fixtureCode)} ${esc(t.fixtureName)}</div>
+              <div class="tx-fixture">${esc(t.fixtureCode)} ${esc(t.fixtureName)}${t.fixtureSerialNo ? `<span class="tx-serial">${esc(t.fixtureSerialNo)}</span>` : ''}</div>
               <div class="tx-status">${fs.label} → ${ts.label}</div>
               <div class="tx-operator">${esc(t.operator || '-')}</div>
               <div class="tx-party">${esc(t.counterparty || '-')}</div>
@@ -4746,22 +4773,34 @@
   function scanPickOne(code, type) {
     const key = String(code == null ? '' : code).trim();
     const f = state.fixtures.find((x) => (DB.codeEq ? DB.codeEq(x.code, key) : String(x.code) === key));
-    if (!f) { toast('未找到夹具 ' + key, 'err'); return; }
+    if (!f) { toast('未找到夹具 ' + key, 'err'); return false; }
     const who = f.serialNo || (f.code);
     const want = type === 'out' ? 'stocked' : 'checked_out';
     if (f.status !== want) {
       toast(type === 'out' ? '夹具 ' + who + ' 不在库' : '夹具 ' + who + ' 未出库', 'err');
-      return;
+      return false;
     }
     const prefix = type === 'out' ? 'out' : 'return';
+    /* v5.7.1：先记下已勾选项。旧实现改写编号后立即重绘候选区，
+       此前勾的件被整片清空 ⇒ 连扫多件只剩最后一件，数量也随之变成 1。 */
+    const before = pickedIds(prefix);
     const codeEl = $('#' + prefix + '_code'); if (codeEl) codeEl.value = f.code;
     const q = type === 'out' ? outSearch : returnSearch;
     q();
+    let kept = 0, lost = 0;
+    before.forEach((id) => {
+      if (id === f.id) return;
+      const box = $('.' + prefix + '-pick[data-id="' + id + '"]');
+      if (box) { box.checked = true; kept++; } else lost++;
+    });
     const cb = $('.' + prefix + '-pick[data-id="' + f.id + '"]');
     if (cb) cb.checked = true;
     syncGroupHead(prefix);
     syncPickToQty(prefix);
-    toast('已选中 ' + who, 'ok');
+    const total = pickedIds(prefix).length;
+    if (lost) toast(`${who} 已选中；另有 ${lost} 套不在当前检索结果内，未计入本次勾选`, 'warn');
+    else toast(`已选中 ${who}${total > 1 ? `（共 ${total} 套）` : ''}`, 'ok');
+    return true;
   }
 
   window.scanForFixOut = function () {
@@ -4776,17 +4815,9 @@
     startScan('fix_scan_return_area', (code) => scanPickOne(code, 'return'));
   };
 
-  /* 批量扫码：逐台加入勾选，最后统一提交（不再逐个弹窗） */
-  window.scanForFixBatch = function () {
-    const container = $('#fix_scan_batch_area');
-    if (!container) return;
-    let picked = 0;
-    startScan('fix_scan_batch_area', (code) => scanPickOne(code, 'out') && picked++);
-    setTimeout(() => {
-      const tip = $('#fix_scan_batch_tip');
-      if (tip) tip.textContent = '已扫码 ' + picked + ' 个夹具';
-    }, 100);
-  };
+  /* v5.7.1（BUG-018）：原「📷 批量扫码出库」入口已移除。
+     它指向的 #fix_scan_batch_area 从未出现在出库页，点击必无反应；
+     而且 startScan() 识别到第一件就停，本就不是批量。摄像头扫码统一走编号栏的 📷。 */
 
   /* ============================================================
    * 夹具回库

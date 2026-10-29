@@ -759,7 +759,89 @@ async function main() {
     bulkRet.length === 3 && bulkRet.every((f) => f.status === 'stocked'),
     JSON.stringify(bulkRet.map((f) => [f.location, f.status])));
 
-  /* ---------- 7. 送修 / 维修完成 ---------- */
+  /* ---------- 6.6 手勾优先：提交不得改写勾选（v5.7.1 BUG-017） ---------- */
+  section('6.6 手勾优先：提交不得用「列表前 N 件」覆盖勾选（v5.7.1 BUG-017）');
+  const pickKeep = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    const r = {};
+    const codeOf = (cb) => {
+      const t = ((cb.closest('.pick-code') || {}).textContent || '');
+      const m = t.match(/(\\d+)\\s*·/);
+      return m ? m[1] : '';
+    };
+    window.showView('outbound'); await sleep(350);
+    setV('#out_location','ZP1-U-1'); await sleep(450);
+    /* ① 数量框填 2 → 既有交互：自动勾前两件（用户主动改数量时才允许联动） */
+    setV('#out_qty','2'); await sleep(220);
+    r.autoChecked = $$('.out-pick').filter(c=>c.checked).length;
+    /* ② 手工改勾：取消第 1 件、改勾第 3 件 —— 真实意图是【第 2、3 件】 */
+    const boxes = $$('.out-pick');
+    r.allCodes = boxes.map(codeOf);
+    boxes[0].checked = false; boxes[0].dispatchEvent(new Event('change')); await sleep(160);
+    boxes[2].checked = true;  boxes[2].dispatchEvent(new Event('change')); await sleep(160);
+    const picked = $$('.out-pick').filter(c=>c.checked);
+    r.pickedCodes = picked.map(codeOf);
+    r.qtyShown = String(($('#out_qty')||{}).value||'');
+    r.summary = (($('#out_picked_summary')||{}).textContent||'');
+    /* ③ 提交：必须出库第 2、3 件，而不是列表前两件 */
+    swipe('#swipe_out_party','BR-0001'); await sleep(180);
+    const b = btnByText('提交出库');
+    if (!b) return Object.assign(r, { err: '无提交出库按钮' });
+    b.click(); await sleep(1900);
+    r.toast = (($('#toast')||{}).textContent||'');
+    return r;
+  })()`);
+  ok('数量框填 2 仍会自动勾前两件（用户主动改数量时联动保留）',
+    pickKeep.autoChecked === 2, String(pickKeep.autoChecked));
+  ok('手勾结果 = 第 2、3 件（取消第 1 件、补勾第 3 件）',
+    pickKeep.pickedCodes && pickKeep.pickedCodes.length === 2
+    && pickKeep.pickedCodes[0] === pickKeep.allCodes[1] && pickKeep.pickedCodes[1] === pickKeep.allCodes[2],
+    JSON.stringify(pickKeep));
+  ok('勾选数与数量框一致时数量框回填为 2', pickKeep.qtyShown === '2', pickKeep.qtyShown);
+  ok('已选摘要列出的是手勾的两件（不是前两件）',
+    pickKeep.pickedCodes.every((c) => (pickKeep.summary || '').includes(c)), pickKeep.summary);
+  ok('提交后提示「出库成功 2 套」（按勾选提交，未被数量框放大）',
+    /出库成功 2 套/.test(pickKeep.toast || ''), pickKeep.toast);
+  const db66 = readDb();
+  const pickKeepCodes = pickKeep.allCodes || [];
+  const firstFix = db66.fixtures.find((f) => String(f.code) === String(pickKeepCodes[0]));
+  const secondFix = db66.fixtures.find((f) => String(f.code) === String(pickKeepCodes[1]));
+  const thirdFix = db66.fixtures.find((f) => String(f.code) === String(pickKeepCodes[2]));
+  ok('BUG-017 复现点：未勾选的第 1 件仍在库（旧版会被误出库）',
+    firstFix && firstFix.status === 'stocked', firstFix && firstFix.status);
+  ok('手勾的第 2、3 件才是真正出库的（状态 = checked_out）',
+    secondFix && secondFix.status === 'checked_out' && thirdFix && thirdFix.status === 'checked_out',
+    JSON.stringify([secondFix && secondFix.status, thirdFix && thirdFix.status]));
+  const tx66 = db66.fixTransactions.filter((t) => t.type === 'out');
+  const txCodes66 = tx66.slice(-2).map((t) => String(t.fixtureCode));
+  ok('流水记录与出库对象一致（记的就是手勾的两件）',
+    txCodes66.length === 2 && txCodes66.includes(String(pickKeepCodes[1])) && txCodes66.includes(String(pickKeepCodes[2])),
+    JSON.stringify(txCodes66));
+  ok('流水带上实物编号（fixtureSerialNo），序号与出厂编号可并排核对',
+    tx66.length > 0 && tx66.slice(-2).every((t) => !!t.fixtureSerialNo),
+    JSON.stringify(tx66.slice(-2).map((t) => [t.fixtureCode, t.fixtureSerialNo])));
+
+  /* 复原：把这两套回库，保证后续用例状态干净 */
+  const pickKeepRet = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    window.showView('return'); await sleep(350);
+    setV('#return_location','ZP1-U-1'); await sleep(450);
+    const box = $('#return_pick_all');
+    box.checked = true; box.dispatchEvent(new Event('change')); await sleep(200);
+    swipe('#swipe_ret_party','BR-0001'); await sleep(160);
+    const b = btnByText('提交回库');
+    if (!b) return { err: '无提交回库按钮' };
+    b.click(); await sleep(1800);
+    return { toast: (($('#toast')||{}).textContent||'') };
+  })()`);
+  const db66b = readDb();
+  const backInStock = db66b.fixtures.filter((f) => /^ZP1-U-1-/.test(f.location || ''));
+  ok('复原：手勾的 2 套已回库，后续用例状态干净',
+    /回库成功 2 套/.test(pickKeepRet.toast || '')
+    && backInStock.filter((f) => f.status === 'stocked').length === 3,
+    JSON.stringify([pickKeepRet.toast, backInStock.map((f) => f.status)]));
+
+
   section('7. 送修与维修完成');
   const repRes = await wc.executeJavaScript(`(async () => {
     ${HELPERS}

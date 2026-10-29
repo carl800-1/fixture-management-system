@@ -336,6 +336,8 @@ tbody tr.selected { background: var(--primary-soft); }
 .tx-row:last-child { border-bottom: none; }
 .tx-type { font-weight: 600; }
 .tx-fixture { font-weight: 500; }
+/* v5.7.1：流水「夹具」列副行显示实物编号，4 位序号与出厂编号并排可见（BUG-017 的误判来源之一） */
+.tx-fixture .tx-serial { display: block; font-weight: 400; font-size: 11px; color: var(--muted); line-height: 1.3; }
 .tx-status { color: var(--muted); }
 .tx-operator { color: var(--muted); }
 .tx-party { color: var(--muted); }

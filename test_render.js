@@ -853,6 +853,33 @@ ok('SWIPE_CTX 四个上下文都不再带 operatorLabel',
   !/SWIPE_CTX[\s\S]{0,900}operatorLabel/.test(appJs));
 ok('流水表仍保留「经办人」列（只看历史值，新流水为空）', appJs.includes('<div>经办人</div>'));
 
+/* ---------- v5.7.1：提交不得覆盖手勾（BUG-017） ---------- */
+const submitOutBody = (appJs.match(/window\.submitOutDo = async function \(\) \{[\s\S]*?\n  \};/) || [''])[0];
+const submitRetBody = (appJs.match(/window\.submitReturnDo = async function \(\) \{[\s\S]*?\n  \};/) || [''])[0];
+ok('出库提交改用 prepareSubmitPicks（不再按数量框反推勾选）',
+  submitOutBody.includes("prepareSubmitPicks('out')") && !submitOutBody.includes('syncQtyToPick'));
+ok('回库提交同样改用 prepareSubmitPicks',
+  submitRetBody.includes("prepareSubmitPicks('return')") && !submitRetBody.includes('syncQtyToPick'));
+ok('prepareSubmitPicks 以勾选为准，数量框只回填不改勾选',
+  /function prepareSubmitPicks\(prefix\) \{[\s\S]{0,700}const ids = pickedIds\(prefix\);/.test(appJs)
+  && /function prepareSubmitPicks\(prefix\) \{[\s\S]{0,900}input\.value = String\(ids\.length\);/.test(appJs)
+  && !/function prepareSubmitPicks\(prefix\) \{[\s\S]{0,900}c\.checked =/.test(appJs));
+ok('勾选数与数量框不一致时明确提示「按勾选提交」',
+  appJs.includes('实际勾选 ${ids.length} 套，已按勾选提交'));
+ok('syncQtyToPick 仍保留但只服务「用户主动改数量」（outQtyChange / returnQtyChange）',
+  /window\.outQtyChange = function \(\) \{\s*syncQtyToPick\('out'\);/.test(appJs)
+  && /window\.returnQtyChange = function \(\) \{\s*syncQtyToPick\('return'\);/.test(appJs)
+  && (appJs.match(/syncQtyToPick\('/g) || []).length === 2);   /* 全库只剩这两处调用 */
+ok('扫码选中不再清空已有勾选（先记 pickedIds 再重绘）',
+  /function scanPickOne\(code, type\) \{[\s\S]{0,900}const before = pickedIds\(prefix\);/.test(appJs));
+ok('扫码后提示被检索结果挤掉的勾选数（不静默丢弃）',
+  appJs.includes('套不在当前检索结果内，未计入本次勾选'));
+ok('已失效的「批量扫码出库」入口已移除（容器从未存在、点击无反应）',
+  !appJs.includes('scanForFixBatch(') && !appJs.includes('onclick="scanForFixBatch()"'));
+ok('流水「夹具」列副行显示实物编号（序号与出厂编号并排）',
+  appJs.includes('${t.fixtureSerialNo ? `<span class="tx-serial">') 
+  && /\.tx-fixture \.tx-serial\s*\{/.test(css));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);
