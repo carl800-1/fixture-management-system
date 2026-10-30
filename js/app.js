@@ -365,7 +365,34 @@
   /* ---------------- 变更日志（关于面板） ---------------- */
   const CHANGELOG = [
     {
-      version: '5.8.2', date: '2026-10-30', items: [
+      version: '5.9.0', date: '2026-10-30', items: [
+        '<b>【改进】出入库领用人/退库人改为下拉选择 + 输入过滤</b>：'
+          + '此前刷卡位仅支持刷卡器输入或手工输入卡号，现在新增 <b>下拉选择</b> 功能 —— '
+          + '从人员卡库中按卡号/姓名搜索，选中后<b>带出姓名与部门显示在输入框右侧状态徽标</b>'
+          + '（框里仍是可直接当卡号用的卡号）；'
+          + '同时<b>保留手工输入和刷卡器输入</b>，三种方式并存',
+        '<b>【改进】人员查找支持按姓名匹配</b>：'
+          + '此前仅按卡号精确匹配，现额外支持直接输入姓名（<b>唯一命中才认</b>，同名多人会明确拦下）',
+        '<b>【修复】选完人提交被误拦「领用人未登记」</b>：'
+          + '上一版选人成功后会把手输框改写成「卡号 | 姓名 - 部门」的展示串，'
+          + '提交时再解析一次就把展示串当卡号去查人员卡库，自然查不到，于是报「未登记」。'
+          + '现输入框<b>只保留纯卡号</b>，解析入口统一剥掉「| 姓名 - 部门」后缀，'
+          + '同一次录入反复解析（失焦 → 二次校验 → 提交）结果完全一致；'
+          + '历史遗留的展示串也仍能正确识别并自动规范化',
+        '<b>【修复】按姓名选人时不再猜</b>：'
+          + '移除「按部门匹配人员」—— 同部门有多人时会挑到第一个，等于把夹具出给错的人'
+      ]
+    },
+    {
+      version: '5.8.3', date: '2026-10-30', items: [
+        '<b>【新增】异常工装页「📊 导出 Excel」</b>：刷新旁新增导出按钮，可勾选要导出的异常类型'
+          + '（名称套号不符 / 名称主干不同 / 编号格式异常 / 套号缺失 / 库位分布），并<b>逐类自定义背景色</b>；'
+          + '导出为<b>真正的 .xlsx</b>——每类异常一个工作表，表头加粗并<b>冻结首行</b>，带自动筛选与列宽，'
+          + '数据行按所选颜色填充。颜色配置保存到本机，下次打开自动沿用，另提供「全选 / 全不选 / 恢复默认颜色」',
+        '<b>【说明】导出使用自实现的零依赖 xlsx 写入器</b>（<code>js/xlsx_writer.js</code>）：'
+          + '与既有 <code>xlsx_reader.js</code> 对称，自己拼 zip + OOXML + 样式表，'
+          + '不引入 SheetJS 等外部库 —— 后者社区版<b>不支持写入单元格样式</b>，导出的表会没有颜色；'
+          + '本程序打包离线运行，也不适合依赖 CDN',
         '<b>【改进】夹具编辑弹窗可上下滑动，确认按钮不再被顶出屏幕</b>：'
           + '此前机种名较多时，标签区把弹窗撑高，底部「保存修改 / 取消」被挤出可视区看不见，只能靠猜。'
           + '现弹窗高度不超过视口（<code>max-height: calc(100vh - 40px)</code>），标题栏固定、'
@@ -883,21 +910,33 @@
   };
 
   function swipeHintText() {
-    return '刷卡后自动带出姓名与部门（卡需已在「👤 人员卡库」登记并启用）';
+    return '刷卡、从下拉选人或直接输姓名；卡需已在「👤 人员卡库」登记并启用';
   }
 
-  /* 生成一个刷卡输入位（HTML 片段）
-   * v5.6.0：经办位整块取消，出库只有「领用人」、回库只有「退库人」，因此不再传 role。 */
+  /* 生成一个人员选择输入位（HTML 片段）
+   * v5.9.0：改为 datalist 下拉选择 + 输入过滤，保留手工输入卡号功能。
+   * 从 state.staffs 动态生成选项，支持按卡号/姓名/部门搜索。 */
   function swipeFieldHtml(ctx) {
     const c = SWIPE_CTX[ctx];
     const id = c.partyId.slice(1);
     const label = c.partyLabel;
+    
+    // 生成 datalist 选项（按卡号排序）
+    const staffOptions = (state.staffs || [])
+      .filter(s => s.active !== false)
+      .sort((a, b) => String(a.cardNo).localeCompare(String(b.cardNo)))
+      .map(s => `<option value="${esc(s.cardNo)}" data-name="${esc(s.name)}" data-dept="${esc(s.dept || '')}">${esc(s.cardNo)} | ${esc(s.name)}${s.dept ? ' - ' + esc(s.dept) : ''}</option>`)
+      .join('\n        ');
+    
     return `
       <div class="form-group">
         <label>${label} *</label>
         <div class="swipe-box">
-          <input type="text" id="${id}" data-swipe="${ctx}" autocomplete="off"
-            placeholder="💳 刷${label}工牌，或手工输入卡号后回车">
+          <input type="text" id="${id}" list="${id}_staff_list" data-swipe="${ctx}" autocomplete="off"
+            placeholder="💳 刷卡/输入卡号/选择姓名">
+          <datalist id="${id}_staff_list">
+            ${staffOptions}
+          </datalist>
           <span class="swipe-state" id="${id}_state">未刷卡</span>
         </div>
         <small class="hint" id="${id}_tip">${swipeHintText()}</small>
@@ -921,12 +960,15 @@
 
   /* 解析一个刷卡位：查库 → 停用校验 → 渲染状态徽标 → 记录到 state
    * v5.6.0：经办位取消后不再按角色限制 —— 只要卡已登记且启用就能刷。
-   *         历史「经办人」角色的人照样能刷领用/退库位（否则老卡就废了）。 */
+   *         历史「经办人」角色的人照样能刷领用/退库位（否则老卡就废了）。
+   * v5.9.0：支持 datalist 选择后自动填充姓名和部门。 */
   function resolveSwipe(ctx) {
     const c = SWIPE_CTX[ctx];
     const el = $(c.partyId);
     if (!el) return { ok: false, empty: true };
-    const raw = String(el.value || '').trim();
+    /* v5.9.1：先剥掉「| 姓名 - 部门」后缀再解析，保证反复调用（change → 提交校验）
+     * 得到同一个结果。旧版把展示串直接写回输入框，第二次调用就查不到人了。 */
+    const raw = swipeCardPart(el.value);
     const stEl = $('#' + el.id + '_state');
     const tipEl = $('#' + el.id + '_tip');
     const label = c.partyLabel;
@@ -953,6 +995,11 @@
       setState('err', '已停用', `「${s.name}」的卡已停用，不能用于出入库；如确需使用请到「👤 人员卡库」重新启用`);
       return { ok: false, msg: `${label}「${s.name}」的卡已停用` };
     }
+
+    /* v5.9.1：输入框只保留纯卡号 —— 与 datalist 的 option value 一致，也保证刷卡器
+     * 下次输入时是「替换」而不是拼在展示串后面。姓名与部门放在状态徽标 / 提示行里显示，
+     * 信息不丢，但输入框的值永远可直接当卡号用。 */
+    if (el.value !== String(s.cardNo)) el.value = String(s.cardNo);
 
     state.swipePick[ctx].party = s.id;
     setState('ok', `${s.name}${s.dept ? ' · ' + s.dept : ''}`, `✓ 卡号 ${normCard(s.cardNo)} ｜ ${STAFF_ROLE_LABEL[s.role] || s.role || '—'}`);
@@ -4026,11 +4073,34 @@
     return String(v == null ? '' : v).replace(/[\s\u3000\-_]/g, '').toUpperCase();
   }
 
-  /* 按卡号在本地已加载的人员里查（刷卡走这里，避免每次刷都走 IPC） */
-  function findStaffLocal(cardNo) {
-    const n = normCard(cardNo);
+  /* 输入框内容 → 纯卡号
+   * v5.9.1（BUG）：旧版 resolveSwipe 成功后会把输入框改写成「卡号 | 姓名 - 部门」的
+   *   展示串，于是提交时 validateSwipe 再解析一次，把展示串当卡号查库 → 查不到 →
+   *   误报「领用人未登记」。现统一在这里剥掉「|」之后的部分，无论输入框里是纯卡号、
+   *   姓名还是历史遗留的展示串，解析结果都一致（幂等）。 */
+  function swipeCardPart(raw) {
+    return String(raw == null ? '' : raw).split('|')[0].trim();
+  }
+
+  /* 按卡号精确查（归一化后比对）—— 刷卡主路径 / 新卡查重都走这里，不做姓名兜底 */
+  function findStaffByCard(cardNo) {
+    const n = normCard(swipeCardPart(cardNo));
     if (!n) return null;
     return (state.staffs || []).find((s) => normCard(s.cardNo) === n) || null;
+  }
+
+  /* UI 输入解析（刷卡 / datalist 选择 / 手工输姓名）：先卡号，再姓名精确匹配。
+   * ⚠️ 不再按「部门」匹配 —— 同部门多人时 find 会取第一个，等于静默把夹具出给错的人。
+   * ⚠️ 同名多人视为有歧义，返回 null（宁可让用户刷卡或从下拉里选，也不要猜）。 */
+  function findStaffLocal(input) {
+    const raw = swipeCardPart(input);
+    if (!raw) return null;
+    const byCard = findStaffByCard(raw);
+    if (byCard) return byCard;
+    const name = String(raw).trim();
+    if (!name) return null;
+    const hits = (state.staffs || []).filter((s) => String(s.name || '').trim() === name);
+    return hits.length === 1 ? hits[0] : null;
   }
 
   function staffFiltered() {
@@ -4191,7 +4261,8 @@
         const v = cardEl.value.trim();
         const st = $('#st_card_state');
         if (!v) { if (st) { st.className = 'swipe-state err'; st.textContent = '卡号为空'; } return; }
-        const dup = findStaffLocal(v);
+        /* 查重只看卡号（v5.9.1：findStaffLocal 现在会兜底匹配姓名，不能用于卡号查重） */
+        const dup = findStaffByCard(v);
         if (st) {
           st.className = 'swipe-state ' + (dup && dup.id !== Number(id) ? 'err' : 'ok');
           st.textContent = dup && dup.id !== Number(id) ? `已登记给 ${dup.name}` : '卡号可用';
@@ -4494,8 +4565,13 @@
       .trim();
   }
 
-  function renderFixAnomaly() {
-    const list = state.fixtures || [];
+  /* ------------------------------------------------------------
+   * 异常判定（v5.8.3 抽出）：页面渲染与 Excel 导出共用同一份规则，
+   * 避免「屏幕上看到的」与「导出的」不一致。
+   * 返回 { unparsed, seqNameAnoms, nameAnoms, missingAnoms, locInfo }
+   * ------------------------------------------------------------ */
+  function computeFixAnomalies(list) {
+    list = list || [];
 
     /* ---- 聚合：按工装号分组（格式异常单独列出） ---- */
     const groups = new Map();      // base -> fixtures[]
@@ -4542,6 +4618,12 @@
     nameAnoms.sort((a, b) => b.items.length - a.items.length);
     missingAnoms.sort((a, b) => b.items.length - a.items.length);
     locInfo.sort((a, b) => b.items.length - a.items.length);
+
+    return { unparsed, seqNameAnoms, nameAnoms, missingAnoms, locInfo };
+  }
+
+  function renderFixAnomaly() {
+    const { unparsed, seqNameAnoms, nameAnoms, missingAnoms, locInfo } = computeFixAnomalies(state.fixtures || []);
 
     /* ---- v5.8.1「逐条编辑」：展开某工装号下所有记录，逐条编辑完整信息 ---- */
     const anomDetailRow = (base, colspan) => {
@@ -4671,6 +4753,7 @@
         <div class="panel-title">⚠️ 异常工装
           <span class="panel-actions">
             <button class="btn sm" onclick="renderFixAnomaly()">🔄 刷新</button>
+            <button class="btn sm" onclick="openExportAnomalyModal()">📊 导出 Excel</button>
           </span>
         </div>
         ${summary}
@@ -4769,6 +4852,256 @@
     if (kw) { kw.value = f.serialNo || String(f.code || ''); fixtureSearch(); }
     fixtureEdit(id);
   };
+
+  /* ============================================================
+   * 异常工装导出 Excel（v5.8.3 新增）
+   * ============================================================ */
+  
+  // 默认异常类型颜色配置
+  const DEFAULT_ANOMALY_COLORS = {
+    seqNameAnoms: '#ffcccc',      // 名称套号不符 - 浅红
+    nameAnoms: '#ffcccc',         // 名称主干不同 - 浅红
+    unparsed: '#ffcccc',          // 编号格式异常 - 浅红
+    missingAnoms: '#fff9e6',      // 套号缺失 - 浅黄
+    locInfo: '#e6f3ff'            // 库位分布 - 浅蓝（信息，非异常）
+  };
+  
+  // 从 localStorage 加载用户配置
+  function loadExportColorConfig() {
+    try {
+      const saved = localStorage.getItem('fixAnomalyExportColors');
+      if (saved) return { ...DEFAULT_ANOMALY_COLORS, ...JSON.parse(saved) };
+    } catch (e) { /* ignore */ }
+    return { ...DEFAULT_ANOMALY_COLORS };
+  }
+  
+  // 保存用户配置到 localStorage
+  function saveExportColorConfig(colors) {
+    try {
+      localStorage.setItem('fixAnomalyExportColors', JSON.stringify(colors));
+    } catch (e) { /* ignore */ }
+  }
+  
+  // 打开导出配置模态框
+  window.openExportAnomalyModal = function () {
+    const colors = loadExportColorConfig();
+    const typeOptions = [
+      { key: 'seqNameAnoms', label: '① 名称套号不符（严重）', defaultColor: '#ffcccc' },
+      { key: 'nameAnoms', label: '② 名称主干不同（严重）', defaultColor: '#ffcccc' },
+      { key: 'unparsed', label: '③ 编号格式异常（严重）', defaultColor: '#ffcccc' },
+      { key: 'missingAnoms', label: '④ 套号缺失（警告）', defaultColor: '#fff9e6' },
+      { key: 'locInfo', label: '库位分布（信息）', defaultColor: '#e6f3ff' }
+    ];
+    
+    const colorInputs = typeOptions.map(t => `
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+        <label style="min-width:200px;margin:0;">
+          <input type="checkbox" id="export_type_${t.key}" checked> ${t.label}
+        </label>
+        <input type="color" id="export_color_${t.key}" value="${colors[t.key] || t.defaultColor}"
+          style="width:44px;height:30px;border:1px solid var(--border);cursor:pointer;padding:2px;"
+          oninput="exportAnomalyHex('${t.key}', this.value)">
+        <span class="mono" id="export_hex_${t.key}" style="font-size:12px;color:var(--muted);min-width:64px;">${colors[t.key] || t.defaultColor}</span>
+      </div>
+    `).join('');
+
+    openModal('📊 导出 Excel 配置', `
+      <p class="muted" style="margin:0 0 16px;">
+        勾选需要导出的异常类型，并为每种类型指定背景色。颜色配置会记住，下次打开自动沿用。<br>
+        导出为真正的 <b>.xlsx</b> 文件：<b>每类异常一个工作表</b>，表头加粗并冻结首行，数据行按所选颜色填充。
+      </p>
+      <div style="background:var(--bg);padding:16px;border-radius:8px;margin-bottom:12px;">
+        ${colorInputs}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="btn sm" onclick="exportAnomalyCheckAll(true)">☑ 全选</button>
+        <button class="btn sm" onclick="exportAnomalyCheckAll(false)">☐ 全不选</button>
+        <button class="btn sm ghost" onclick="exportAnomalyResetColors()">↺ 恢复默认颜色</button>
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" onclick="submitExportAnomaly()">📥 导出 Excel</button>
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+      </div>
+    `);
+  };
+
+  const EXPORT_TYPE_KEYS = ['seqNameAnoms', 'nameAnoms', 'unparsed', 'missingAnoms', 'locInfo'];
+
+  /* 取色器实时回显十六进制值 */
+  window.exportAnomalyHex = function (key, val) {
+    const el = $('#export_hex_' + key);
+    if (el) el.textContent = String(val || '');
+  };
+
+  window.exportAnomalyCheckAll = function (on) {
+    EXPORT_TYPE_KEYS.forEach((key) => {
+      const cb = $(`#export_type_${key}`);
+      if (cb) cb.checked = !!on;
+    });
+  };
+
+  window.exportAnomalyResetColors = function () {
+    EXPORT_TYPE_KEYS.forEach((key) => {
+      const picker = $(`#export_color_${key}`);
+      const hexEl = $(`#export_hex_${key}`);
+      if (picker) {
+        picker.value = DEFAULT_ANOMALY_COLORS[key];
+        if (hexEl) hexEl.textContent = DEFAULT_ANOMALY_COLORS[key];
+      }
+    });
+    try { localStorage.removeItem('fixAnomalyExportColors'); } catch (e) { /* ignore */ }
+    toast('已恢复默认颜色', 'ok');
+  };
+  
+  // 提交导出
+  window.submitExportAnomaly = function () {
+    // 收集用户配置
+    const selectedTypes = [];
+    const colors = {};
+    
+    ['seqNameAnoms', 'nameAnoms', 'unparsed', 'missingAnoms', 'locInfo'].forEach(key => {
+      const checkbox = $(`#export_type_${key}`);
+      const colorPicker = $(`#export_color_${key}`);
+      if (checkbox && checkbox.checked) {
+        selectedTypes.push(key);
+      }
+      // 未勾选的类型也记下颜色，下次勾选时沿用
+      colors[key] = (colorPicker && colorPicker.value) || DEFAULT_ANOMALY_COLORS[key];
+    });
+    
+    if (selectedTypes.length === 0) {
+      toast('请至少选择一种异常类型', 'err');
+      return;
+    }
+    
+    // 保存颜色配置
+    saveExportColorConfig(colors);
+    
+    // 执行导出
+    doExportAnomalyExcel(selectedTypes, colors);
+    closeModal();
+  };
+  
+  // 执行导出：生成真正的 .xlsx（零依赖写入器 js/xlsx_writer.js）
+  function doExportAnomalyExcel(selectedTypes, colors) {
+    if (typeof XlsxWriter === 'undefined') {
+      toast('导出组件未加载（js/xlsx_writer.js），请重启程序', 'err');
+      return;
+    }
+
+    /* 与页面渲染共用同一份异常判定，保证「屏幕上看到的」＝「导出的」 */
+    const { unparsed, seqNameAnoms, nameAnoms, missingAnoms, locInfo } =
+      computeFixAnomalies(state.fixtures || []);
+
+    const seq = (n) => String(n).padStart(3, '0');
+    const plan = [];   // { sheet, header, widths, rows: [{ cells, fill }] }
+
+    /* ① 名称套号不符（编号套号 ≠ 名称末尾数字） */
+    if (selectedTypes.includes('seqNameAnoms') && seqNameAnoms.length) {
+      plan.push({
+        sheet: '①名称套号不符',
+        header: ['编号', '名称', '编号套号', '名称尾号', '说明'],
+        widths: [26, 32, 10, 10, 32],
+        rows: seqNameAnoms.reduce((acc, g) => {
+          g.bad.forEach(({ f, seq: s, nameNo }) => {
+            acc.push({
+              fill: colors.seqNameAnoms,
+              cells: [f.serialNo, f.name, seq(s), seq(nameNo), '编号套号与名称末尾数字不一致，需核对']
+            });
+          });
+          return acc;
+        }, [])
+      });
+    }
+
+    /* ② 名称主干不同（去掉末尾套号后名称仍不同） */
+    if (selectedTypes.includes('nameAnoms') && nameAnoms.length) {
+      plan.push({
+        sheet: '②名称主干不同',
+        header: ['工装号', '套数', '该工装号下的名称'],
+        widths: [26, 10, 60],
+        rows: nameAnoms.map((g) => ({
+          fill: colors.nameAnoms,
+          cells: [g.base, g.items.length + ' 套', g.names.join('、')]
+        }))
+      });
+    }
+
+    /* ③ 编号格式异常（末尾不是 3 位套号） */
+    if (selectedTypes.includes('unparsed') && unparsed.length) {
+      plan.push({
+        sheet: '③编号格式异常',
+        header: ['编号', '名称', '库位'],
+        widths: [28, 32, 16],
+        rows: unparsed.map((f) => ({
+          fill: colors.unparsed,
+          cells: [f.serialNo, f.name, f.location || '（空）']
+        }))
+      });
+    }
+
+    /* ④ 套号缺失（多套工装号的套号不连续） */
+    if (selectedTypes.includes('missingAnoms') && missingAnoms.length) {
+      plan.push({
+        sheet: '④套号缺失',
+        header: ['工装号', '现有套号', '缺失套号', '说明'],
+        widths: [26, 40, 26, 20],
+        rows: missingAnoms.map((g) => ({
+          fill: colors.missingAnoms,
+          cells: [
+            g.base,
+            g.items.map((f) => seq(parseFixSerial(f.serialNo).seq)).join('、'),
+            g.miss.map(seq).join('、'),
+            '套号不连续，待人工确认'
+          ]
+        }))
+      });
+    }
+
+    /* ⑤ 库位分布（信息，非异常） */
+    if (selectedTypes.includes('locInfo') && locInfo.length) {
+      plan.push({
+        sheet: '库位分布',
+        header: ['工装号', '套数', '库位分布'],
+        widths: [26, 10, 60],
+        rows: locInfo.map((g) => {
+          const locCount = new Map();
+          g.items.forEach((f) => {
+            const l = f.location || '（空）';
+            locCount.set(l, (locCount.get(l) || 0) + 1);
+          });
+          return {
+            fill: colors.locInfo,
+            cells: [
+              g.base,
+              g.items.length + ' 套',
+              [...locCount.entries()].map(([l, c]) => `${l}（${c}套）`).join('、')
+            ]
+          };
+        })
+      });
+    }
+
+    if (!plan.length) {
+      toast('没有选中的异常类型数据', 'err');
+      return;
+    }
+
+    try {
+      const wb = XlsxWriter.create();
+      plan.forEach((p) => wb.addSheet(p.sheet, { header: p.header, widths: p.widths, rows: p.rows }));
+
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+        + `_${pad(now.getHours())}${pad(now.getMinutes())}`;
+      wb.download(`异常工装导出_${stamp}.xlsx`);
+
+      toast(`已导出 ${plan.length} 类异常、共 ${wb.rowCount()} 条记录（.xlsx）`, 'ok');
+    } catch (e) {
+      toast('导出失败：' + (e && e.message ? e.message : e), 'err');
+    }
+  }
 
   /* ============================================================
    * 数据备份

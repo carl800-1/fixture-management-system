@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  version: '5.8.2',
+  version: '5.9.0',
   invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
   // 打印：opts = { pageSize, copies, landscape, margins }，返回 { ok, reason? }
   printLabels: (opts) => ipcRenderer.invoke('print-labels', opts),

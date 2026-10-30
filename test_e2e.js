@@ -580,6 +580,101 @@ async function main() {
     txOut && txOut.fromLocation === 'ZP1-U-1-1' && txOut.toLocation === 'ZP1-U-1-1', txOut && [txOut.fromLocation, txOut.toLocation]);
   ok('流水冗余实物编号字段', txOut && txOut.fixtureSerialNo === 'DH40MC-921-001-001', txOut && txOut.fixtureSerialNo);
 
+  /* ---------- 4.6 datalist 选人回归（v5.9.1 BUG：选人后提交报「领用人未登记」） ----------
+     v5.9.0 把领用人改成 <input>+<datalist> 后，resolveSwipe 成功时把输入框改写成
+     「卡号 | 姓名 - 部门」展示串；提交时 validateSwipe 再解析一次，把展示串当卡号
+     查库 → 查不到 → 误报未登记。这里用 change（datalist 选中就是触发 change）驱动，
+     而不是刷卡用的 Enter，专门守住这条新路径。 */
+  section('4.6 datalist 选人 → 提交出库（v5.9.1 回归）');
+  const pickRes = await wc.executeJavaScript(`(async () => {
+    ${HELPERS}
+    window.showView('fixtures'); await sleep(250);
+    const card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
+    if (!card) return { err:'未找到 XXK-D10VG-002 卡片' };
+    const btn = [...card.querySelectorAll('button')].find(b=>b.textContent.trim()==='出库');
+    if (!btn) return { err:'卡片无出库按钮' };
+    btn.click(); await sleep(300);
+
+    const out = {};
+    const el = $('#swipe_dlg_party');
+    const st = () => (($('#swipe_dlg_party_state')||{}).textContent||'');
+    out.hasDatalist = !!document.getElementById('swipe_dlg_party_staff_list');
+    out.optionCount = out.hasDatalist ? document.querySelectorAll('#swipe_dlg_party_staff_list option').length : 0;
+    out.firstOptionValue = out.hasDatalist ? ((document.querySelector('#swipe_dlg_party_staff_list option')||{}).value||'') : '';
+    out.firstOptionText = out.hasDatalist ? ((document.querySelector('#swipe_dlg_party_staff_list option')||{}).textContent||'') : '';
+
+    /* ① 模拟下拉选中：option 的 value 就是卡号，选中后浏览器派发 input + change */
+    el.value = 'BR-0001';
+    el.dispatchEvent(new Event('input'));
+    el.dispatchEvent(new Event('change'));
+    await sleep(150);
+    out.valueAfterPick = el.value;
+    out.stateAfterPick = st();
+
+    /* ② 二次解析（失焦再进、或提交前的 validateSwipe 都会再跑一遍） */
+    el.dispatchEvent(new Event('change'));
+    await sleep(100);
+    out.valueAfterSecond = el.value;
+    out.stateAfterSecond = st();
+
+    /* ③ 历史遗留的展示串也应能解析并规范化（老窗口 / 老数据） */
+    el.value = 'BR-0001 | 李领用 - 生产部';
+    el.dispatchEvent(new Event('change'));
+    await sleep(150);
+    out.valueAfterLegacy = el.value;
+    out.stateAfterLegacy = st();
+
+    /* ④ 真正提交 */
+    btnByText('确认出库').click();
+    await sleep(700);
+    out.toast = (($('#toast')||{}).textContent||'');
+    out.modalOpen = !$('#modalOverlay').hidden;
+
+    /* ⑤ 复原：把它回库，后续用例仍假设 B 是「在库」状态 */
+    window.showView('fixtures'); await sleep(300);
+    const card2 = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
+    const rb = card2 && [...card2.querySelectorAll('button')].find(b=>b.textContent.trim()==='回库');
+    if (rb) {
+      rb.click(); await sleep(320);
+      swipe('#swipe_rdlg_party','BR-0001');
+      const rbtn = btnByText('确认回库');
+      if (rbtn) rbtn.click();
+      await sleep(800);
+    }
+    out.restored = !!rb;
+    return out;
+  })()`);
+  ok('出库弹窗的领用人带 datalist（可下拉选人）', pickRes.hasDatalist === true, pickRes.err || '');
+  ok('datalist 选项来自人员卡库（≥1 个）', pickRes.optionCount >= 1, String(pickRes.optionCount));
+  /* option 的 value 必须是卡号（纯 ASCII），姓名只出现在显示文本里 —— 这正是
+     「选中后 value 直接可当卡号用」的前提，也是本次 BUG 的根因所在 */
+  ok('datalist 的 option value 是卡号（纯 ASCII，不含姓名/竖线）',
+    /^[A-Za-z0-9_-]+$/.test(pickRes.firstOptionValue || ''),
+    pickRes.firstOptionValue);
+  ok('datalist 的 option 显示文本带姓名（value 与文本分离）',
+    (pickRes.firstOptionText || '').indexOf(pickRes.firstOptionValue || '\u0000') === 0
+      && /[\u4e00-\u9fa5]/.test(pickRes.firstOptionText || ''),
+    pickRes.firstOptionText);
+  ok('选人后解析成功，输入框仍是纯卡号（旧版会变成「卡号 | 姓名 - 部门」）',
+    pickRes.valueAfterPick === 'BR-0001', pickRes.valueAfterPick);
+  ok('选人后状态徽标显示领用人姓名', /李领用/.test(pickRes.stateAfterPick || ''), pickRes.stateAfterPick);
+  ok('二次解析结果不变（不会因为重复解析变成「未登记」）',
+    pickRes.valueAfterSecond === 'BR-0001' && /李领用/.test(pickRes.stateAfterSecond || ''),
+    pickRes.valueAfterSecond + ' / ' + pickRes.stateAfterSecond);
+  ok('历史展示串能被解析并规范化回纯卡号', pickRes.valueAfterLegacy === 'BR-0001', pickRes.valueAfterLegacy);
+  ok('提交出库成功（toast 不含「未登记」）',
+    !/未登记/.test(pickRes.toast || '') && /出库成功/.test(pickRes.toast || ''), pickRes.toast);
+  ok('提交后弹窗已关闭', pickRes.modalOpen === false, String(pickRes.modalOpen));
+  ok('回归用夹具已复原回库（不污染后续用例）', pickRes.restored === true, String(pickRes.restored));
+
+  const db46 = readDb();
+  const txPick = db46.fixTransactions
+    .filter((t) => t.type === 'out' && t.fixtureSerialNo === 'XXK-D10VG-002')
+    .pop();
+  ok('选人出库的流水已写入', !!txPick);
+  ok('流水领用人 = 李领用', txPick && txPick.counterparty === '李领用', txPick && txPick.counterparty);
+  ok('流水领用人卡号 = BR0001（不是展示串）', txPick && txPick.partyCard === 'BR0001', txPick && txPick.partyCard);
+
   /* ---------- 5. 回库（可改库位） ---------- */
   section('5. 回库流程（四栏互查 → 卡片弹窗改库位 → 提交）');
   const retRes = await wc.executeJavaScript(`(async () => {
@@ -619,7 +714,10 @@ async function main() {
   ok('回库后状态 = stocked', retFix && retFix.status === 'stocked', retFix && retFix.status);
   ok('回库次数 = 1', retFix && retFix.totalReturnCount === 1, retFix && String(retFix.totalReturnCount));
   ok('回库库位写回 location（ZP1-U-1-1 → ZP1-U-2-2）', retFix && retFix.location === 'ZP1-U-2-2', retFix && retFix.location);
-  const txRet = db5.fixTransactions.find((t) => t.type === 'return' && t.counterparty === '李领用');
+  /* 断言要锁定具体夹具：流水里可能已有别的回库记录（如 4.6 段复原用夹具），
+     只按 type+counterparty 取第一条会撞车 */
+  const txRet = db5.fixTransactions.find((t) => t.type === 'return'
+    && t.fixtureSerialNo === 'DH40MC-921-001-001' && t.counterparty === '李领用');
   ok('回库流水已写入', !!txRet);
   ok('流水记录库位变更 from ZP1-U-1-1 → to ZP1-U-2-2',
     txRet && txRet.fromLocation === 'ZP1-U-1-1' && txRet.toLocation === 'ZP1-U-2-2', txRet && [txRet.fromLocation, txRet.toLocation]);
