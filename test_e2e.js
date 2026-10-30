@@ -451,6 +451,52 @@ async function main() {
   ok('编辑弹窗标题显示实物编号', /SN-C-003/.test(editRes.title), editRes.title);
   ok('编辑保存后弹窗关闭', editRes.closed === true);
 
+  /* ---------- 3.2 编辑弹窗可上下滑动（v5.8.2） ---------- */
+  section('3.2 编辑弹窗可上下滑动（v5.8.2：机种多时确认按钮不被顶出屏幕）');
+  const scrollProbe = `(async () => {
+    ${HELPERS}
+    const out = {};
+    const card = $$('.fixture-card').find(c=>c.textContent.includes('XXK-D10VG-002'));
+    if (!card) return { err: '未找到 XXK-D10VG-002 卡片' };
+    window.fixtureEdit(Number(card.dataset.id)); await sleep(350);
+    /* 灌 12 个机种名，模拟「机种名较多」 */
+    const names = [];
+    for (let i = 1; i <= 12; i++) names.push('MODEL-AAA-BBB-' + (i < 10 ? '0' + i : i));
+    const inp = $('#fix_lm_text');
+    inp.value = names.join('/');
+    window.fixFormModelsInput(); await sleep(250);
+    const body = $('#modalBody');
+    const modal = document.querySelector('.modal');
+    const btn = body.querySelector('.form-actions .btn.primary');
+    const br = btn.getBoundingClientRect();
+    const chips = $('#fix_lm_chips');
+    out.chipCount = $$('#fix_lm_chips .chip-tag').length;
+    out.modalH = Math.round(modal.getBoundingClientRect().height);
+    out.winH = window.innerHeight;
+    out.scrollable = body.scrollHeight > body.clientHeight + 1;
+    out.overflowY = getComputedStyle(body).overflowY;
+    out.btnBottom = Math.round(br.bottom);
+    out.btnVisible = br.bottom <= window.innerHeight + 1 && br.top >= 0;
+    out.chipsScrollable = chips.scrollHeight > chips.clientHeight + 1;
+    out.chipsMaxH = getComputedStyle(chips).maxHeight;
+    window.closeModal(); await sleep(150);
+    return out;
+  })()`;
+  let scrollRes = await wc.executeJavaScript(scrollProbe);
+  /* 大窗口下内容可能刚好放得下 → 缩小窗口复测（用户窗口本来就可能更小） */
+  if (scrollRes && !scrollRes.scrollable) {
+    const win0 = BrowserWindow.getAllWindows()[0];
+    if (win0) { win0.setSize(900, 520); await sleep(500); }
+    scrollRes = await wc.executeJavaScript(scrollProbe);
+    if (win0) { win0.setSize(1280, 820); await sleep(300); }
+  }
+  ok('机种灌入 12 个标签（模拟机种名较多）', scrollRes.chipCount === 12, String(scrollRes.chipCount));
+  ok('编辑弹窗高度不超过视口', scrollRes.modalH <= scrollRes.winH, scrollRes.modalH + '/' + scrollRes.winH);
+  ok('弹窗内容区可上下滚动（overflow-y:auto 且内容确实溢出）',
+    scrollRes.scrollable === true && scrollRes.overflowY === 'auto', JSON.stringify(scrollRes));
+  ok('机种多时「保存修改」按钮仍在视口内可见', scrollRes.btnVisible === true, 'btnBottom=' + scrollRes.btnBottom);
+  ok('机种标签区自身限高滚动', scrollRes.chipsScrollable === true, 'maxHeight=' + scrollRes.chipsMaxH);
+
   /* ---------- 3.5 线体 ↔ 机种 派生列（v5.2.0） ---------- */
   section('3.5 线体 ↔ 机种 派生列（两列都由夹具现算，不新增存储字段）');
   const crossRes = await wc.executeJavaScript(`(async () => {

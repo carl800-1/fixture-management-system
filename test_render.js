@@ -955,6 +955,18 @@ ok('applyFixturePatch 被单条与批量共用（防规则漂移）',
   && storeJs.indexOf('applyFixturePatch(data.fixtures[i], fixture)') >= 0
   && storeJs.indexOf('applyFixturePatch(old, item.patch') >= 0);
 
+/* v5.8.2：夹具编辑弹窗内容变长时可上下滑动，底部「保存/取消」始终可见 */
+ok('弹窗限高 + 内容区可上下滑动（v5.8.2）',
+  /\.modal\s*\{[^}]*max-height:\s*calc\(100vh/.test(css)
+  && /\.modal-body\s*\{[^}]*overflow-y:\s*auto/.test(css)
+  && /\.modal-head\s*\{[^}]*flex:\s*0 0 auto/.test(css));
+ok('弹窗操作区吸底，确认按钮不被顶出屏幕（v5.8.2）',
+  /\.modal-body \.form-actions\s*\{[^}]*position:\s*sticky/.test(css)
+  && /\.modal-body \.form-actions\s*\{[^}]*bottom:\s*-?20px/.test(css));
+ok('机种标签区自身限高滚动（v5.8.2）',
+  /#fix_lm_chips\s*\{[^}]*max-height/.test(css)
+  && /#fix_lm_chips\s*\{[^}]*overflow-y:\s*auto/.test(css));
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(50));
 console.log('测试汇总：通过 ' + pass + ' / 失败 ' + fail);

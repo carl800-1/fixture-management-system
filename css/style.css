@@ -359,16 +359,38 @@ tbody tr.selected { background: var(--primary-soft); }
 .modal {
   background: #fff; border-radius: 12px; width: 90%; max-width: 500px;
   box-shadow: 0 10px 40px rgba(0,0,0,.2);
+  /* v5.8.2：弹窗不超出视口 —— 内容多时（机种/产线标签多）内部可上下滑动 */
+  max-height: calc(100vh - 40px);
+  display: flex; flex-direction: column;
 }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px; border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;   /* v5.8.2：标题栏不被内容压缩 */
 }
 .modal-head h3 { margin: 0; font-size: 16px; }
 .modal-close {
   background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted);
 }
-.modal-body { padding: 20px; }
+/* v5.8.2：内容区可上下滑动，底部「保存/取消」不再被顶出屏幕 */
+.modal-body {
+  padding: 20px;
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
+}
+/* v5.8.2：操作区吸底 —— 滑动时「保存修改 / 取消」始终可见 */
+.modal-body .form-actions {
+  position: sticky; bottom: -20px;
+  background: #fff;
+  margin: 16px -20px -20px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  z-index: 2;
+}
+/* v5.8.2：机种标签区自身限高滚动，机种多时不再把弹窗撑出屏幕 */
+#fix_lm_chips {
+  max-height: 132px; overflow-y: auto;
+}
 
 /* ---------- Toast ---------- */
 .toast {

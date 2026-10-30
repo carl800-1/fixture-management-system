@@ -7,7 +7,7 @@
  * 两侧的校验规则、编号分配、级联清理口径必须一致，否则测试与实机行为会漂移。
  * ============================================================ */
 const DB = (function () {
-  const APP_VERSION = '5.8.1';
+  const APP_VERSION = '5.8.2';
   const electronApi = (typeof window !== 'undefined' && window.api) ? window.api : null;
 
   /* ---------------- 常量（与 store.js 同源） ---------------- */
